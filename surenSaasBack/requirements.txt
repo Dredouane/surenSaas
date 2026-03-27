@@ -1,0 +1,20 @@
+fastapi>=0.104,<0.110
+uvicorn[standard]>=0.24,<0.28
+python-multipart>=0.0.6
+pydantic>=2.5,<2.6
+pydantic-settings>=2.1,<2.2
+
+# Mise à jour pour compatibilité google-genai
+# supabase 2.x supporte httpx>=0.25.0 (requis par google-genai>=1.0.0)
+supabase>=2.0.0,<3.0.0
+PyJWT>=2.8,<2.9
+email-validator>=2.1.0
+httpx>=0.25.0,<0.28.0  # Compatible avec supabase 2.x et google-genai
+
+# AI/ML
+google-genai>=1.0.0
+Pillow>=10.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

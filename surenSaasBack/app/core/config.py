@@ -1,0 +1,124 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Optional
+import os
+
+
+class Settings(BaseSettings):
+    """Configuration de l'application."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+    
+    # Environment (détermine les préfixes à utiliser)
+    environment: str = "development"
+    
+    # Supabase (peut être partagé ou préfixé)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    
+    # JWT (devrait être différent par environnement)
+    jwt_secret: str = ""
+    
+    # CORS - format: "http://localhost:3000,https://..."
+    allowed_origins: str = "http://localhost:3000"
+    
+    # Organisation (préfixée TEST_ORG_ID ou PROD_ORG_ID)
+    org_id: str = ""
+    
+    # Telegram Construction Bots (préfixés TEST_ ou PROD_)
+    telegram_construction_bot_token: str = ""
+    telegram_construction_bot_username: str = ""
+    
+    # Google Gemini API (préfixés TEST_ ou PROD_)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"  # Modèle recommandé pour nouveaux projets
+    gemini_location: str = "europe-west1"  # Région Vertex AI
+    
+    # App
+    app_name: str = "SurenSaaS API"
+    debug: bool = False
+    
+    def model_post_init(self, __context) -> None:
+        """Charge les variables d'environnement (préfixées ou non)."""
+        env = self.environment.lower()
+        
+        # Mapping des variables avec fallback
+        # Format: (nom_attribut, [liste des noms de variables possibles])
+        var_mappings = [
+            ("supabase_service_key", [
+                f"{env}_supabase_service_key",  # TEST_SUPABASE_SERVICE_KEY
+                "supabase_service_key",          # SUPABASE_SERVICE_KEY (GCP)
+            ]),
+            ("jwt_secret", [
+                f"{env}_jwt_secret",
+                "jwt_secret",
+            ]),
+            ("org_id", [
+                f"{env}_org_id",
+                "org_id",
+            ]),
+            ("telegram_construction_bot_token", [
+                f"{env}_telegram_construction_bot_token",
+                "telegram_construction_bot_token",
+            ]),
+            ("telegram_construction_bot_username", [
+                f"{env}_telegram_construction_bot_username",
+                "telegram_construction_bot_username",
+            ]),
+            ("gemini_api_key", [
+                f"{env}_google_gemini_credentials_b64",
+                "google_gemini_credentials_b64",
+            ]),
+        ]
+        
+        for attr_name, env_var_names in var_mappings:
+            value = None
+            used_var = None
+            
+            # Chercher dans l'ordre des priorités
+            for env_var_name in env_var_names:
+                env_value = os.getenv(env_var_name.upper())
+                if env_value:
+                    value = env_value
+                    used_var = env_var_name.upper()
+                    break
+            
+            if value:
+                setattr(self, attr_name, value)
+                print(f"   {attr_name}: [CHARGÉ depuis {used_var}]")
+            elif getattr(self, attr_name):
+                print(f"   {attr_name}: [CHARGÉ depuis .env]")
+            else:
+                print(f"   {attr_name}: [NON DÉFINI]")
+    
+    def get_allowed_origins(self) -> List[str]:
+        """Parse la liste des origines depuis la string."""
+        if not self.allowed_origins:
+            return ["http://localhost:3000"]
+        return [origin.strip() for origin in self.allowed_origins.split(",")]
+    
+    def is_configured(self) -> bool:
+        """Vérifie que la configuration minimale est présente."""
+        return bool(self.supabase_url and self.supabase_service_key and self.jwt_secret)
+
+
+# Singleton pattern - créé à la première utilisation
+_settings_instance: Optional[Settings] = None
+
+def get_settings() -> Settings:
+    """Récupère les settings (singleton)."""
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()
+        # Log pour debug
+        print(f"🔧 Settings initialisés:")
+        print(f"   ENVIRONMENT: {_settings_instance.environment}")
+        print(f"   Configuré: {_settings_instance.is_configured()}")
+    return _settings_instance
+
+
+# Compatibilité ascendante - les modules qui importent 'settings' directement
+# obtiendront l'instance au moment de l'import
+settings = get_settings()
