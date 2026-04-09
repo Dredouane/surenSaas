@@ -104,3 +104,48 @@
 - Contrôle total sur qui peut rejoindre l'organisation
 - Permissions fines adaptées au multi-PME
 - Séparation claire admin vs utilisateur standard
+
+## ADR-016 : Module Emails - Architecture Data Layer
+**Choix** : Séparation stricte entre ingestion emails (data) et secrétariat IA (logic)
+**Architecture** :
+- **Module Emails** : Ingestion Gmail, stockage, vectorisation (`docs/EMAILS.md`)
+- **Module Secrétariat** : Analyse métier, workflows, décisions (`docs/SECRETARIAT.md`)
+**Pourquoi** :
+- **Testabilité** : Tester l'ingestion sans logique métier complexe
+- **Évolution** : Remplacer Gmail par Outlook sans toucher le secrétariat
+- **Performance** : Vectorisation batch, secrétariat temps réel
+- **Équipe** : Data engineer = Emails, Métier/IA = Secrétariat
+
+## ADR-017 : Gmail OAuth2 pour ingestion emails
+**Choix** : OAuth2 avec refresh tokens pour accès API Gmail
+**Implémentation** :
+- Refresh tokens chiffrés stockés en DB (`email_accounts.oauth_refresh_token`)
+- Polling incrémental via UID Gmail (pas de webhook pour l'instant)
+- Scopes limités : `gmail.readonly` uniquement
+**Pourquoi** :
+- Sécurité : Pas de stockage mot de passe
+- Fiabilité : Refresh tokens longue durée vs access tokens courts
+- Simplicité : Pas de webhook complexe à gérer (polling HTTP trigger)
+
+## ADR-018 : Stockage embeddings séparé (pgvector)
+**Choix** : Table `email_embeddings` séparée de `emails`
+**Structure** :
+- `emails` = métadonnées + contenu texte
+- `email_embeddings` = vecteurs + chunks de texte
+**Pourquoi** :
+- Un email → N embeddings (corps chunké + N pièces jointes)
+- Recherche vectorielle plus performante (moins de données à scanner)
+- Flexibilité : plusieurs modèles/version d'embeddings cohabitent
+**Tech** : Supabase pgvector extension, dimension 1536 (OpenAI)
+
+## ADR-019 : Polling synchrone HTTP pour emails
+**Choix** : Endpoint HTTP déclencheur synchrone, pas de workers async
+**Implémentation** :
+- `POST /api/v1/{org}/emails/sync` déclenche le polling complet
+- Traitement synchrone dans la requête HTTP
+- Pas de Celery/Redis/Cloud Tasks pour l'instant
+**Pourquoi** :
+- **Simplicité** : Pas d'infrastructure supplémentaire
+- **Cloud Run compatible** : Pas de long-running processes
+- **Contrôle** : Déclenchement manuel ou via cron externe (Cloud Scheduler)
+- **Futur** : Migrera vers async workers si volume important

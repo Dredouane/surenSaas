@@ -34,7 +34,18 @@ Les migrations doivent être exécutées dans l'ordre numérique. Voici la séqu
     - Met à jour pour utiliser `users.org_id` directement
     - **À exécuter après 015 si d'autres tables ne fonctionnent pas (bots Telegram, companies, etc.)**
 
-### Phase 4 : Nettoyage (999)
+### Phase 4 : Module Emails (020)
+17. **`020_email_tables.sql`** - Module d'ingestion et vectorisation des emails
+    - Crée extension `vector` (pgvector) pour embeddings
+    - Table `email_accounts` : Configuration Gmail OAuth par org
+    - Table `emails` : Stockage des emails avec métadonnées (contenu nettoyé via RAG Mail)
+    - Table `email_attachments` : Pièces jointes avec OCR
+    - Table `email_embeddings` : Vecteurs pour recherche sémantique (RAG)
+    - Types ENUM : `email_status`, `embedding_source`
+    - Fonctions utilitaires : `search_similar_emails()`, `get_email_thread()`
+    - **Prérequis** : Activer extension pgvector dans Supabase Dashboard
+
+### Phase 5 : Nettoyage (999)
 999. `999_cleanup_user_org_membership.sql` - Nettoyage de la table dépréciée
     - Désactive RLS sur user_org_membership
     - Migre les données vers users.role

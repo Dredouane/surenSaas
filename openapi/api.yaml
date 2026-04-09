@@ -1351,6 +1351,306 @@ paths:
         409:
           description: Capability existe déjà
 
+  # ============================================
+  # EMAILS - MODULE D'INGESTION GMAIL
+  # ============================================
+
+  /{org}/emails/accounts:
+    get:
+      summary: Lister les comptes Gmail configurés
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Liste des comptes email
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmailAccount'
+        403:
+          description: Non autorisé
+
+    post:
+      summary: Connecter un compte Gmail (OAuth2)
+      security:
+        - bearerAuth: []
+      description: |
+        Échange le code d'autorisation OAuth2 contre un refresh token et configure le compte Gmail.
+        Nécessite capability emails:write ou rôle admin.
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmailAccountRequest'
+      responses:
+        201:
+          description: Compte Gmail connecté
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailAccount'
+        400:
+          description: Code OAuth invalide ou expiré
+        403:
+          description: Non autorisé
+
+  /{org}/emails/accounts/{account_id}:
+    get:
+      summary: Détails d'un compte Gmail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Détails du compte
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailAccountDetail'
+        404:
+          description: Compte non trouvé
+
+    delete:
+      summary: Déconnecter un compte Gmail
+      security:
+        - bearerAuth: []
+      description: Supprime le compte et révoque l'accès OAuth2
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        204:
+          description: Compte déconnecté
+        403:
+          description: Non autorisé
+
+  /{org}/emails/sync:
+    post:
+      summary: Déclencher la synchronisation des emails
+      security:
+        - bearerAuth: []
+      description: |
+        Lance le polling synchrone Gmail jusqu'à la vectorisation complète.
+        Traitement incrémental (depuis last_uid) ou historique par période.
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailSyncRequest'
+      responses:
+        200:
+          description: Synchronisation terminée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailSyncResponse'
+        202:
+          description: Synchronisation en cours (si async dans le futur)
+        400:
+          description: Paramètres invalides
+        403:
+          description: Non autorisé
+        409:
+          description: Une synchronisation est déjà en cours pour ce compte
+
+  /{org}/emails/sync-status:
+    get:
+      summary: Statut de la dernière synchronisation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: account_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Statut de synchronisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailSyncStatus'
+
+  /{org}/emails:
+    get:
+      summary: Lister les emails synchronisés
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: thread_id
+          in: query
+          schema:
+            type: string
+          description: Filtrer par thread de conversation
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, vectorized, error]
+        - name: sender
+          in: query
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Recherche textuelle (sujet + contenu)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        200:
+          description: Liste des emails
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emails:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Email'
+                  total:
+                    type: integer
+
+  /{org}/emails/{email_id}:
+    get:
+      summary: Détails d'un email
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Détails de l'email avec pièces jointes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailDetail'
+        404:
+          description: Email non trouvé
+
+  /{org}/emails/{email_id}/attachments/{attachment_id}/download:
+    get:
+      summary: Télécharger une pièce jointe
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: org
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: attachment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Fichier téléchargé
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        404:
+          description: Pièce jointe non trouvée
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2089,3 +2389,286 @@ components:
           type: string
           format: uuid
           description: ID de l'organisation
+
+    # ----------------------------------------
+    # EMAIL SCHEMAS
+    # ----------------------------------------
+
+    EmailAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email_address:
+          type: string
+          format: email
+        email_address_display:
+          type: string
+        is_active:
+          type: boolean
+        sync_enabled:
+          type: boolean
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    EmailAccountDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/EmailAccount'
+        - type: object
+          properties:
+            last_sync_uid:
+              type: integer
+              description: Dernier UID Gmail synchronisé
+            total_emails_synced:
+              type: integer
+              description: Nombre total d'emails synchronisés
+            pending_vectorization:
+              type: integer
+              description: Emails en attente de vectorisation
+            recent_errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  occurred_at:
+                    type: string
+                    format: date-time
+
+    CreateEmailAccountRequest:
+      type: object
+      required:
+        - email
+        - oauth_code
+        - redirect_uri
+      properties:
+        email:
+          type: string
+          format: email
+          description: Adresse Gmail à connecter
+        oauth_code:
+          type: string
+          description: Code d'autorisation OAuth2 (obtenu du flux Google)
+        redirect_uri:
+          type: string
+          description: URI de redirection configurée dans Google Cloud Console
+        email_address_display:
+          type: string
+          description: Nom d'affichage personnalisé (optionnel)
+
+    EmailSyncRequest:
+      type: object
+      required:
+        - account_id
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          description: ID du compte Gmail à synchroniser
+        sync_mode:
+          type: string
+          enum: [incremental, historical]
+          default: incremental
+          description: |
+            Mode de synchronisation :
+            - incremental : depuis le dernier UID (défaut)
+            - historical : par période pour import d'existant
+        date_range:
+          type: object
+          description: Requis si sync_mode=historical
+          properties:
+            start_date:
+              type: string
+              format: date
+              description: Date de début (YYYY-MM-DD)
+            end_date:
+              type: string
+              format: date
+              description: Date de fin (YYYY-MM-DD)
+        max_emails:
+          type: integer
+          default: 1000
+          description: Nombre maximum d'emails à traiter (limite de sécurité)
+
+    EmailSyncResponse:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        synced:
+          type: integer
+          description: Nombre d'emails synchronisés
+        vectorized:
+          type: integer
+          description: Nombre d'emails vectorisés
+        errors:
+          type: integer
+          description: Nombre d'erreurs
+        last_uid:
+          type: integer
+          description: Dernier UID traité
+        duration_seconds:
+          type: integer
+          description: Durée totale du traitement
+        completed_at:
+          type: string
+          format: date-time
+
+    EmailSyncStatus:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [idle, syncing, error]
+        last_sync:
+          type: string
+          format: date-time
+          nullable: true
+        last_sync_uid:
+          type: integer
+        pending_count:
+          type: integer
+          description: Emails en attente de vectorisation
+        processing_count:
+          type: integer
+          description: Emails en cours de traitement
+        vectorized_count:
+          type: integer
+          description: Emails prêts pour Secrétariat
+        error_count:
+          type: integer
+          description: Emails en erreur
+
+    Email:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        gmail_thread_id:
+          type: string
+          description: ID du thread Gmail (conversation)
+        gmail_message_id:
+          type: string
+          description: ID unique du message Gmail
+        subject:
+          type: string
+        subject_cleaned:
+          type: string
+        sender_email:
+          type: string
+          format: email
+        sender_name:
+          type: string
+        recipient_emails:
+          type: array
+          items:
+            type: string
+            format: email
+        sent_at:
+          type: string
+          format: date-time
+        processing_status:
+          type: string
+          enum: [pending, processing, vectorized, error]
+        has_attachments:
+          type: boolean
+        attachments_count:
+          type: integer
+        snippet:
+          type: string
+          description: Extrait du contenu (150 premiers caractères)
+
+    EmailDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/Email'
+        - type: object
+          properties:
+            content_text:
+              type: string
+              description: Contenu nettoyé par RAG Mail
+            content_text_raw:
+              type: string
+              description: Contenu original brut
+            headers:
+              type: object
+              description: Headers complets de l'email
+            in_reply_to:
+              type: string
+              description: Message-ID auquel cet email répond
+            references:
+              type: array
+              items:
+                type: string
+              description: Chaîne de références Message-ID
+            gmail_labels:
+              type: array
+              items:
+                type: string
+            processing_error:
+              type: string
+              nullable: true
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/EmailAttachment'
+            embeddings_status:
+              type: object
+              properties:
+                total_chunks:
+                  type: integer
+                body_vectorized:
+                  type: boolean
+                attachments_vectorized:
+                  type: integer
+            thread_emails:
+              type: array
+              items:
+                $ref: '#/components/schemas/Email'
+              description: Autres emails du même thread
+
+    EmailAttachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        filename_clean:
+          type: string
+        mime_type:
+          type: string
+        file_size_bytes:
+          type: integer
+        file_extension:
+          type: string
+        is_processed:
+          type: boolean
+          description: OCR/analyse effectuée
+        ocr_text:
+          type: string
+          description: Texte extrait si applicable
+          nullable: true
+        ocr_confidence:
+          type: number
+          format: decimal
+          minimum: 0
+          maximum: 1
+          nullable: true
+        is_inline:
+          type: boolean
+          description: Image inline dans HTML
