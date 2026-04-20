@@ -1536,6 +1536,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: company_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filtrer par entreprise (company)
         - name: thread_id
           in: query
           schema:
@@ -2506,7 +2512,23 @@ components:
           format: uuid
         synced:
           type: integer
-          description: Nombre d'emails synchronisés
+          description: Nombre d'emails synchronisés (routing OK)
+        ignored:
+          type: integer
+          description: Nombre d'emails ignorés (alias invalide)
+        ignored_breakdown:
+          type: object
+          description: Détail des emails ignorés
+          properties:
+            no_alias:
+              type: integer
+              description: Emails sans alias (REDACTED_EMAIL)
+            org_mismatch:
+              type: integer
+              description: Emails pour autre environnement
+            company_not_found:
+              type: integer
+              description: Company slug inexistant
         vectorized:
           type: integer
           description: Nombre d'emails vectorisés
@@ -2538,18 +2560,27 @@ components:
           nullable: true
         last_sync_uid:
           type: integer
-        pending_count:
-          type: integer
-          description: Emails en attente de vectorisation
-        processing_count:
-          type: integer
-          description: Emails en cours de traitement
-        vectorized_count:
-          type: integer
-          description: Emails prêts pour Secrétariat
-        error_count:
-          type: integer
-          description: Emails en erreur
+        stats:
+          type: object
+          properties:
+            total_synced:
+              type: integer
+              description: Total emails avec routing OK
+            total_ignored:
+              type: integer
+              description: Total emails ignorés (alias invalide)
+            pending:
+              type: integer
+              description: Emails en attente de vectorisation
+            processing:
+              type: integer
+              description: Emails en cours de traitement
+            vectorized:
+              type: integer
+              description: Emails prêts pour Secrétariat
+            error:
+              type: integer
+              description: Emails en erreur
 
     Email:
       type: object
@@ -2557,6 +2588,20 @@ components:
         id:
           type: string
           format: uuid
+        company_id:
+          type: string
+          format: uuid
+          description: Company déduite de l'alias Gmail
+        company_slug:
+          type: string
+          description: Slug de la company (pour affichage)
+        company_name:
+          type: string
+          description: Nom de la company (pour affichage)
+        delivered_to_alias:
+          type: string
+          description: Alias complet (REDACTED_EMAIL)
+          example: "REDACTED_EMAIL"
         gmail_thread_id:
           type: string
           description: ID du thread Gmail (conversation)
@@ -2570,6 +2615,7 @@ components:
         sender_email:
           type: string
           format: email
+          description: Email du client expéditeur (pas le compte Gmail)
         sender_name:
           type: string
         recipient_emails:
@@ -2577,6 +2623,7 @@ components:
           items:
             type: string
             format: email
+          description: Liste des destinataires (incluant l'alias Gmail)
         sent_at:
           type: string
           format: date-time

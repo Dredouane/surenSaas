@@ -11,6 +11,10 @@ echo "📋 Variables dans ~/.bashrc :"
 echo "  SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN: ${SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN:0:20}..."
 echo "  TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME: $TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME"
 echo "  SUREN_GOOGLE_GEMINI_CREDENTIALS_B64: ${SUREN_GOOGLE_GEMINI_CREDENTIALS_B64:0:20}..."
+echo "  SUREN_GMAIL_OAUTH_CLIENT_ID: ${SUREN_GMAIL_OAUTH_CLIENT_ID:0:20}..."
+echo "  SUREN_GMAIL_OAUTH_CLIENT_SECRET: ${SUREN_GMAIL_OAUTH_CLIENT_SECRET:0:20}..."
+echo "  SUREN_GMAIL_OAUTH_REFRESH_TOKEN: ${SUREN_GMAIL_OAUTH_REFRESH_TOKEN:0:20}..."
+echo "  SUREN_GMAIL_ACCOUNT: ${SUREN_GMAIL_ACCOUNT:-REDACTED_EMAIL}"
 echo ""
 
 # Charger .env.test
@@ -28,7 +32,7 @@ fi
 echo "🔐 Secrets dans GCP Secret Manager :"
 echo ""
 
-for secret in "test-telegram-bot-token" "test-telegram-bot-username" "test-google-gemini-credentials"; do
+for secret in "test-telegram-bot-token" "test-telegram-bot-username" "test-google-gemini-credentials" "gmail-oauth-client-id" "gmail-oauth-client-secret" "gmail-oauth-refresh-token" "gmail-account"; do
     echo -n "  $secret: "
     if gcloud secrets describe $secret --project=$GCP_PROJECT_ID > /dev/null 2>&1; then
         echo "✅ EXISTE"
@@ -55,6 +59,24 @@ fi
 if [ -z "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64" ]; then
     echo "❌ SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 n'est pas défini dans ~/.bashrc"
     echo "   Ajoutez-le: export SUREN_GOOGLE_GEMINI_CREDENTIALS_B64='...'"
+    echo ""
+fi
+
+if [ -z "$SUREN_GMAIL_OAUTH_CLIENT_ID" ]; then
+    echo "❌ SUREN_GMAIL_OAUTH_CLIENT_ID n'est pas défini dans ~/.bashrc"
+    echo "   Ajoutez-le: export SUREN_GMAIL_OAUTH_CLIENT_ID='votre-client-id'"
+    echo ""
+fi
+
+if [ -z "$SUREN_GMAIL_OAUTH_CLIENT_SECRET" ]; then
+    echo "❌ SUREN_GMAIL_OAUTH_CLIENT_SECRET n'est pas défini dans ~/.bashrc"
+    echo "   Ajoutez-le: export SUREN_GMAIL_OAUTH_CLIENT_SECRET='votre-client-secret'"
+    echo ""
+fi
+
+if [ -z "$SUREN_GMAIL_OAUTH_REFRESH_TOKEN" ]; then
+    echo "❌ SUREN_GMAIL_OAUTH_REFRESH_TOKEN n'est pas défini dans ~/.bashrc"
+    echo "   Ajoutez-le: export SUREN_GMAIL_OAUTH_REFRESH_TOKEN='votre-refresh-token'"
     echo ""
 fi
 

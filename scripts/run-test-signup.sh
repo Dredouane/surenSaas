@@ -21,16 +21,14 @@ elif [ -f .env.test ]; then
     set +a
 fi
 
-# Créer le fichier .env pour pydantic
-cat > .env << EOF
-SUPABASE_URL=${SUPABASE_URL}
-SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-JWT_SECRET=${JWT_SECRET}
-ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
-ENVIRONMENT=test
-EOF
+# Exporter les variables d'environnement pour que config.py les lise
+export ENVIRONMENT=test
+export SUPABASE_URL=${SUPABASE_URL}
+export SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+export JWT_SECRET=${JWT_SECRET}
+export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
 
-echo "✅ Configuration chargée"
+echo "✅ Variables d'environnement exportées"
 echo ""
 
 # Activer le venv

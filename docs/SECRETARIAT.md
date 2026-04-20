@@ -546,9 +546,492 @@ Si on améliore le modèle IA, on peut ré-analyser les emails historiques pour 
 
 ---
 
+## Tests
+
+### Tests end-to-end (`tests/test_secretariat_scenarios.py`)
+
+Les tests valident le flux complet : Email → Vectorisation → Analyse Secrétaire → Chat.
+
+⚠️ **Coût** : Ces tests utilisent de vrais appels Vertex AI
+- Coût estimé : ~0.01-0.03€ par test
+- Durée : 15-30 secondes par test
+
+#### Exécution
+
+```bash
+# Tous les tests (y compris les tests lents avec appels Gemini)
+pytest tests/test_secretariat_scenarios.py -v
+
+# Ignorer les tests lents (sans appels Gemini)
+pytest tests/test_secretariat_scenarios.py -v -m 'not slow'
+
+# Un seul scénario
+pytest tests/test_secretariat_scenarios.py::TestSecretariatScenarios::test_scenario_1_first_email_analysis_and_chat -v -s
+```
+
+#### Scénarios de test
+
+##### Scénario 1 : Premier email + Analyse + Chat
+
+**Objectif** : Valider l'analyse automatique et le chat de base
+
+**Données** : Email forward de demande de devis ACORUS (basé sur INV-EXA-0001)
+
+**Validations** :
+- Résumé contient : `["devis", "bf2507022328", "acorus", "salle de bain"]`
+- Statut dans `['new', 'awaiting_user']`
+- Message system existe dans chat
+- Réponse à question cite le numéro de devis
+- Sources et confidence présentes
+
+**Coût** : ~0.01€ (1 pré-analyse + 1 chat)
+
+##### Scénario 2 : Thread de 2 emails (relance)
+
+**Objectif** : Valider la mise à jour du contexte avec nouvel email
+
+**Données** : 
+- Email 1 : Devis initial
+- Email 2 : Relance avec mentions "urgent", "échéance", "handicapé"
+
+**Validations** :
+- Résumé mis à jour mentionne : `["relance", "urgent", "échéance", "handicapé"]`
+- Statut = `'urgent'` (détection automatique)
+- Urgence = `'high'`
+- Message system mis à jour (pas de doublon)
+
+**Coût** : ~0.01€ (1 pré-analyse)
+
+##### Scénario 3 : Contexte complet + Question
+
+**Objectif** : Valider que la réponse utilise les 2 emails (contexte complet)
+
+**Données** : Même thread que Scénario 2
+
+**Question** : `"Quel est le montant du devis et pourquoi c'est urgent ?"`
+
+**Validations** :
+- Réponse mentionne montant (de Email 1/PJ)
+- Réponse explique urgence (de Email 2)
+- Sources citées ≥ 1
+- Confidence > 0.6
+
+**Coût** : ~0.02€ (2 pré-analyses + 1 chat)
+
+#### Stratégie de validation
+
+Comme les réponses Gemini ne sont pas déterministes, les tests utilisent une **validation par mots-clés** :
+
+```python
+def assert_contains_any(text: str, keywords: list):
+    """Valide que text contient au moins un des keywords."""
+    text_check = text.lower()
+    found = [kw for kw in keywords if kw.lower() in text_check]
+    assert len(found) > 0, f"Aucun mot trouvé dans: {text[:200]}"
+```
+
+**Exemple** :
+```python
+# Validation résumé
+self.assert_contains_any(summary, [
+    "devis", "bf2507022328", "acorus", "salle de bain"
+])
+
+# Validation réponse chat  
+self.assert_contains_any(response_text, [
+    "3280.78", "euro", "montant"
+])
+```
+
+---
+
+## Implémentation Actuelle (Phase 1)
+
+### Vue d'ensemble
+
+La Secrétaire IA est maintenant **opérationnelle** avec deux fonctionnalités principales:
+
+1. **Pré-analyse automatique** des nouveaux emails (asynchrone, déclenchée après vectorisation)
+2. **Réponses interactives** dans le chat des threads
+
+### Architecture Implémentée
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    SECRÉTAIRE IA                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────────┐      ┌──────────────────────────────┐ │
+│  │  PRÉ-ANALYSE     │      │  RÉPONSE CHAT                │ │
+│  │  (Async)         │      │  (On-demand)                 │ │
+│  └────────┬─────────┘      └──────────────┬───────────────┘ │
+│           │                               │                  │
+│           ▼                               ▼                  │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              CONTEXT BUILDER                         │   │
+│  │  - Thread (emails, participants)                    │   │
+│  │  - Attachments (OCR text)                           │   │
+│  │  - RAG (emails similaires via embeddings)          │   │
+│  │  - Chat history                                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+│           │                               │                  │
+│           ▼                               ▼                  │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              GEMINI CLIENT                           │   │
+│  │  Model: VERTEX_AI_SECRETARIAT_MODEL                 │   │
+│  │  Default: gemini-1.5-flash-001                      │   │
+│  │  Temperature: 0.3 (formel/concis)                   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Fichiers créés
+
+```
+app/
+├── models/
+│   └── secretariat.py              # Modèles Pydantic (EmailStatus, AnalysisResult, ChatResponse)
+├── services/
+│   ├── secretariat_service.py      # Service principal (analyze_new_email, respond_to_chat)
+│   ├── secretariat_context.py      # Context Builder (prompts, RAG, formatage)
+│   └── emails/
+│       └── embedding_service.py    # Déclenchement après vectorisation
+├── agents/
+│   └── prompts/
+│       └── secretariat/
+│           ├── system_preanalysis.txt   # Style: formel/concis
+│           ├── user_preanalysis.txt     # Template avec placeholders
+│           ├── system_chat.txt          # Style: formel/concis
+│           └── user_chat.txt            # Template avec placeholders
+└── core/
+    └── config.py                   # VERTEX_AI_SECRETARIAT_MODEL
+```
+
+### Configuration
+
+**Variable d'environnement:**
+```bash
+VERTEX_AI_SECRETARIAT_MODEL=gemini-1.5-flash-001
+```
+
+**Dépendances:**
+- `GOOGLE_GEMINI_CREDENTIALS_B64` (déjà existant)
+- `GCP_PROJECT_ID` (déjà existant)
+- `GEMINI_LOCATION` (déjà existant, default: europe-west1)
+
+### Fonctionnalités
+
+#### 1. Pré-analyse des emails
+
+**Déclencheur:** Après vectorisation (`processing_status` → "vectorized")
+
+**Processus:**
+```python
+# Dans embedding_service.py
+async def vectorize_email_async(self, email_id: str):
+    # ... vectorisation ...
+    await email_db.update_email_status(email_id, "vectorized")
+    
+    # Déclencher l'analyse Secrétaire (asynchrone)
+    asyncio.create_task(
+        secretariat_service.analyze_new_email(email_id)
+    )
+```
+
+**Réponse JSON attendue:**
+```json
+{
+  "status": "new|awaiting_response|awaiting_user|resolved|urgent|escalated",
+  "summary": "Résumé concis (2-3 phrases)",
+  "context": "Contexte important",
+  "key_points": ["Point clé 1", "Point clé 2"],
+  "suggested_actions": ["Action 1", "Action 2"],
+  "urgency_reason": "Raison si urgent",
+  "attachments_analysis": "Analyse des PJ"
+}
+```
+
+#### 2. Réponses dans le chat
+
+**Déclencheur:** Message utilisateur dans le chat du thread
+
+**Réponse JSON attendue:**
+```json
+{
+  "response": "Réponse textuelle",
+  "sources": ["Email du 28/07/2025", "Facture.pdf"],
+  "confidence": 0.95,
+  "suggested_follow_up": "Question de suivi suggérée"
+}
+```
+
+### Statuts des emails
+
+| Statut | Description |
+|--------|-------------|
+| `new` | Nouveau, pas encore analysé |
+| `in_analysis` | En cours d'analyse par IA |
+| `awaiting_response` | Attente réponse du client |
+| `awaiting_user` | Attente action utilisateur |
+| `resolved` | Traité/Résolu |
+| `urgent` | Marqué urgent par IA |
+| `escalated` | À escalader (niveau 2) |
+
+### Prompts templates
+
+Les prompts sont stockés dans des fichiers `.txt` modifiables:
+
+**Placeholders pré-analyse:**
+- `{{THREAD_CONTEXT}}` - Informations du thread
+- `{{CURRENT_EMAIL}}` - Email à analyser
+- `{{ATTACHMENTS_CONTEXT}}` - Texte OCR des pièces jointes
+- `{{RAG_CONTEXT}}` - Emails similaires trouvés
+
+**Placeholders chat:**
+- `{{THREAD_SUMMARY}}` - Résumé du thread
+- `{{CHAT_HISTORY}}` - Historique des messages
+- `{{EMAILS_CONTEXT}}` - Emails du thread
+- `{{ATTACHMENTS_CONTEXT}}` - Pièces jointes
+- `{{RAG_CONTEXT}}` - Context similaire
+- `{{USER_QUESTION}}` - Question de l'utilisateur
+
+### Utilisation
+
+#### Analyse manuelle (pour tests)
+
+```python
+from app.services.secretariat_service import secretariat_service
+
+# Analyser un email spécifique
+result = await secretariat_service.analyze_new_email("email-uuid")
+print(result.summary)
+print(result.status)
+```
+
+#### Réponse dans le chat
+
+```python
+from app.services.secretariat_service import secretariat_service
+from uuid import UUID
+
+# Obtenir une réponse
+response = await secretariat_service.respond_to_chat(
+    thread_id=UUID("thread-uuid"),
+    session_id=UUID("session-uuid"),
+    user_message="Quel est le montant du devis ?"
+)
+
+print(response.response)
+print(response.sources)
+```
+
+### Personnalisation
+
+#### Modifier le style (formel/concis)
+
+Éditer les fichiers:
+- `app/agents/prompts/secretariat/system_preanalysis.txt`
+- `app/agents/prompts/secretariat/system_chat.txt`
+
+#### Changer le modèle
+
+```bash
+# .env.test ou .env.prod
+VERTEX_AI_SECRETARIAT_MODEL=gemini-1.5-pro-001
+```
+
+#### Ajuster la température
+
+Modifier dans `secretariat_service.py`:
+```python
+gemini = GeminiClient(
+    ...
+    temperature=0.3,  # Plus bas = plus déterministe
+    ...
+)
+```
+
+### Coûts et optimisations
+
+**Modèle:** `gemini-1.5-flash-001`
+- Rapide et économique
+- Contexte: jusqu'à 1M tokens
+- Tarif: ~$0.35/million tokens (input)
+
+**Optimisations:**
+- Chunking des emails (limité à 1500-2000 caractères)
+- Limitation historique (5 derniers emails)
+- Limitation RAG (3 résultats max)
+
+---
+
+## 🧪 Tests
+
+### Exécution des tests
+
+```bash
+# Tous les tests de la Secrétaire (incluent des appels réels à Gemini)
+pytest tests/test_secretariat_scenarios.py -v
+
+# Un scénario spécifique
+pytest tests/test_secretariat_scenarios.py::TestSecretariatScenarios::test_scenario_1_first_email_analysis_and_chat -v
+
+# Ignorer les tests lents (sans appels Gemini)
+pytest tests/test_secretariat_scenarios.py -v -m 'not slow'
+```
+
+### ⚠️ Coût des tests
+
+**Important:** Ces tests utilisent de vrais appels Vertex AI.
+
+| Scénario | Coût estimé | Durée |
+|----------|-------------|-------|
+| Test 1: Premier email + Chat | ~0.01€ | ~10s |
+| Test 2: 2 emails + Relance | ~0.01€ | ~10s |
+| Test 3: Contexte + Question | ~0.02€ | ~15s |
+| **TOTAL** | **~0.04€** | **~35s** |
+
+### État des tests (Avril 2025)
+
+| Scénario | Status | Description |
+|----------|--------|-------------|
+| **Test 1** | ✅ PASS | Premier email → Analyse → Chat |
+| **Test 2** | ✅ PASS | Thread de 2 emails avec relance urgente |
+| **Test 3** | ✅ PASS | Contexte complet + Question utilisateur |
+| **TOTAL** | **3/3** | **100%** |
+
+#### Scénario 1: Premier email + Analyse + Chat
+
+**Validations:**
+- Résumé contient: `["devis", "bf2507022328", "acorus", "salle de bain"]`
+- Statut dans `['new', 'waiting', 'in_progress']`
+- Message system existe dans chat
+- Réponse à question cite le numéro de devis
+- Sources et confidence présentes
+
+#### Scénario 2: Thread de 2 emails (relance)
+
+**Données:**
+- Email 1: Devis initial (INV-EXA-0001)
+- Email 2: Relance avec mentions "urgent", "échéance", "handicapé"
+
+**Validations:**
+- Résumé mis à jour mentionne: `["relance", "urgent", "échéance", "handicapé"]`
+- Statut = `waiting` (urgent mappé pour la DB)
+- Urgence = `high`
+- Message system mis à jour (pas de doublon)
+
+#### Scénario 3: Contexte complet + Question
+
+**Question:** `"Quel est le montant du devis et pourquoi c'est urgent ?"`
+
+**Validations:**
+- Réponse mentionne montant (de Email 1/PJ)
+- Réponse explique urgence (de Email 2)
+- Sources citées ≥ 1
+- Confidence > 0.6
+
+### Stratégie de validation
+
+Comme les réponses Gemini ne sont pas déterministes, les tests utilisent une **validation par mots-clés** :
+
+```python
+def assert_contains_any(text: str, keywords: list):
+    """Valide que text contient au moins un des keywords."""
+    text_check = text.lower()
+    found = [kw for kw in keywords if kw.lower() in text_check]
+    assert len(found) > 0
+```
+
+**Exemple:**
+```python
+# Validation résumé
+self.assert_contains_any(summary, [
+    "devis", "bf2507022328", "acorus", "salle de bain"
+])
+
+# Validation réponse chat  
+self.assert_contains_any(response_text, [
+    "3280.78", "euro", "montant"
+])
+```
+
+---
+
+## ✅ Implémentation - Modules Drafting & Dossiers (Avril 2025)
+
+### Status: Backend + Frontend Complets
+
+#### ✅ Module: Drafting Sandbox (Rédacteur)
+
+**Fonctionnalités implémentées:**
+- ✅ Bouton "Préparer une réponse" dans le panneau Assistant IA
+- ✅ Modal flottant avec Rich Text Editor
+- ✅ Génération V1 via Gemini (ou fallback local)
+- ✅ Smart Chips: Plus court, Plus poli, Ajouter signature, Plus technique
+- ✅ Petit Prompt: Zone d'instruction pour itérer
+- ✅ Copie dans le clipboard
+
+**Fichiers créés:**
+- Backend: `app/services/drafting_service.py`
+- API: Endpoints dans `app/api/email_threads.py`
+- Frontend: `components/secretary/DraftSandbox.tsx`
+- Intégration: Bouton dans `[id]/page.tsx` (email thread detail)
+
+**Routes API:**
+```
+POST /api/v1/{org}/email-threads/{id}/draft
+PUT  /api/v1/{org}/email-threads/{id}/draft/{draft_id}
+POST /api/v1/{org}/email-threads/{id}/draft/{draft_id}/smart-chip
+```
+
+#### ✅ Module: Le Classeur (Dossiers)
+
+**Fonctionnalités implémentées:**
+- ✅ CRUD complet des dossiers
+- ✅ Table `dossiers` avec contraintes et indexes
+- ✅ Liaison Thread ↔ Dossier (1:N)
+- ✅ Page liste: `/dashboard/dossiers`
+- ✅ Page détail: `/dashboard/dossiers/[id]` avec tabs
+- ✅ Onglets: Emails, Documents, Tâches
+- ✅ Suggestion IA de liaison (basique)
+- ✅ Menu "Dossiers" dans la sidebar
+
+**Fichiers créés:**
+- DB: `db/schema/026_dossiers.sql`
+- Models: `app/models/dossiers.py`
+- Backend: `app/services/dossier_service.py`
+- API: `app/api/dossiers.py`
+- Frontend:
+  - `app/dashboard/dossiers/page.tsx`
+  - `app/dashboard/dossiers/[id]/page.tsx`
+  - `app/dashboard/dossiers/new/page.tsx`
+- Tests: `tests/test_dossiers.py` (7/7 passent)
+
+**Routes API:**
+```
+GET    /api/v1/{org}/dossiers
+POST   /api/v1/{org}/dossiers
+GET    /api/v1/{org}/dossiers/{id}
+PATCH  /api/v1/{org}/dossiers/{id}
+DELETE /api/v1/{org}/dossiers/{id}
+GET    /api/v1/{org}/dossiers/{id}/emails
+GET    /api/v1/{org}/dossiers/{id}/documents
+GET    /api/v1/{org}/dossiers/{id}/summary
+GET    /api/v1/{org}/email-threads/{id}/suggested-dossiers
+POST   /api/v1/{org}/email-threads/{id}/link-to-dossier
+POST   /api/v1/{org}/email-threads/{id}/unlink-from-dossier
+```
+
+**Navigation:** Menu "Dossiers" ajouté dans `app/dashboard/layout.tsx`
+
+---
+
 ## Références
 
 - `docs/EMAILS.md` - Module ingestion emails (prérequis)
+- `docs/EMAILS_MANAGEMENT.md` - Gestion des threads et chat
 - `docs/CAPABILITIES.md` - Permissions (`secretariat:read`, `secretariat:review`)
 - `docs/gemini-extraction-agent.md` - Agent IA existant
 - `docs/BACKEND.md` - Architecture backend

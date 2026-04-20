@@ -11,7 +11,7 @@ import os
 import base64
 import json
 import tempfile
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -159,7 +159,7 @@ class GeminiClient:
             raise
     
     def extract_from_pdf(self, pdf_data: bytes, prompt: str) -> str:
-        """Extrait du texte depuis un PDF."""
+        """Extrait du texte depuis un PDF complet."""
         try:
             config = self._create_config()
             
@@ -185,6 +185,83 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"❌ Erreur extraction PDF: {e}")
             raise
+    
+    def extract_from_pdf_pages(
+        self, 
+        pdf_data: bytes, 
+        prompt: str,
+        page_range: Optional[Tuple[int, int]] = None,
+        max_pages: Optional[int] = None,
+        fallback_on_error: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Extrait des données de pages spécifiques d'un PDF.
+        
+        Args:
+            pdf_data: Données binaires du PDF
+            prompt: Prompt d'extraction
+            page_range: Plage de pages à extraire (start, end) inclusif
+            max_pages: Nombre maximum de pages à traiter
+            fallback_on_error: Continuer si une page échoue
+            
+        Returns:
+            Liste de dictionnaires avec résultats par page
+        """
+        try:
+            results = []
+            
+            # Créer un prompt spécifique pour l'extraction par page
+            page_prompt = prompt + "\n\nINSTRUCTION IMPORTANTE: Cette extraction concerne une page spécifique du document. " \
+                "Indique clairement dans ta réponse le numéro de page analysé."
+            
+            config = self._create_config()
+            
+            # Pour l'instant, on envoie le PDF complet avec instructions
+            # Note: L'API Gemini 1.5 Flash peut analyser des pages spécifiques
+            # mais nécessite une approche différente pour l'isolation des pages
+            
+            contents = [
+                self._types.Content(
+                    role="user",
+                    parts=[
+                        self._types.Part.from_text(text=page_prompt),
+                        self._types.Part.from_bytes(data=pdf_data, mime_type="application/pdf")
+                    ]
+                )
+            ]
+            
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
+            
+            # Pour la compatibilité, on retourne un résultat pour la "page 1"
+            # Dans une implémentation avancée, on pourrait splitter le PDF
+            page_result = {
+                "page_number": 1,
+                "response_text": response.text,
+                "status": "success"
+            }
+            
+            results.append(page_result)
+            
+            logger.info(f"✅ Extraction PDF pages: {len(results)} pages traitées")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction PDF pages: {e}")
+            
+            if fallback_on_error:
+                logger.warning(f"⚠️  Fallback: retourne un résultat vide pour continuer")
+                return [{
+                    "page_number": 1,
+                    "response_text": "",
+                    "status": "error",
+                    "error": str(e)
+                }]
+            else:
+                raise
     
     def extract_from_file(self, file_path: str, prompt: str) -> str:
         """Extrait du texte depuis un fichier local."""

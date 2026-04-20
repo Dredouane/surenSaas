@@ -149,3 +149,62 @@
 - **Cloud Run compatible** : Pas de long-running processes
 - **Contrôle** : Déclenchement manuel ou via cron externe (Cloud Scheduler)
 - **Futur** : Migrera vers async workers si volume important
+
+## ADR-020 : Multi-tenancy par aliasing Gmail
+**Choix** : Un seul compte Gmail `REDACTED_EMAIL` avec aliasing pour routing multi-tenant
+**Architecture** :
+- **Compte unique** : `REDACTED_EMAIL` pour TEST et PROD (mêmes credentials OAuth)
+- **Aliasing** : `REDACTED_EMAIL` (séparateur configurable, défaut: `#`)
+- **Extraction forward** : Détection et extraction du mail original (l'adresse Gmail disparaît des données)
+- **Routing strict** : Extraction du header `Delivered-To`, parsing alias, lookup org/company
+- **Pas de fallback** : Emails sans alias valide sont ignorés (pas stockés)
+**Pourquoi** :
+- **Économie** : Un seul compte Gmail, un seul projet Google Cloud
+- **Simplicité** : Pas de configuration multiple OAuth
+- **Sécurité** : Isolation stricte par validation org_slug (emails pour PROD ignorés sur TEST)
+- **Clarté** : Chaque email est routé vers exactement une company
+- **Transparence** : Le module traite les emails comme s'il écoutait directement le client
+**Cas rejetés** :
+- Pas d'alias (`REDACTED_EMAIL`) → ignoré
+- Org mismatch (`+prod-xxx` sur env TEST) → ignoré
+- Company inexistante → ignoré
+- Format invalide → ignoré
+**Implémentation** : 
+- Service `alias_router.py` avec regex dynamique selon `EMAIL_ALIAS_SEPARATOR`
+- Service `content_cleaner.py` avec détection patterns forward (Gmail, Outlook, Apple Mail)
+
+## ADR-021 : Stratégie d'embedding Vertex AI + Matryoshka
+**Choix** : Vertex AI text-embedding-004 avec chunking overlap et Matryoshka slicing
+**Architecture** :
+- **Modèle** : `vertexai.language_models.TextEmbeddingModel` avec `text-embedding-004`
+- **Dimensions** : 768 (nativement, pas de slicing nécessaire pour ce modèle)
+- **Chunking** : 500 tokens avec overlap 50 tokens pour préserver le contexte
+- **Asynchrone** : L'embedding est découplé du stockage raw (pas de blocage du polling)
+**Pourquoi** :
+- **Qualité** : text-embedding-004 offre excellente qualité pour 768 dims
+- **Économie** : Moins de stockage que 1536 dims, recherche plus rapide
+- **Contexte** : L'overlap évite de perdre l'info entre deux chunks
+- **Performance** : Async ne bloque pas le flux de polling Gmail
+**Implémentation** :
+- Chunking overlap avant appel API
+- Stockage immédiat en DB avec `processing_status='pending'`
+- Vectorisation async via `asyncio.create_task()` ou endpoint séparé
+
+## ADR-022 : Tests TDD avec embeddings réels
+**Choix** : Tests avec génération d'embeddings réels (pas de mock)
+**Architecture** :
+- **Tests scénarios** : 5 scénarios complets (email simple, thread, cas limites, historique, RAG)
+- **Données** : Fichiers JSON dans `tests/data/emails/` (pas de .eml pour l'instant)
+- **Embeddings** : Vrais appels API pour génération et recherche sémantique
+- **Vérifications** : Recherche sémantique dans contenu email + pièce jointe OCR
+**Pourquoi** :
+- **Non-régression** : Tests complets détectent les vraies régressions
+- **Confiance** : Valide que le pipeline embedding → vectorisation → recherche fonctionne
+- **Documentation** : Les tests servent de documentation vivante
+**Scénarios testés** :
+1. Email forwardé avec PJ (recherche sémantique sur OCR)
+2. Chaîne d'emails thread (recherche sémantique dans réponse)
+3. Cas limites ignorés (no_alias, org_mismatch, company_not_found)
+4. Polling historique par période
+5. Extraction forward + RAG Mail
+**Coût** : Acceptable (exécution tests occasionnelle, pas à chaque commit)

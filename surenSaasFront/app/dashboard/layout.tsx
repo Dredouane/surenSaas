@@ -14,10 +14,13 @@ import {
   Home,
   FileText,
   Users,
+  Mail,
+  FolderKanban,
   Settings,
   Menu,
   ChevronDown,
   LogOut,
+  FileSearch,
 } from "lucide-react";
 
 interface DashboardLayoutProps {
@@ -26,6 +29,9 @@ interface DashboardLayoutProps {
 
 const getNavigation = (isAdmin: boolean) => [
   { name: "Accueil", href: "/dashboard", icon: Home },
+  { name: "Emails", href: "/dashboard/email-threads", icon: Mail },
+  { name: "Dossiers", href: "/dashboard/dossiers", icon: FolderKanban },
+  { name: "Appels d'Offres", href: "/dashboard/ao", icon: FileSearch },
   { name: "Factures", href: "/dashboard/invoices", icon: FileText },
   { name: "Clients", href: "/dashboard/clients", icon: Users },
   { name: "Paramètres", href: "/dashboard/settings", icon: Settings },

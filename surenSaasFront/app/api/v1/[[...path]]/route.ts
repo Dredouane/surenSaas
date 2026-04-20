@@ -39,10 +39,18 @@ async function handleProxy(request: NextRequest, method: string) {
   console.log(`   API_URL config: ${API_BASE_URL}`);
   
   try {
-    // Vérifier que le backend est accessible
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    // Détecter le content-type de la requête
+    const contentType = request.headers.get('content-type') || '';
+    const isMultipart = contentType.includes('multipart/form-data');
+    const isFormUrlEncoded = contentType.includes('application/x-www-form-urlencoded');
+    
+    // Préparer les headers
+    const headers: Record<string, string> = {};
+    
+    // Ne pas définir Content-Type pour multipart (le browser le fait avec le boundary)
+    if (!isMultipart && !isFormUrlEncoded) {
+      headers['Content-Type'] = 'application/json';
+    }
     
     // Copier les headers importants
     const authHeader = request.headers.get('authorization');
@@ -56,21 +64,29 @@ async function handleProxy(request: NextRequest, method: string) {
     }
     
     // Récupérer le body si présent
-    let body: string | undefined;
+    let body: string | FormData | undefined;
+    
     if (method !== 'GET' && method !== 'HEAD') {
-      body = await request.text();
-      // Masquer les champs sensibles dans les logs
-      let logBody = body;
-      try {
-        const bodyObj = JSON.parse(body);
-        if (bodyObj.password) {
-          bodyObj.password = '***MASQUÉ***';
-          logBody = JSON.stringify(bodyObj);
+      if (isMultipart || isFormUrlEncoded) {
+        // Pour les uploads de fichiers ou formulaires, forward le FormData tel quel
+        body = await request.formData();
+        console.log(`   Body: FormData (${isMultipart ? 'multipart' : 'form-urlencoded'})`);
+      } else {
+        // Pour les requêtes JSON, lire comme texte
+        body = await request.text();
+        // Masquer les champs sensibles dans les logs
+        let logBody = body;
+        try {
+          const bodyObj = JSON.parse(body);
+          if (bodyObj.password) {
+            bodyObj.password = '***MASQUÉ***';
+            logBody = JSON.stringify(bodyObj);
+          }
+        } catch {
+          // Si pas JSON, on log tel quel mais tronqué
         }
-      } catch {
-        // Si pas JSON, on log tel quel mais tronqué
+        console.log(`   Body: ${logBody.substring(0, 200)}...`);
       }
-      console.log(`   Body: ${logBody.substring(0, 200)}...`);
     }
     
     console.log(`   → Envoi vers backend...`);

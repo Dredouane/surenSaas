@@ -35,8 +35,6 @@ Client → Cloud Run Front (Next.js) → Cloud Run Back (FastAPI) → Supabase P
 ```bash
 # Front
 API_URL=https://back-xxx.run.app
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
 
 # Back
 SUPABASE_URL=

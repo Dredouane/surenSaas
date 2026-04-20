@@ -13,6 +13,11 @@ from app.api.invoices import router as invoices_router
 from app.api.admin import router as admin_router
 from app.api.construction_bot import router as construction_bot_router
 from app.api.telegram_core import router as telegram_webhooks_router
+from app.api.emails import router as emails_router
+from app.api.email_threads import router as email_threads_router
+from app.api.dossiers import router as dossiers_router
+from app.api.ao import router as ao_router
+from app.api.files import router as files_router
 
 # Initialiser le logging au démarrage
 setup_logging(
@@ -131,6 +136,11 @@ app.include_router(clients_router, prefix="/api/v1")
 app.include_router(invoices_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(construction_bot_router, prefix="/api/v1")
+app.include_router(emails_router, prefix="/api/v1")
+app.include_router(email_threads_router, prefix="/api/v1")
+app.include_router(dossiers_router, prefix="/api/v1")
+app.include_router(ao_router, prefix="/api/v1")
+app.include_router(files_router, prefix="/api/v1")
 app.include_router(telegram_webhooks_router)
 
 @app.on_event("startup")

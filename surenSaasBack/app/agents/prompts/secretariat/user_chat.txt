@@ -1,0 +1,30 @@
+RÉSUMÉ DU DOSSIER:
+{{THREAD_SUMMARY}}
+
+HISTORIQUE DU CHAT:
+{{CHAT_HISTORY}}
+
+EMAILS DU THREAD (du plus récent au plus ancien):
+{{EMAILS_CONTEXT}}
+
+PIÈCES JOINTES RELEVANTES:
+{{ATTACHMENTS_CONTEXT}}
+
+CONTEXTE SIMILAIRE (RAG):
+{{RAG_CONTEXT}}
+
+QUESTION DE L'UTILISATEUR:
+{{USER_QUESTION}}
+
+INSTRUCTIONS:
+Réponds à la question en te basant uniquement sur les informations fournies ci-dessus. Sois concis et précis.
+
+Format de ta réponse (JSON):
+{
+  "response": "Ta réponse textuelle",
+  "sources": ["source 1", "source 2"],
+  "confidence": 0.95,
+  "suggested_follow_up": "Question de suivi suggérée ou null"
+}
+
+Réponds uniquement avec le JSON.

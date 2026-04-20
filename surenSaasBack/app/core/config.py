@@ -6,7 +6,8 @@ import os
 class Settings(BaseSettings):
     """Configuration de l'application."""
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Ne pas utiliser env_file car on charge manuellement depuis .env.test/.env.prod
+        env_file=None,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
     
     # Organisation (préfixée TEST_ORG_ID ou PROD_ORG_ID)
     org_id: str = ""
+    org_slug: str = ""
     
     # Telegram Construction Bots (préfixés TEST_ ou PROD_)
     telegram_construction_bot_token: str = ""
@@ -35,10 +37,22 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"  # Modèle recommandé pour nouveaux projets
     gemini_location: str = "europe-west1"  # Région Vertex AI
+    gcp_project_id: str = ""  # Projet GCP pour Vertex AI
+    
+    # Secrétaire IA (préfixés TEST_ ou PROD_)
+    secretariat_model: str = "gemini-2.5-flash-lite"  # Modèle pour la Secrétaire IA
     
     # App
     app_name: str = "SurenSaaS API"
     debug: bool = False
+
+    # Cloudflare R2 Configuration (S3-Compatible)
+    # Mêmes credentials pour test et prod (isolation par folder)
+    r2_endpoint_url: str = ""       # SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT
+    r2_access_key_id: str = ""      # SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID
+    r2_secret_access_key: str = ""  # SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY
+    r2_token: str = ""              # SUREN_GED_CLOUDFLARE_TOKEN
+    r2_bucket_name: str = ""        # SUREN_GED_CLOUDFLARE_BUCKET_NAME
     
     def model_post_init(self, __context) -> None:
         """Charge les variables d'environnement (préfixées ou non)."""
@@ -47,6 +61,9 @@ class Settings(BaseSettings):
         # Mapping des variables avec fallback
         # Format: (nom_attribut, [liste des noms de variables possibles])
         var_mappings = [
+            ("supabase_url", [
+                "SUPABASE_URL",
+            ]),
             ("supabase_service_key", [
                 f"{env}_supabase_service_key",  # TEST_SUPABASE_SERVICE_KEY
                 "supabase_service_key",          # SUPABASE_SERVICE_KEY (GCP)
@@ -59,6 +76,10 @@ class Settings(BaseSettings):
                 f"{env}_org_id",
                 "org_id",
             ]),
+            ("org_slug", [
+                f"{env}_org_slug",
+                "org_slug",
+            ]),
             ("telegram_construction_bot_token", [
                 f"{env}_telegram_construction_bot_token",
                 "telegram_construction_bot_token",
@@ -70,6 +91,40 @@ class Settings(BaseSettings):
             ("gemini_api_key", [
                 f"{env}_google_gemini_credentials_b64",
                 "google_gemini_credentials_b64",
+            ]),
+            ("gcp_project_id", [
+                f"{env}_gcp_project_id",
+                "gcp_project_id",
+                "GOOGLE_CLOUD_PROJECT",
+                "GCP_PROJECT",
+            ]),
+            ("secretariat_model", [
+                f"{env}_vertex_ai_secretariat_model",
+                "vertex_ai_secretariat_model",
+            ]),
+            ("allowed_origins", [
+                "ALLOWED_ORIGINS",
+            ]),
+            # Cloudflare R2 (SUREN_GED_CLOUDFLARE_* pour local, R2_* pour GCP)
+            ("r2_endpoint_url", [
+                "SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT",
+                "R2_ENDPOINT_URL",
+            ]),
+            ("r2_access_key_id", [
+                "SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID",
+                "R2_ACCESS_KEY_ID",
+            ]),
+            ("r2_secret_access_key", [
+                "SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY",
+                "R2_SECRET_ACCESS_KEY",
+            ]),
+            ("r2_token", [
+                "SUREN_GED_CLOUDFLARE_TOKEN",
+                "R2_TOKEN",
+            ]),
+            ("r2_bucket_name", [
+                "SUREN_GED_CLOUDFLARE_BUCKET_NAME",
+                "R2_BUCKET_NAME",
             ]),
         ]
         
@@ -89,7 +144,7 @@ class Settings(BaseSettings):
                 setattr(self, attr_name, value)
                 print(f"   {attr_name}: [CHARGÉ depuis {used_var}]")
             elif getattr(self, attr_name):
-                print(f"   {attr_name}: [CHARGÉ depuis .env]")
+                print(f"   {attr_name}: [DÉFINI par défaut]")
             else:
                 print(f"   {attr_name}: [NON DÉFINI]")
     

@@ -95,3 +95,37 @@ echo -e "${BLUE}🌐 URL: $FRONT_URL${NC}"
 echo ""
 echo -e "${YELLOW}📊 Monitoring:${NC}"
 echo "   gcloud logging tail --service=$PROD_FRONT_SERVICE_NAME"
+
+# Nettoyage Artifact Registry
+echo ""
+echo -e "${YELLOW}🧹 Nettoyage Artifact Registry...${NC}"
+REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/cloud-run-source-deploy/$PROD_FRONT_SERVICE_NAME"
+
+# Vérifier si le dépôt existe
+if gcloud artifacts repositories describe "cloud-run-source-deploy" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+    echo -e "${BLUE}  Dépôt trouvé: $REPOSITORY${NC}"
+    
+    # Lister toutes les images avec leurs timestamps
+    IMAGES=$(gcloud artifacts docker images list "$REPOSITORY" --sort-by="~UPDATE_TIME" --format="value(digest)" 2>/dev/null || echo "")
+    
+    if [ ! -z "$IMAGES" ]; then
+        echo -e "${BLUE}  Images trouvées: $(echo "$IMAGES" | wc -l)${NC}"
+        
+        # Garder seulement les 3 images les plus récentes
+        local count=0
+        for digest in $IMAGES; do
+            if [ $count -ge 3 ]; then
+                # Supprimer les images anciennes
+                echo -e "${YELLOW}    Suppression de l'image: ${digest:0:20}...${NC}"
+                gcloud artifacts docker images delete "$REPOSITORY@$digest" --quiet > /dev/null 2>&1
+            fi
+            ((count++))
+        done
+        
+        echo -e "${GREEN}  ✅ Nettoyage Artifact Registry terminé (3 images conservées)${NC}"
+    else
+        echo -e "${YELLOW}  ⚠️  Aucune image trouvée dans le dépôt${NC}"
+    fi
+else
+    echo -e "${YELLOW}  ⚠️  Dépôt Artifact Registry non trouvé${NC}"
+fi

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from supabase import create_client
 from datetime import datetime, timedelta
+from uuid import UUID
 import jwt
 import hashlib
 import time
@@ -513,3 +514,38 @@ async def logout(response: Response):
     logger.info("Déconnexion")
     response.delete_cookie(COOKIE_NAME)
     return {"success": True}
+
+
+# ============================================================================
+# DÉPENDANCES FASTAPI
+# ============================================================================
+
+def get_current_user(request: Request) -> dict:
+    """
+    Dépendance FastAPI pour récupérer l'utilisateur courant.
+    
+    Usage:
+        @router.get("/protected")
+        async def protected_route(current_user: dict = Depends(get_current_user)):
+            return {"user_id": current_user["sub"]}
+    """
+    return get_current_user_from_cookie(request)
+
+
+def get_org_id_from_user(current_user: dict = Depends(get_current_user)) -> UUID:
+    """
+    Dépendance FastAPI pour récupérer l'org_id de l'utilisateur courant.
+    
+    Usage:
+        @router.get("/items")
+        async def list_items(org_id: UUID = Depends(get_org_id_from_user)):
+            ...
+    """
+    from uuid import UUID
+    org_id = current_user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=401, detail="Organisation non définie")
+    try:
+        return UUID(org_id)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="org_id invalide")

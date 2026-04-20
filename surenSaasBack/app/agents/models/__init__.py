@@ -3,6 +3,8 @@ from app.agents.models.extraction_models import (
     ExtractionResult,
     ExtractionStatus,
     ExtractionField,
+    PageExtractionResult,
+    PageExtractionStatus,
     InvoiceLineItem,
     InvoiceData
 )

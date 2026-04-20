@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from app.api.auth import get_current_user_from_cookie, get_supabase, AuthenticationError, clear_session_cookie
 from app.core.logging import get_logger
+from app.services.file_storage_service import file_storage_service
+from fastapi.responses import RedirectResponse
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -416,3 +418,65 @@ async def delete_invoice(request: Request, org_id: str, invoice_id: str):
     except Exception as e:
         logger.error(f"Erreur suppression facture: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erreur lors de la suppression de la facture: {str(e)}")
+
+
+@router.get("/{invoice_id}/download")
+async def download_invoice_file(
+    request: Request,
+    org_id: str,
+    invoice_id: str
+):
+    """
+    Télécharge le fichier original d'une facture.
+    
+    Retourne une redirection 302 vers une URL signée R2 valide 1 heure.
+    """
+    try:
+        user = check_user_org_access(request, org_id)
+        
+        # Récupérer la facture avec son storage_path
+        result = get_supabase().table('invoices')\
+            .select('original_file_url, org_id, invoice_number')\
+            .eq('id', invoice_id)\
+            .eq('org_id', org_id)\
+            .single()\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Facture non trouvée")
+        
+        invoice = result.data
+        storage_path = invoice.get('original_file_url')
+        
+        if not storage_path:
+            raise HTTPException(status_code=404, detail="Fichier original non disponible pour cette facture")
+        
+        # Vérifier que le fichier existe sur R2
+        exists = await file_storage_service.file_exists(storage_path)
+        if not exists:
+            logger.warning(f"⚠️ Fichier facture non trouvé sur R2: {storage_path}")
+            raise HTTPException(status_code=404, detail="Fichier non trouvé sur le stockage")
+        
+        # Générer URL signée
+        filename = f"facture_{invoice.get('invoice_number', invoice_id)}.pdf"
+        download_url = await file_storage_service.get_presigned_url(
+            key=storage_path,
+            filename=filename,
+            expires=3600
+        )
+        
+        logger.info(
+            f"📥 Téléchargement facture\n"
+            f"   User: {user.get('email')}\n"
+            f"   Invoice: {invoice_id}\n"
+            f"   File: {filename}"
+        )
+        
+        # Rediriger vers l'URL signée R2
+        return RedirectResponse(url=download_url)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur téléchargement facture: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur lors du téléchargement: {str(e)}")

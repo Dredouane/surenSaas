@@ -16,7 +16,7 @@ RÈGLES ABSOLUES:
 2. Si une information est manquante ou illisible, utilise null (pas de chaîne vide)
 3. Sois précis et exhaustif - ne rate aucune information
 4. Conserve le format original des données (dates, montants, etc.)
-5. Numérote les pages si document multi-pages
+5. Pour les documents multi-pages, analyse TOUTES les pages
 
 FORMAT DE SORTIE:
 {
@@ -27,6 +27,45 @@ FORMAT DE SORTIE:
     "metadata": {
         "confidence": "high/medium/low",
         "pages_count": nombre_de_pages,
+        "extraction_notes": ["note1", "note2"]
+    }
+}
+"""
+
+MULTI_PAGE_EXTRACTION_PROMPT = """
+INSTRUCTIONS SPÉCIALES POUR DOCUMENTS MULTI-PAGES:
+
+1. ANALYSE COMPLÈTE:
+   - Analyse TOUTES les pages du document
+   - Identifie les informations réparties sur plusieurs pages
+   - Consolide les données similaires des différentes pages
+
+2. STRUCTURE PAR PAGE (optionnel):
+   - Si le document a une structure claire par page, tu peux organiser les données par page
+   - Exemple: page 1 = en-tête, page 2 = détails, page 3 = signature
+
+3. DONNÉES RÉPARTIES:
+   - Si une information commence sur une page et continue sur la suivante, regroupe-la
+   - Exemple: une liste d'articles qui s'étend sur plusieurs pages
+
+4. CONTRÔLE DE QUALITÉ:
+   - Vérifie la cohérence des données entre les pages
+   - Signale les incohérences dans metadata.issues
+
+FORMAT AVANCÉ POUR MULTI-PAGES (optionnel):
+{
+    "document_type": "type_de_document",
+    "extracted_data": {
+        // Données consolidées de toutes les pages
+    },
+    "page_specific_data": {
+        "page_1": { /* données page 1 */ },
+        "page_2": { /* données page 2 */ }
+    },
+    "metadata": {
+        "confidence": "high/medium/low",
+        "pages_count": nombre_de_pages,
+        "pages_analyzed": [1, 2, 3, ...],
         "extraction_notes": ["note1", "note2"]
     }
 }
@@ -193,12 +232,13 @@ CHAMPS À EXTRAIRE (JSON):
 """
 
 
-def get_prompt(document_type: str) -> str:
+def get_prompt(document_type: str, multi_page: bool = False) -> str:
     """
     Retourne le prompt approprié pour un type de document.
     
     Args:
         document_type: Type de document (invoice, receipt, contract, etc.)
+        multi_page: Inclure les instructions pour documents multi-pages
         
     Returns:
         Prompt système complet
@@ -211,14 +251,21 @@ def get_prompt(document_type: str) -> str:
     
     prompt = prompts.get(document_type, BASE_EXTRACTION_PROMPT)
     
-    # Toujours inclure les règles de base
-    return BASE_EXTRACTION_PROMPT + "\n\n" + prompt
+    # Construire le prompt complet
+    full_prompt = BASE_EXTRACTION_PROMPT + "\n\n" + prompt
+    
+    # Ajouter les instructions multi-pages si demandé
+    if multi_page:
+        full_prompt += "\n\n" + MULTI_PAGE_EXTRACTION_PROMPT
+    
+    return full_prompt
 
 
 def create_custom_prompt(
     document_type: str,
     fields: Dict[str, Any],
-    instructions: str = ""
+    instructions: str = "",
+    multi_page: bool = False
 ) -> str:
     """
     Crée un prompt personnalisé pour un type de document spécifique.
@@ -227,6 +274,7 @@ def create_custom_prompt(
         document_type: Type de document
         fields: Dictionnaire des champs attendus
         instructions: Instructions supplémentaires
+        multi_page: Inclure les instructions pour documents multi-pages
         
     Returns:
         Prompt personnalisé
@@ -240,7 +288,8 @@ def create_custom_prompt(
         }
     }
     
-    return f"""
+    # Construire le prompt de base
+    base_prompt = f"""
 {BASE_EXTRACTION_PROMPT}
 
 INSTRUCTIONS SPÉCIFIQUES:
@@ -249,3 +298,9 @@ INSTRUCTIONS SPÉCIFIQUES:
 SCHÉMA DE SORTIE ATTENDU:
 {schema}
 """
+    
+    # Ajouter les instructions multi-pages si demandé
+    if multi_page:
+        base_prompt += "\n\n" + MULTI_PAGE_EXTRACTION_PROMPT
+    
+    return base_prompt

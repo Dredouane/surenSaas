@@ -260,6 +260,117 @@ class TestGenericExtractor:
                 assert result.raw_data["extracted_data"]["supplier"]["name"] == "Matériaux Pro SARL"
     
     @pytest.mark.asyncio
+    async def test_extract_invoice_multi_page(self, sample_invoice_response):
+        """Test 3b: Extraction d'une facture multi-pages."""
+        from app.agents.generic_extractor import GenericDocumentExtractor
+        
+        # Mock le client Gemini
+        with patch('app.agents.generic_extractor.GeminiClient') as mock_client_class:
+            mock_client = Mock()
+            mock_client.model_name = "gemini-1.5-flash"
+            mock_client.extract_from_pdf_pages.return_value = [
+                {
+                    "page_number": 1,
+                    "response_text": json.dumps(sample_invoice_response),
+                    "status": "success"
+                },
+                {
+                    "page_number": 2,
+                    "response_text": json.dumps({
+                        "document_type": "invoice",
+                        "extracted_data": {
+                            "additional_info": {
+                                "notes": "Page 2 notes",
+                                "terms": "Payment terms"
+                            }
+                        },
+                        "metadata": {"confidence": "high"}
+                    }),
+                    "status": "success"
+                }
+            ]
+            mock_client_class.return_value = mock_client
+            
+            # Mock le file processor
+            with patch('app.agents.generic_extractor.FileProcessor') as mock_processor_class:
+                mock_processor = AsyncMock()
+                mock_processor.prepare_for_extraction.return_value = (b"pdf_data", "application/pdf")
+                mock_processor.close = AsyncMock()
+                mock_processor_class.return_value = mock_processor
+                
+                # Test avec extraction par pages
+                extractor = GenericDocumentExtractor(
+                    document_type="invoice",
+                    extract_by_pages=True,
+                    page_range=(1, 2)
+                )
+                result = await extractor.extract("facture_multi.pdf")
+                
+                assert result.status.value == "success"
+                assert result.document_type == "invoice"
+                assert len(result.page_results) == 2
+                assert result.pages_extracted == 2
+                assert result.pages_failed == 0
+                assert result.page_range_extracted == "1-2"
+                
+                # Vérifier les données consolidées
+                assert "extracted_data" in result.raw_data
+                assert "additional_info" in result.raw_data["extracted_data"]
+    
+    @pytest.mark.asyncio
+    async def test_extract_invoice_multi_page_with_fallback(self):
+        """Test 3c: Extraction multi-pages avec fallback sur erreur."""
+        from app.agents.generic_extractor import GenericDocumentExtractor
+        
+        # Mock le client Gemini
+        with patch('app.agents.generic_extractor.GeminiClient') as mock_client_class:
+            mock_client = Mock()
+            mock_client.model_name = "gemini-1.5-flash"
+            mock_client.extract_from_pdf_pages.return_value = [
+                {
+                    "page_number": 1,
+                    "response_text": json.dumps({
+                        "document_type": "invoice",
+                        "extracted_data": {"supplier": {"name": "Test"}},
+                        "metadata": {"confidence": "high"}
+                    }),
+                    "status": "success"
+                },
+                {
+                    "page_number": 2,
+                    "response_text": "",
+                    "status": "error",
+                    "error": "API error"
+                }
+            ]
+            mock_client_class.return_value = mock_client
+            
+            # Mock le file processor
+            with patch('app.agents.generic_extractor.FileProcessor') as mock_processor_class:
+                mock_processor = AsyncMock()
+                mock_processor.prepare_for_extraction.return_value = (b"pdf_data", "application/pdf")
+                mock_processor.close = AsyncMock()
+                mock_processor_class.return_value = mock_processor
+                
+                # Test avec fallback activé
+                extractor = GenericDocumentExtractor(
+                    document_type="invoice",
+                    extract_by_pages=True,
+                    fallback_on_page_error=True
+                )
+                result = await extractor.extract("facture_error.pdf")
+                
+                assert result.status.value == "success"  # Global success malgré une page en erreur
+                assert len(result.page_results) == 2
+                assert result.pages_extracted == 1
+                assert result.pages_failed == 1
+                
+                # Vérifier que la page 1 a réussi
+                page1 = result.get_page_data(1)
+                assert page1 is not None
+                assert page1.get("extracted_data", {}).get("supplier", {}).get("name") == "Test"
+    
+    @pytest.mark.asyncio
     async def test_extraction_with_error(self):
         """Test 3a: Gestion des erreurs d'extraction."""
         from app.agents.generic_extractor import GenericDocumentExtractor
@@ -438,6 +549,91 @@ class TestConstructionInvoiceAgent:
         assert any("TTC" in e for e in validation["errors"])
 
 
+# ==================== TESTS NOUVEAUX MODÈLES ====================
+
+class TestMultiPageModels:
+    """Tests pour les nouveaux modèles multi-pages."""
+    
+    def test_page_extraction_result(self):
+        """Test 6: Création PageExtractionResult."""
+        from app.agents.models import PageExtractionResult, PageExtractionStatus
+        
+        page_result = PageExtractionResult(
+            page_number=1,
+            extracted_data={"key": "value"},
+            status=PageExtractionStatus.SUCCESS,
+            confidence=0.9,
+            errors=[],
+            warnings=["warning1"]
+        )
+        
+        assert page_result.page_number == 1
+        assert page_result.extracted_data["key"] == "value"
+        assert page_result.status == PageExtractionStatus.SUCCESS
+        assert page_result.confidence == 0.9
+        assert len(page_result.warnings) == 1
+        
+        # Test conversion en dict
+        page_dict = page_result.to_dict()
+        assert page_dict["page_number"] == 1
+        assert page_dict["status"] == "success"
+    
+    def test_extraction_result_multi_page(self):
+        """Test 6a: ExtractionResult avec données multi-pages."""
+        from app.agents.models import ExtractionResult, ExtractionStatus, PageExtractionResult, PageExtractionStatus
+        from datetime import datetime
+        
+        page_results = [
+            PageExtractionResult(
+                page_number=1,
+                extracted_data={"supplier": "Test1"},
+                status=PageExtractionStatus.SUCCESS,
+                confidence=0.8
+            ),
+            PageExtractionResult(
+                page_number=2,
+                extracted_data={"amount": 100},
+                status=PageExtractionStatus.SUCCESS,
+                confidence=0.9
+            )
+        ]
+        
+        result = ExtractionResult(
+            document_type="invoice",
+            extraction_timestamp=datetime.now(),
+            source_file="test.pdf",
+            model_used="gemini",
+            raw_data={"extracted_data": {"consolidated": "data"}},
+            page_results=page_results,
+            pages_processed=2,
+            pages_extracted=2,
+            pages_failed=0,
+            page_range_extracted="1-2"
+        )
+        
+        assert result.document_type == "invoice"
+        assert len(result.page_results) == 2
+        assert result.pages_extracted == 2
+        assert result.pages_failed == 0
+        assert result.page_range_extracted == "1-2"
+        
+        # Test méthodes utilitaires
+        successful_pages = result.get_successful_pages()
+        assert len(successful_pages) == 2
+        
+        page1_data = result.get_page_data(1)
+        assert page1_data["supplier"] == "Test1"
+        
+        page_confidence = result.get_page_confidence_score()
+        assert 0.8 <= page_confidence <= 0.9
+        
+        # Test conversion en dict
+        result_dict = result.to_dict()
+        assert result_dict["pages_extracted"] == 2
+        assert "page_results" in result_dict
+        assert len(result_dict["page_results"]) == 2
+
+
 # ==================== TESTS HELPERS ====================
 
 class TestExtractorHelpers:
@@ -451,6 +647,23 @@ class TestExtractorHelpers:
         
         assert extractor.document_type == "invoice"
     
+    def test_create_invoice_extractor_multi_page(self):
+        """Test 5b: Création extracteur factures multi-pages."""
+        from app.agents.generic_extractor import create_invoice_extractor
+        
+        extractor = create_invoice_extractor(
+            page_range=(1, 3),
+            extract_by_pages=True,
+            max_pages=5,
+            fallback_on_page_error=True
+        )
+        
+        assert extractor.document_type == "invoice"
+        assert extractor.page_range == (1, 3)
+        assert extractor.extract_by_pages is True
+        assert extractor.max_pages == 5
+        assert extractor.fallback_on_page_error is True
+    
     def test_create_receipt_extractor(self):
         """Test 5a: Création extracteur tickets."""
         from app.agents.generic_extractor import create_receipt_extractor
@@ -460,7 +673,7 @@ class TestExtractorHelpers:
         assert extractor.document_type == "receipt"
     
     def test_create_custom_extractor(self):
-        """Test 5b: Création extracteur personnalisé."""
+        """Test 5c: Création extracteur personnalisé."""
         from app.agents.generic_extractor import create_custom_extractor
         
         extractor = create_custom_extractor(
@@ -474,6 +687,22 @@ class TestExtractorHelpers:
         
         assert extractor.document_type == "delivery_note"
         assert "delivery_note" in extractor.system_prompt
+    
+    def test_create_custom_extractor_multi_page(self):
+        """Test 5d: Création extracteur personnalisé multi-pages."""
+        from app.agents.generic_extractor import create_custom_extractor
+        
+        extractor = create_custom_extractor(
+            document_type="report",
+            fields={"title": "Titre", "sections": "Sections"},
+            instructions="Analyse complète",
+            extract_by_pages=True,
+            page_range=(1, 10)
+        )
+        
+        assert extractor.document_type == "report"
+        assert extractor.extract_by_pages is True
+        assert extractor.page_range == (1, 10)
 
 
 # ==================== EXÉCUTION ====================

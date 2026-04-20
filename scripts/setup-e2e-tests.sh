@@ -35,12 +35,10 @@ echo ""
 cd surenSaasBack
 source venv/bin/activate
 
-# Créer le fichier .env
-cat > .env << EOF
-SUPABASE_URL=${SUPABASE_URL}
-SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-JWT_SECRET=${JWT_SECRET}
-EOF
+# Exporter les variables d'environnement
+export SUPABASE_URL=${SUPABASE_URL}
+export SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+export JWT_SECRET=${JWT_SECRET}
 
 python3 << 'PYTHON_SCRIPT'
 import sys

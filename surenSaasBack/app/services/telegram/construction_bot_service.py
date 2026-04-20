@@ -245,9 +245,10 @@ class ConstructionBotService:
             )
             
             temp_file_path = await file_storage_service.store_file(
-                file_data, 
-                original_filename, 
-                org_id=org_id
+                file_data=file_data,
+                filename=original_filename,
+                org_id=org_id,
+                folder="telegram"
             )
             
             # Ã‰tape 3: Appeler l'agent OCR avec le fichier local

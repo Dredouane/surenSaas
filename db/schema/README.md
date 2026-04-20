@@ -36,14 +36,19 @@ Les migrations doivent être exécutées dans l'ordre numérique. Voici la séqu
 
 ### Phase 4 : Module Emails (020)
 17. **`020_email_tables.sql`** - Module d'ingestion et vectorisation des emails
+    - **Architecture** : Multi-tenant par aliasing Gmail (`REDACTED_EMAIL`)
+    - **Séparateur** : Configurable via `EMAIL_ALIAS_SEPARATOR` (défaut: `#`)
+    - **Extraction forward** : Détection et extraction du mail original (transparence Gmail)
+    - **Vectorisation** : Vertex AI text-embedding-004 + Matryoshka slicing (768 dims)
     - Crée extension `vector` (pgvector) pour embeddings
-    - Table `email_accounts` : Configuration Gmail OAuth par org
-    - Table `emails` : Stockage des emails avec métadonnées (contenu nettoyé via RAG Mail)
-    - Table `email_attachments` : Pièces jointes avec OCR
-    - Table `email_embeddings` : Vecteurs pour recherche sémantique (RAG)
+    - Table `email_accounts` : Configuration Gmail OAuth (compte unique partagé TEST/PROD)
+    - Table `emails` : Stockage avec routing (`company_id`, `delivered_to_alias`, `routing_status`)
+    - Table `email_attachments` : Pièces jointes avec OCR (hérite `company_id`)
+    - Table `email_embeddings` : Vecteurs 768 dims pour RAG (hérite `company_id`)
     - Types ENUM : `email_status`, `embedding_source`
     - Fonctions utilitaires : `search_similar_emails()`, `get_email_thread()`
     - **Prérequis** : Activer extension pgvector dans Supabase Dashboard
+    - **Routing strict** : Emails ignorés si alias invalide (pas de fallback)
 
 ### Phase 5 : Nettoyage (999)
 999. `999_cleanup_user_org_membership.sql` - Nettoyage de la table dépréciée

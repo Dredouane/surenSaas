@@ -41,16 +41,14 @@ else
     echo "⚠️  Aucun fichier .env.test trouvé"
 fi
 
-# Créer le fichier .env pour pydantic avec TOUTES les variables
-cat > .env << EOF
-SUPABASE_URL=${SUPABASE_URL}
-SUPABASE_SERVICE_KEY=${TEST_SUPABASE_SERVICE_KEY}
-JWT_SECRET=${JWT_SECRET}
-ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
-ENVIRONMENT=test
-SUREN_TEST_LOGIN=${SUREN_TEST_LOGIN}
-SUREN_TEST_PASSWORD=${SUREN_TEST_PASSWORD}
-EOF
+# Exporter les variables d'environnement pour que config.py les lise
+export ENVIRONMENT=test
+export SUPABASE_URL=${SUPABASE_URL}
+export SUPABASE_SERVICE_KEY=${TEST_SUPABASE_SERVICE_KEY}
+export JWT_SECRET=${JWT_SECRET}
+export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+export SUREN_TEST_LOGIN=${SUREN_TEST_LOGIN}
+export SUREN_TEST_PASSWORD=${SUREN_TEST_PASSWORD}
 
 # Vérifier les credentials de test
 if [ -n "$SUREN_TEST_LOGIN" ] && [ -n "$SUREN_TEST_PASSWORD" ]; then

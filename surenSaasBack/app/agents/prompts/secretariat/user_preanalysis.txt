@@ -1,0 +1,26 @@
+CONTEXTE DU THREAD:
+{{THREAD_CONTEXT}}
+
+NOUVEL EMAIL REÇU:
+{{CURRENT_EMAIL}}
+
+PIÈCES JOINTES (OCR):
+{{ATTACHMENTS_CONTEXT}}
+
+CONTEXTE RAG (Échanges similaires):
+{{RAG_CONTEXT}}
+
+INSTRUCTIONS:
+Analyse ce nouvel email dans le contexte de la conversation et fournis une réponse structurée en JSON:
+
+{
+  "status": "new|awaiting_response|awaiting_user|resolved|urgent|escalated",
+  "summary": "Résumé concis (2-3 phrases max) de la situation actuelle",
+  "context": "Éléments de contexte importants (historique, échanges précédents)",
+  "key_points": ["Point clé 1", "Point clé 2", "Point clé 3"],
+  "suggested_actions": ["Action suggérée 1", "Action suggérée 2"],
+  "urgency_reason": "Raison de l'urgence si applicable, sinon null",
+  "attachments_analysis": "Analyse des pièces jointes si pertinentes"
+}
+
+Réponds uniquement avec le JSON, sans texte avant ou après.

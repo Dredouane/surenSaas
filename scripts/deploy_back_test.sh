@@ -57,6 +57,18 @@ if [ ! -z "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64" ]; then
     HAS_GEMINI=true
 fi
 
+# Gmail OAuth2 (partagé test/prod - même compte Gmail)
+HAS_GMAIL=false
+if [ ! -z "$SUREN_GMAIL_OAUTH_CLIENT_ID" ] && [ ! -z "$SUREN_GMAIL_OAUTH_CLIENT_SECRET" ] && [ ! -z "$SUREN_GMAIL_OAUTH_REFRESH_TOKEN" ]; then
+    HAS_GMAIL=true
+fi
+
+# Cloudflare R2 (obligatoire - stockage de fichiers)
+HAS_R2=false
+if [ ! -z "$SUREN_GED_CLOUDFLARE_TOKEN" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_BUCKET_NAME" ]; then
+    HAS_R2=true
+fi
+
 if [ ${#MISSING_VARS[@]} -ne 0 ]; then
     echo -e "${RED}❌ Variables manquantes dans ~/.bashrc:${NC}"
     for var in "${MISSING_VARS[@]}"; do
@@ -84,6 +96,23 @@ if [ "$HAS_GEMINI" = true ]; then
 else
     echo -e "${YELLOW}⚠️  SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 non défini (Gemini désactivé)${NC}"
 fi
+if [ "$HAS_GMAIL" = true ]; then
+    echo -e "${GREEN}✅ SUREN_GMAIL_OAUTH_* trouvé (Module Emails activé)${NC}"
+else
+    echo -e "${YELLOW}⚠️  SUREN_GMAIL_OAUTH_* non défini (Module Emails désactivé)${NC}"
+fi
+if [ "$HAS_R2" = true ]; then
+    echo -e "${GREEN}✅ Credentials Cloudflare R2 trouvés (Stockage GED activé)${NC}"
+else
+    echo -e "${RED}❌ Credentials Cloudflare R2 manquants - Le stockage de fichiers ne fonctionnera pas${NC}"
+    echo "   Variables requises dans ~/.bashrc:"
+    echo "   - SUREN_GED_CLOUDFLARE_TOKEN"
+    echo "   - SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID"
+    echo "   - SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY"
+    echo "   - SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
+    echo "   - SUREN_GED_CLOUDFLARE_BUCKET_NAME"
+    exit 1
+fi
 
 # Vérifier les variables GCP
 if [ -z "$GCP_PROJECT_ID" ] || [ -z "$TEST_BACK_SERVICE_NAME" ]; then
@@ -98,12 +127,30 @@ create_or_update_secret() {
     local name=$1
     local value=$2
     
-    if gcloud secrets describe $name --project=$GCP_PROJECT_ID > /dev/null 2>&1; then
+    if gcloud secrets describe "$name" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
         echo -e "${YELLOW}  Mise à jour du secret: $name${NC}"
-        echo -n "$value" | gcloud secrets versions add $name --data-file=- --project=$GCP_PROJECT_ID > /dev/null 2>&1
+        echo -n "$value" | gcloud secrets versions add "$name" --data-file=- --project="$GCP_PROJECT_ID" > /dev/null 2>&1
+        
+        # Nettoyer les anciennes versions (garder uniquement la plus récente)
+        echo -e "${BLUE}  Nettoyage des anciennes versions...${NC}"
+        # Lister toutes les versions et supprimer les anciennes
+        local versions
+        versions=$(gcloud secrets versions list "$name" --project="$GCP_PROJECT_ID" --format="value(name)" --sort-by="~createTime" 2>/dev/null || echo "")
+        if [ ! -z "$versions" ]; then
+            local count=0
+            for version in $versions; do
+                if [ $count -ge 1 ]; then
+                    # Supprimer les versions anciennes (garder seulement la plus récente)
+                    gcloud secrets versions destroy "$version" --secret="$name" --project="$GCP_PROJECT_ID" --quiet > /dev/null 2>&1
+                    echo -e "${BLUE}    Version $version supprimée${NC}"
+                fi
+                ((count++))
+            done
+        fi
     else
         echo -e "${BLUE}  Création du secret: $name${NC}"
-        echo -n "$value" | gcloud secrets create $name --data-file=- --project=$GCP_PROJECT_ID > /dev/null 2>&1
+        echo -n "$value" | gcloud secrets create "$name" --data-file=- --project="$GCP_PROJECT_ID" \
+            --replication-policy user-managed --locations "$GCP_REGION" > /dev/null 2>&1
     fi
     echo -e "${GREEN}  ✅ $name${NC}"
 }
@@ -125,6 +172,24 @@ fi
 # Gemini (optionnel)
 if [ "$HAS_GEMINI" = true ]; then
     create_or_update_secret "test-google-gemini-credentials" "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64"
+fi
+
+# Gmail OAuth2 (optionnel, mais recommandé)
+if [ "$HAS_GMAIL" = true ]; then
+    create_or_update_secret "gmail-oauth-client-id" "$SUREN_GMAIL_OAUTH_CLIENT_ID"
+    create_or_update_secret "gmail-oauth-client-secret" "$SUREN_GMAIL_OAUTH_CLIENT_SECRET"
+    create_or_update_secret "gmail-oauth-refresh-token" "$SUREN_GMAIL_OAUTH_REFRESH_TOKEN"
+    # L'email account n'est pas un secret, mais on le stocke quand même pour centraliser
+    create_or_update_secret "gmail-account" "${SUREN_GMAIL_ACCOUNT:-REDACTED_EMAIL}"
+fi
+
+# Cloudflare R2 (obligatoire)
+if [ "$HAS_R2" = true ]; then
+    create_or_update_secret "r2-endpoint-url" "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
+    create_or_update_secret "r2-access-key-id" "$SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID"
+    create_or_update_secret "r2-secret-access-key" "$SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY"
+    create_or_update_secret "r2-token" "$SUREN_GED_CLOUDFLARE_TOKEN"
+    create_or_update_secret "r2-bucket-name" "$SUREN_GED_CLOUDFLARE_BUCKET_NAME"
 fi
 
 echo ""
@@ -175,6 +240,12 @@ fi
 if [ "$HAS_GEMINI" = true ]; then
     SECRETS="$SECRETS,TEST_GOOGLE_GEMINI_CREDENTIALS_B64=test-google-gemini-credentials:latest"
 fi
+if [ "$HAS_GMAIL" = true ]; then
+    SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
+fi
+if [ "$HAS_R2" = true ]; then
+    SECRETS="$SECRETS,R2_ENDPOINT_URL=r2-endpoint-url:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_TOKEN=r2-token:latest"
+fi
 
 gcloud run deploy $TEST_BACK_SERVICE_NAME \
     --source . \
@@ -213,3 +284,37 @@ echo "      export SUREN_TEST_API_BASE_URL=\"$BACK_URL\""
 echo ""
 echo -e "${YELLOW}🚀 Pour déployer le frontend:${NC}"
 echo "   ./scripts/deploy_front_test.sh"
+
+# Nettoyage Artifact Registry
+echo ""
+echo -e "${YELLOW}🧹 Nettoyage Artifact Registry...${NC}"
+REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/cloud-run-source-deploy/$TEST_BACK_SERVICE_NAME"
+
+# Vérifier si le dépôt existe
+if gcloud artifacts repositories describe "cloud-run-source-deploy" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+    echo -e "${BLUE}  Dépôt trouvé: $REPOSITORY${NC}"
+    
+    # Lister toutes les images avec leurs timestamps
+    IMAGES=$(gcloud artifacts docker images list "$REPOSITORY" --sort-by="~UPDATE_TIME" --format="value(digest)" 2>/dev/null || echo "")
+    
+    if [ ! -z "$IMAGES" ]; then
+        echo -e "${BLUE}  Images trouvées: $(echo "$IMAGES" | wc -l)${NC}"
+        
+        # Garder seulement les 3 images les plus récentes
+        local count=0
+        for digest in $IMAGES; do
+            if [ $count -ge 3 ]; then
+                # Supprimer les images anciennes
+                echo -e "${YELLOW}    Suppression de l'image: ${digest:0:20}...${NC}"
+                gcloud artifacts docker images delete "$REPOSITORY@$digest" --quiet > /dev/null 2>&1
+            fi
+            ((count++))
+        done
+        
+        echo -e "${GREEN}  ✅ Nettoyage Artifact Registry terminé (3 images conservées)${NC}"
+    else
+        echo -e "${YELLOW}  ⚠️  Aucune image trouvée dans le dépôt${NC}"
+    fi
+else
+    echo -e "${YELLOW}  ⚠️  Dépôt Artifact Registry non trouvé${NC}"
+fi

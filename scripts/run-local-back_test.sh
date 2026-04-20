@@ -49,20 +49,19 @@ echo "✅ Variables chargées depuis .env.test et ~/.bashrc"
 
 cd surenSaasBack
 
-# Créer un fichier .env temporaire avec les valeurs réelles
-# Utiliser TEST_JWT_SECRET depuis .bashrc ou une valeur par défaut
-JWT_SECRET=${TEST_JWT_SECRET:-local-dev-jwt-secret-not-for-production}
-SUPABASE_SERVICE_KEY=${TEST_SUPABASE_SERVICE_KEY:-}
+# Exporter les variables d'environnement pour que config.py les lise
+export ENVIRONMENT=test
+export SUPABASE_URL=${SUPABASE_URL}
+export SUPABASE_SERVICE_KEY=${TEST_SUPABASE_SERVICE_KEY:-}
+export JWT_SECRET=${TEST_JWT_SECRET:-local-dev-jwt-secret-not-for-production}
+export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+export SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT=${SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT:-}
+export SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID=${SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID:-}
+export SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY=${SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY:-}
+export SUREN_GED_CLOUDFLARE_TOKEN=${SUREN_GED_CLOUDFLARE_TOKEN:-}
+export SUREN_GED_CLOUDFLARE_BUCKET_NAME=${SUREN_GED_CLOUDFLARE_BUCKET_NAME:-}
 
-cat > .env << EOF
-SUPABASE_URL=${SUPABASE_URL}
-SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-JWT_SECRET=${JWT_SECRET}
-ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
-ENVIRONMENT=test
-EOF
-
-echo "📝 Fichier .env créé"
+echo "✅ Variables d'environnement exportées"
 
 # Activer le venv
 source venv/bin/activate
@@ -74,8 +73,10 @@ echo "=========================================="
 echo ""
 echo "Configuration:"
 echo "  Supabase URL: ${SUPABASE_URL:0:40}..."
-echo "  Service Key: $([ -n "$SUPABASE_SERVICE_KEY" ] && echo '✅ défini' || echo '❌ MANQUANT')"
+echo "  Service Key: $([ -n "$TEST_SUPABASE_SERVICE_KEY" ] && echo '✅ défini' || echo '❌ MANQUANT')"
 echo "  JWT Secret: $([ -n "$TEST_JWT_SECRET" ] && echo '✅ défini (depuis ~/.bashrc)' || echo '⚠️  Valeur par défaut (non sécurisé)')"
+echo "  Cloudflare R2: $([ -n "$SUREN_GED_CLOUDFLARE_TOKEN" ] && echo '✅ configuré' || echo '❌ MANQUANT - stockage fichiers désactivé')
+  R2 Bucket: ${SUREN_GED_CLOUDFLARE_BUCKET_NAME:-❌ NON DÉFINI}"
 echo ""
 echo "URL: http://localhost:8080"
 echo ""

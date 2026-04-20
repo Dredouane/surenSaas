@@ -1,185 +1,297 @@
 """
-Service de stockage de fichiers temporaire.
+Service de stockage de fichiers - Cloudflare R2 (S3-Compatible).
 
-Stockage local dans /tmp pour l'instant.
-À remplacer plus tard par S3 ou autre provider.
+Stockage full cloud sans dépendance au filesystem local.
+Utilise boto3 pour communiquer avec l'API S3 de Cloudflare R2.
+
+Structure des dossiers:
+    {environment}/org/{org_id}/{folder}/{timestamp}_{filename}
+    
+    Ex: test/org/xxx/invoices/20250115_143022_123456_facture.pdf
 """
 
-import os
-import shutil
-import tempfile
-from pathlib import Path
+import mimetypes
+from datetime import datetime
 from typing import Optional
-from datetime import datetime, timedelta
+from pathlib import Path
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from app.core.logging import get_logger
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
 
 
 class FileStorageService:
     """
-    Service de stockage de fichiers temporaire.
+    Service de stockage de fichiers sur Cloudflare R2.
     
-    Pour l'instant, stocke les fichiers dans /tmp.
-    À remplacer par un vrai service S3/Storage cloud plus tard.
+    Cette implémentation utilise boto3 pour stocker/récupérer des fichiers
+    sur R2 via l'API S3-compatible. Il n'y a plus de stockage local.
+    
+    Attributes:
+        s3_client: Client boto3 configuré pour R2
+        bucket_name: Nom du bucket R2
+        environment: Environnement courant (test/production)
     """
     
-    def __init__(self, base_path: str = "/tmp/surensaas"):
+    def __init__(self):
+        """Initialise le service avec les credentials R2."""
+        self.settings = get_settings()
+        self.environment = self.settings.environment.lower()
+        
+        # Vérifier que les credentials sont configurés
+        self._validate_credentials()
+        
+        # Initialiser le client S3 pour R2
+        self.s3_client = boto3.client(
+            's3',
+            endpoint_url=self.settings.r2_endpoint_url,
+            aws_access_key_id=self.settings.r2_access_key_id,
+            aws_secret_access_key=self.settings.r2_secret_access_key,
+            config=Config(signature_version='s3v4'),
+            region_name='auto'  # R2 n'utilise pas de régions
+        )
+        self.bucket_name = self.settings.r2_bucket_name
+        
+        logger.info(f"📁 FileStorageService initialisé (R2)")
+        logger.info(f"   Bucket: {self.bucket_name}")
+        logger.info(f"   Environnement: {self.environment}")
+        logger.info(f"   Endpoint: {self.settings.r2_endpoint_url}")
+    
+    def _validate_credentials(self):
+        """Vérifie que tous les credentials R2 sont configurés."""
+        required = [
+            ('r2_endpoint_url', self.settings.r2_endpoint_url),
+            ('r2_access_key_id', self.settings.r2_access_key_id),
+            ('r2_secret_access_key', self.settings.r2_secret_access_key),
+        ]
+        
+        missing = [name for name, value in required if not value]
+        
+        if missing:
+            error_msg = (
+                f"❌ Credentials Cloudflare R2 manquants: {', '.join(missing)}\n"
+                f"Veuillez configurer les variables dans ~/.bashrc:\n"
+                f"  - SUREN_GED_CLOUDFLARE_TOKEN\n"
+                f"  - SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID\n"
+                f"  - SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY\n"
+                f"  - SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+    
+    def _build_key(self, org_id: str, folder: str, filename: str) -> str:
         """
-        Initialise le service de stockage.
+        Construit la clé S3 avec préfixe environment.
+        
+        Format: {env}/org/{org_id}/{folder}/{timestamp}_{filename}
         
         Args:
-            base_path: Chemin de base pour le stockage temporaire
+            org_id: ID de l'organisation
+            folder: Dossier logique (emails, invoices, ao, telegram, general)
+            filename: Nom original du fichier
+            
+        Returns:
+            Clé S3 complète
         """
-        self.base_path = Path(base_path)
-        self.base_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"📁 FileStorageService initialisé: {self.base_path}")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        safe_filename = f"{timestamp}_{filename}"
+        return f"{self.environment}/org/{org_id}/{folder}/{safe_filename}"
+    
+    def _get_content_type(self, filename: str) -> str:
+        """Déduit le Content-Type depuis l'extension du fichier."""
+        content_type, _ = mimetypes.guess_type(filename)
+        return content_type or 'application/octet-stream'
     
     async def store_file(
         self, 
         file_data: bytes, 
         filename: str,
-        org_id: Optional[str] = None
+        org_id: Optional[str] = None,
+        folder: str = "general"
     ) -> str:
         """
-        Stocke un fichier temporairement.
+        Stocke un fichier sur R2.
         
         Args:
             file_data: Données binaires du fichier
-            filename: Nom du fichier
-            org_id: ID de l'organisation (pour isolation)
+            filename: Nom original du fichier
+            org_id: ID de l'organisation (obligatoire)
+            folder: Dossier logique (emails, invoices, ao, telegram, general)
             
         Returns:
-            Chemin local du fichier stocké
-        """
-        # Créer un sous-dossier par org si spécifié
-        if org_id:
-            target_dir = self.base_path / org_id
-        else:
-            target_dir = self.base_path / "general"
-        
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Ajouter timestamp pour éviter collisions
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        safe_filename = f"{timestamp}_{filename}"
-        
-        file_path = target_dir / safe_filename
-        
-        # Écrire le fichier
-        with open(file_path, 'wb') as f:
-            f.write(file_data)
-        
-        logger.info(f"💾 Fichier stocké: {file_path} ({len(file_data)} bytes)")
-        
-        return str(file_path)
-    
-    def get_file(self, file_path: str) -> Optional[bytes]:
-        """
-        Récupère un fichier.
-        
-        Args:
-            file_path: Chemin du fichier
+            Clé S3 complète (à sauvegarder en base de données)
             
-        Returns:
-            Données binaires ou None si fichier inexistant
+        Raises:
+            ValueError: Si org_id est manquant
+            ClientError: Si erreur lors de l'upload
         """
-        path = Path(file_path)
+        if not org_id:
+            raise ValueError("org_id est obligatoire pour le stockage R2")
         
-        if not path.exists():
-            logger.warning(f"⚠️ Fichier non trouvé: {file_path}")
-            return None
-        
-        with open(path, 'rb') as f:
-            return f.read()
-    
-    def delete_file(self, file_path: str) -> bool:
-        """
-        Supprime un fichier.
-        
-        Args:
-            file_path: Chemin du fichier
-            
-        Returns:
-            True si supprimé, False sinon
-        """
-        try:
-            path = Path(file_path)
-            if path.exists():
-                path.unlink()
-                logger.info(f"🗑️ Fichier supprimé: {file_path}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"❌ Erreur suppression fichier {file_path}: {e}")
-            return False
-    
-    def cleanup_old_files(self, max_age_hours: int = 24) -> int:
-        """
-        Nettoie les fichiers vieux de plus de X heures.
-        
-        Args:
-            max_age_hours: Âge maximum des fichiers en heures
-            
-        Returns:
-            Nombre de fichiers supprimés
-        """
-        deleted_count = 0
-        max_age = timedelta(hours=max_age_hours)
-        now = datetime.now()
+        key = self._build_key(org_id, folder, filename)
+        content_type = self._get_content_type(filename)
         
         try:
-            for org_dir in self.base_path.iterdir():
-                if org_dir.is_dir():
-                    for file_path in org_dir.iterdir():
-                        if file_path.is_file():
-                            # Vérifier l'âge du fichier
-                            stat = file_path.stat()
-                            file_age = now - datetime.fromtimestamp(stat.st_mtime)
-                            
-                            if file_age > max_age:
-                                file_path.unlink()
-                                deleted_count += 1
-                                logger.debug(f"🧹 Fichier nettoyé: {file_path}")
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=file_data,
+                ContentType=content_type
+            )
             
-            logger.info(f"🧹 Nettoyage terminé: {deleted_count} fichiers supprimés")
+            logger.info(f"💾 Fichier stocké sur R2: {key} ({len(file_data)} bytes)")
+            return key
             
-        except Exception as e:
-            logger.error(f"❌ Erreur nettoyage fichiers: {e}")
-        
-        return deleted_count
+        except ClientError as e:
+            logger.error(f"❌ Erreur upload R2: {e}")
+            raise
     
-    def get_file_info(self, file_path: str) -> Optional[dict]:
+    async def get_file(self, key: str) -> Optional[bytes]:
         """
-        Retourne les informations d'un fichier.
+        Récupère un fichier depuis R2.
         
         Args:
-            file_path: Chemin du fichier
+            key: Clé S3 du fichier
             
         Returns:
-            Dictionnaire avec infos ou None
+            Données binaires du fichier ou None si inexistant
         """
         try:
-            path = Path(file_path)
-            if not path.exists():
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name, 
+                Key=key
+            )
+            return response['Body'].read()
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.warning(f"⚠️ Fichier non trouvé sur R2: {key}")
                 return None
+            logger.error(f"❌ Erreur récupération fichier R2: {e}")
+            raise
+    
+    async def get_presigned_url(
+        self, 
+        key: str, 
+        expires: int = 3600,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        Génère une URL signée pour téléchargement.
+        
+        L'URL signée permet d'accéder au fichier directement sur R2
+        sans passer par l'API backend. Elle expire après un certain temps.
+        
+        Args:
+            key: Clé S3 du fichier
+            expires: Durée de validité en secondes (défaut: 3600 = 1h)
+            filename: Nom du fichier pour le header Content-Disposition
             
-            stat = path.stat()
+        Returns:
+            URL signée complète
+        """
+        params = {
+            'Bucket': self.bucket_name,
+            'Key': key
+        }
+        
+        if filename:
+            # Permet au navigateur de suggérer ce nom lors du téléchargement
+            params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
+        
+        try:
+            url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params=params,
+                ExpiresIn=expires
+            )
+            
+            logger.debug(f"🔗 URL signée générée pour {key} (expire dans {expires}s)")
+            return url
+            
+        except ClientError as e:
+            logger.error(f"❌ Erreur génération URL signée: {e}")
+            raise
+    
+    async def delete_file(self, key: str) -> bool:
+        """
+        Supprime un fichier de R2.
+        
+        Args:
+            key: Clé S3 du fichier
+            
+        Returns:
+            True si supprimé avec succès, False sinon
+        """
+        try:
+            self.s3_client.delete_object(
+                Bucket=self.bucket_name, 
+                Key=key
+            )
+            logger.info(f"🗑️ Fichier supprimé de R2: {key}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"❌ Erreur suppression fichier R2 {key}: {e}")
+            return False
+    
+    async def file_exists(self, key: str) -> bool:
+        """
+        Vérifie si un fichier existe sur R2.
+        
+        Args:
+            key: Clé S3 du fichier
+            
+        Returns:
+            True si le fichier existe
+        """
+        try:
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=key
+            )
+            return True
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return False
+            raise
+    
+    def get_file_info(self, key: str) -> Optional[dict]:
+        """
+        Retourne les informations d'un fichier sur R2.
+        
+        Args:
+            key: Clé S3 du fichier
+            
+        Returns:
+            Dictionnaire avec infos ou None si fichier inexistant
+        """
+        try:
+            response = self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=key
+            )
             
             return {
-                "path": str(path),
-                "filename": path.name,
-                "size_bytes": stat.st_size,
-                "size_mb": round(stat.st_size / 1024 / 1024, 2),
-                "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "key": key,
+                "size_bytes": response.get('ContentLength', 0),
+                "size_mb": round(response.get('ContentLength', 0) / 1024 / 1024, 2),
+                "content_type": response.get('ContentType', 'unknown'),
+                "last_modified": response.get('LastModified').isoformat() if response.get('LastModified') else None,
             }
             
-        except Exception as e:
-            logger.error(f"❌ Erreur récupération info fichier: {e}")
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return None
+            logger.error(f"❌ Erreur récupération info fichier R2: {e}")
             return None
 
 
-# Singleton
+# Singleton instance
 file_storage_service = FileStorageService()
