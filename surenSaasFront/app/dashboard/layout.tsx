@@ -21,6 +21,7 @@ import {
   ChevronDown,
   LogOut,
   FileSearch,
+  Construction,
 } from "lucide-react";
 
 interface DashboardLayoutProps {
@@ -34,6 +35,7 @@ const getNavigation = (isAdmin: boolean) => [
   { name: "Appels d'Offres", href: "/dashboard/ao", icon: FileSearch },
   { name: "Factures", href: "/dashboard/invoices", icon: FileText },
   { name: "Clients", href: "/dashboard/clients", icon: Users },
+  { name: "Gestion chantiers", href: "/dashboard/chantiers", icon: Construction },
   { name: "Paramètres", href: "/dashboard/settings", icon: Settings },
   ...(isAdmin ? [{ name: "Administration", href: "/dashboard/settings/admin/users", icon: Settings }] : []),
 ];

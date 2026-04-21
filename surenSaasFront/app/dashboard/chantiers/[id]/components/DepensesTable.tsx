@@ -1,0 +1,316 @@
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Plus,
+  Search,
+  Filter,
+  DollarSign,
+  Calendar,
+  Building,
+  Package,
+} from 'lucide-react';
+import { Depense } from '@/types/chantier';
+
+interface DepensesTableProps {
+  chantierId: string;
+  depenses: Depense[];
+}
+
+export default function DepensesTable({ chantierId, depenses }: DepensesTableProps) {
+  const [search, setSearch] = useState('');
+  const [filterCategorie, setFilterCategorie] = useState('all');
+  const [filterFournisseur, setFilterFournisseur] = useState('all');
+
+  // Filtrer les dépenses
+  const filteredDepenses = depenses.filter(depense => {
+    if (search && !depense.description.toLowerCase().includes(search.toLowerCase())) {
+      return false;
+    }
+    if (filterCategorie !== 'all' && depense.categorie !== filterCategorie) {
+      return false;
+    }
+    if (filterFournisseur !== 'all' && !depense.fournisseur.toLowerCase().includes(filterFournisseur.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+
+  // Calculer les totaux
+  const totalDepenses = filteredDepenses.reduce((total, depense) => total + depense.montant, 0);
+  
+  // Calculer par catégorie
+  const totalSousTraitant = filteredDepenses
+    .filter(d => d.categorie === 'sous_traitant')
+    .reduce((total, d) => total + d.montant, 0);
+  
+  const totalFournisseur = filteredDepenses
+    .filter(d => d.categorie === 'fournisseur')
+    .reduce((total, d) => total + d.montant, 0);
+  
+  const totalAutre = filteredDepenses
+    .filter(d => d.categorie === 'autre')
+    .reduce((total, d) => total + d.montant, 0);
+
+  // Liste unique des fournisseurs
+  const fournisseurs = Array.from(new Set(depenses.map(d => d.fournisseur)));
+
+  // Formater une date
+  const formatDate = (dateString: string | Date) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR');
+  };
+
+  // Formater un montant
+  const formatMontant = (montant: number) => {
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(montant);
+  };
+
+  // Obtenir la couleur du badge selon la catégorie
+  const getCategorieBadge = (categorie: string) => {
+    switch (categorie) {
+      case 'sous_traitant':
+        return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Sous-traitant</Badge>;
+      case 'fournisseur':
+        return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Fournisseur</Badge>;
+      case 'autre':
+        return <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">Autre</Badge>;
+      default:
+        return <Badge variant="outline">{categorie}</Badge>;
+    }
+  };
+
+  // Handler pour ajouter une dépense
+  const handleAddDepense = () => {
+    alert('Fonctionnalité d\'ajout à implémenter dans la prochaine itération');
+  };
+
+  // Handler pour réinitialiser les filtres
+  const handleResetFilters = () => {
+    setSearch('');
+    setFilterCategorie('all');
+    setFilterFournisseur('all');
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <CardTitle>Dépenses chantier</CardTitle>
+            <p className="text-sm text-muted-foreground mt-2">
+              {filteredDepenses.length} dépense{filteredDepenses.length > 1 ? 's' : ''} • Total: {formatMontant(totalDepenses)}
+            </p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button onClick={handleAddDepense} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Ajouter une dépense
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {/* Filtres */}
+        <div className="flex flex-col lg:flex-row gap-4 mb-6 p-4 border rounded-lg bg-muted/20">
+          <div className="flex-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Rechercher par description..."
+                className="pl-10"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Select
+              value={filterCategorie}
+              onValueChange={setFilterCategorie}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Catégorie" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes catégories</SelectItem>
+                <SelectItem value="sous_traitant">Sous-traitant</SelectItem>
+                <SelectItem value="fournisseur">Fournisseur</SelectItem>
+                <SelectItem value="autre">Autre</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Select
+              value={filterFournisseur}
+              onValueChange={setFilterFournisseur}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Fournisseur" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous fournisseurs</SelectItem>
+                {fournisseurs.map(fournisseur => (
+                  <SelectItem key={fournisseur} value={fournisseur}>
+                    {fournisseur}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            <Button
+              variant="outline"
+              onClick={handleResetFilters}
+              className="gap-2"
+            >
+              <Filter className="h-4 w-4" />
+              Réinitialiser
+            </Button>
+          </div>
+        </div>
+
+        {/* Statistiques rapides */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="p-4 border rounded-lg bg-blue-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-800">Sous-traitants</p>
+                <p className="text-2xl font-bold text-blue-900">{formatMontant(totalSousTraitant)}</p>
+              </div>
+              <Building className="h-8 w-8 text-blue-600" />
+            </div>
+          </div>
+          
+          <div className="p-4 border rounded-lg bg-green-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-green-800">Fournisseurs</p>
+                <p className="text-2xl font-bold text-green-900">{formatMontant(totalFournisseur)}</p>
+              </div>
+              <Package className="h-8 w-8 text-green-600" />
+            </div>
+          </div>
+          
+          <div className="p-4 border rounded-lg bg-gray-50">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-800">Autres dépenses</p>
+                <p className="text-2xl font-bold text-gray-900">{formatMontant(totalAutre)}</p>
+              </div>
+              <DollarSign className="h-8 w-8 text-gray-600" />
+            </div>
+          </div>
+        </div>
+
+        {filteredDepenses.length === 0 ? (
+          <div className="text-center py-12">
+            <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-medium">Aucune dépense trouvée</h3>
+            <p className="text-muted-foreground mt-2">
+              Aucune dépense ne correspond à vos critères de recherche.
+            </p>
+            <Button onClick={handleResetFilters} className="mt-4">
+              Réinitialiser les filtres
+            </Button>
+          </div>
+        ) : (
+          <div className="rounded-md border overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">Date</TableHead>
+                    <TableHead>Fournisseur</TableHead>
+                    <TableHead className="w-[120px]">Catégorie</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-right w-[150px]">Montant (€ HT)</TableHead>
+                    <TableHead className="w-[120px]">Facture</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredDepenses.map((depense) => (
+                    <TableRow key={depense.id} className="hover:bg-muted/50">
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-muted-foreground" />
+                          {formatDate(depense.date)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{depense.fournisseur}</TableCell>
+                      <TableCell>{getCategorieBadge(depense.categorie)}</TableCell>
+                      <TableCell>{depense.description}</TableCell>
+                      <TableCell className="text-right font-bold">
+                        <div className="flex items-center justify-end gap-2">
+                          <DollarSign className="h-4 w-4 text-muted-foreground" />
+                          {formatMontant(depense.montant)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm text-muted-foreground">
+                          {depense.factureRef || '—'}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="sm" className="w-full">
+                          Voir détails
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  
+                  {/* Ligne de total */}
+                  <TableRow className="bg-muted/30">
+                    <TableCell colSpan={4} className="text-right font-bold">
+                      Total dépenses:
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-lg">
+                      {formatMontant(totalDepenses)}
+                    </TableCell>
+                    <TableCell colSpan={2}></TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+        
+        {/* Note */}
+        <div className="mt-6 text-sm text-muted-foreground">
+          <p>
+            <strong>Note:</strong> Ce tableau reproduit exactement la structure de l'Excel "Dépenses chantier".
+            Les 13 lignes correspondent aux dépenses du chantier CRF.
+          </p>
+          <p className="mt-2">
+            Les dépenses sont classées par catégorie (Sous-traitant, Fournisseur, Autre) comme dans le fichier Excel.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
