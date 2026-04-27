@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -28,18 +28,78 @@ import {
   Calendar,
   Building,
   Package,
+  Clock,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Depense } from '@/types/chantier';
+import { scrollToDetail } from '@/lib/scroll-to-detail';
 
 interface DepensesTableProps {
   chantierId: string;
-  depenses: Depense[];
+  orgId: string;
+  onRefresh?: () => void;
 }
 
-export default function DepensesTable({ chantierId, depenses }: DepensesTableProps) {
+export default function DepensesTable({ chantierId, orgId, onRefresh }: DepensesTableProps) {
+  const [depenses, setDepenses] = useState<Depense[]>([]);
   const [search, setSearch] = useState('');
   const [filterCategorie, setFilterCategorie] = useState('all');
   const [filterFournisseur, setFilterFournisseur] = useState('all');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [selectedDepense, setSelectedDepense] = useState<Depense | null>(null);
+  const [editDepenseMode, setEditDepenseMode] = useState(false);
+  const [editDepenseForm, setEditDepenseForm] = useState({ fournisseur: '', description: '', montant: '', categorie: 'autre', date: '' });
+  const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
+  const [invoiceItemsLoading, setInvoiceItemsLoading] = useState(false);
+  const [newDepense, setNewDepense] = useState({
+    fournisseur: '',
+    description: '',
+    montant: '',
+    categorie: 'autre',
+  });
+
+  useEffect(() => {
+    fetchDepenses();
+  }, [chantierId]);
+
+  const fetchDepenses = async () => {
+    try {
+      const res = await fetch(`/api/v1/chantiers/${chantierId}/depenses?org_id=${orgId}`, {
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDepenses(data.map((d: any) => ({
+          id: d.id,
+          chantierId: d.chantier_id,
+          date: d.date || d.created_at,
+          fournisseur: d.fournisseur || '',
+          categorie: d.categorie || 'autre',
+          description: d.description || '',
+          montant: d.montant,
+          factureRef: d.facture_ref,
+          statut: d.statut || 'validee',
+          validePar: d.valide_par || '',
+          invoiceId: d.invoice_id,
+          createdAt: d.created_at,
+          updatedAt: d.updated_at || d.created_at,
+        })));
+      }
+    } catch (err) {
+      console.error('Erreur chargement depenses:', err);
+    }
+  };
 
   // Filtrer les dépenses
   const filteredDepenses = depenses.filter(depense => {
@@ -104,9 +164,38 @@ export default function DepensesTable({ chantierId, depenses }: DepensesTablePro
     }
   };
 
-  // Handler pour ajouter une dépense
-  const handleAddDepense = () => {
-    alert('Fonctionnalité d\'ajout à implémenter dans la prochaine itération');
+  // Handler pour créer une dépense via dialog
+  const handleCreateDepense = async () => {
+    if (!newDepense.fournisseur.trim() || !newDepense.description.trim() || !newDepense.montant) {
+      alert('Veuillez remplir le fournisseur, la description et le montant');
+      return;
+    }
+    const montant = parseFloat(newDepense.montant);
+    if (isNaN(montant) || montant <= 0) {
+      alert('Montant invalide');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/v1/chantiers/${chantierId}/depenses?org_id=${orgId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: new Date().toISOString().split('T')[0],
+          fournisseur: newDepense.fournisseur,
+          categorie: newDepense.categorie,
+          description: newDepense.description,
+          montant,
+        }),
+      });
+      if (!res.ok) throw new Error('Erreur création dépense');
+      setShowCreateDialog(false);
+      setNewDepense({ fournisseur: '', description: '', montant: '', categorie: 'autre' });
+      fetchDepenses();
+      onRefresh?.();
+    } catch (err) {
+      alert('Erreur lors de la création : ' + (err instanceof Error ? err.message : 'Erreur inconnue'));
+    }
   };
 
   // Handler pour réinitialiser les filtres
@@ -128,10 +217,71 @@ export default function DepensesTable({ chantierId, depenses }: DepensesTablePro
           </div>
           
           <div className="flex flex-col sm:flex-row gap-3">
-            <Button onClick={handleAddDepense} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Ajouter une dépense
-            </Button>
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Ajouter une dépense
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Nouvelle dépense</DialogTitle>
+                  <DialogDescription>Ajouter une dépense au chantier.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Fournisseur *</Label>
+                    <Input
+                      placeholder="Nom du fournisseur"
+                      value={newDepense.fournisseur}
+                      onChange={(e) => setNewDepense({...newDepense, fournisseur: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description *</Label>
+                    <Input
+                      placeholder="Description de la dépense"
+                      value={newDepense.description}
+                      onChange={(e) => setNewDepense({...newDepense, description: e.target.value})}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Montant HT (€) *</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={newDepense.montant}
+                        onChange={(e) => setNewDepense({...newDepense, montant: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Catégorie</Label>
+                      <Select
+                        value={newDepense.categorie}
+                        onValueChange={(v) => setNewDepense({...newDepense, categorie: v})}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sous_traitant">Sous-traitant</SelectItem>
+                          <SelectItem value="fournisseur">Fournisseur</SelectItem>
+                          <SelectItem value="autre">Autre</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Annuler</Button>
+                  <Button onClick={handleCreateDepense}>Créer la dépense</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </CardHeader>
@@ -250,6 +400,7 @@ export default function DepensesTable({ chantierId, depenses }: DepensesTablePro
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right w-[150px]">Montant (€ HT)</TableHead>
                     <TableHead className="w-[120px]">Facture</TableHead>
+                    <TableHead className="w-[110px]">Statut</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -277,9 +428,53 @@ export default function DepensesTable({ chantierId, depenses }: DepensesTablePro
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" className="w-full">
-                          Voir détails
-                        </Button>
+                        {depense.statut === 'en_attente' ? (
+                          <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200"><Clock className="w-3 h-3 mr-1" /> En attente</Badge>
+                        ) : depense.statut === 'validee' ? (
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200"><CheckCircle className="w-3 h-3 mr-1" /> Validée</Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200"><XCircle className="w-3 h-3 mr-1" /> Rejetée</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={async () => {
+                            setSelectedDepense(depense);
+                            scrollToDetail();
+                            setInvoiceItems([]);
+                            if (depense.invoiceId) {
+                              setInvoiceItemsLoading(true);
+                              try {
+                                const invRes = await fetch(`/api/v1/invoices/${depense.invoiceId}?org_id=${orgId}`, { credentials: 'include' });
+                                if (invRes.ok) {
+                                  const inv = await invRes.json();
+                                  setInvoiceItems(inv.items || []);
+                                }
+                              } catch (e) { console.error('Erreur chargement lignes facture:', e); }
+                              setInvoiceItemsLoading(false);
+                            }
+                          }}>Détails</Button>
+                          {depense.statut === 'en_attente' && (
+                            <>
+                              <Button variant="ghost" size="sm" className="text-green-600" onClick={async () => {
+                                await fetch(`/api/v1/chantiers/${chantierId}/depenses/${depense.id}?org_id=${orgId}`, {
+                                  method: 'PUT', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ statut: 'validee' }),
+                                });
+                                fetchDepenses();
+                              }}>Valider</Button>
+                              <Button variant="ghost" size="sm" className="text-red-600" onClick={async () => {
+                                await fetch(`/api/v1/chantiers/${chantierId}/depenses/${depense.id}?org_id=${orgId}`, {
+                                  method: 'PUT', credentials: 'include',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ statut: 'rejetee' }),
+                                });
+                                fetchDepenses();
+                              }}>Rejeter</Button>
+                            </>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -300,17 +495,109 @@ export default function DepensesTable({ chantierId, depenses }: DepensesTablePro
           </div>
         )}
         
-        {/* Note */}
-        <div className="mt-6 text-sm text-muted-foreground">
-          <p>
-            <strong>Note:</strong> Ce tableau reproduit exactement la structure de l'Excel "Dépenses chantier".
-            Les 13 lignes correspondent aux dépenses du chantier CRF.
-          </p>
-          <p className="mt-2">
-            Les dépenses sont classées par catégorie (Sous-traitant, Fournisseur, Autre) comme dans le fichier Excel.
-          </p>
-        </div>
       </CardContent>
+
+      {/* Carte détail dépense en bas */}
+      {selectedDepense && (
+        <Card id="detail-card" className="mt-6">
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5" />
+                Détail de la dépense
+              </CardTitle>
+              <div className="flex gap-2">
+                {editDepenseMode && <Button size="sm" onClick={async () => {
+                  await fetch(`/api/v1/chantiers/${chantierId}/depenses/${selectedDepense.id}?org_id=${orgId}`, {
+                    method: 'PUT', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...editDepenseForm, montant: parseFloat(editDepenseForm.montant) }),
+                  });
+                  setEditDepenseMode(false);
+                  fetchDepenses();
+                }}>Sauvegarder</Button>}
+                <Button variant={editDepenseMode ? "outline" : "default"} size="sm" onClick={() => {
+                  if (!editDepenseMode) {
+                    setEditDepenseForm({
+                      fournisseur: selectedDepense.fournisseur,
+                      description: selectedDepense.description,
+                      montant: String(selectedDepense.montant),
+                      categorie: selectedDepense.categorie,
+                      date: typeof selectedDepense.date === 'string' ? selectedDepense.date.split('T')[0] : '',
+                    });
+                  }
+                  setEditDepenseMode(!editDepenseMode);
+                }}>{editDepenseMode ? 'Annuler' : 'Modifier'}</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedDepense(null); setEditDepenseMode(false); }}>Fermer</Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {editDepenseMode ? (
+              <>
+                <div className="space-y-2"><Label>Fournisseur</Label><Input value={editDepenseForm.fournisseur} onChange={(e) => setEditDepenseForm({...editDepenseForm, fournisseur: e.target.value})} /></div>
+                <div className="space-y-2"><Label>Description</Label><Input value={editDepenseForm.description} onChange={(e) => setEditDepenseForm({...editDepenseForm, description: e.target.value})} /></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2"><Label>Montant HT</Label><Input type="number" step="0.01" value={editDepenseForm.montant} onChange={(e) => setEditDepenseForm({...editDepenseForm, montant: e.target.value})} /></div>
+                  <div className="space-y-2"><Label>Date</Label><Input type="date" value={editDepenseForm.date} onChange={(e) => setEditDepenseForm({...editDepenseForm, date: e.target.value})} /></div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Catégorie</Label>
+                  <Select value={editDepenseForm.categorie} onValueChange={(v) => setEditDepenseForm({...editDepenseForm, categorie: v})}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sous_traitant">Sous-traitant</SelectItem>
+                      <SelectItem value="fournisseur">Fournisseur</SelectItem>
+                      <SelectItem value="autre">Autre</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div><Label>Fournisseur</Label><p className="font-medium">{selectedDepense.fournisseur}</p></div>
+                  <div><Label>Catégorie</Label><p>{getCategorieBadge(selectedDepense.categorie)}</p></div>
+                  <div className="md:col-span-2"><Label>Description</Label><p>{selectedDepense.description}</p></div>
+                  <div><Label>Montant HT</Label><p className="text-lg font-bold">{formatMontant(selectedDepense.montant)}</p></div>
+                  <div><Label>Date</Label><p>{formatDate(selectedDepense.date)}</p></div>
+                  <div><Label>Statut</Label><p>{selectedDepense.statut === 'en_attente' ? 'En attente' : selectedDepense.statut === 'validee' ? 'Validée' : 'Rejetée'}</p></div>
+                  {selectedDepense.factureRef && <div><Label>Réf. facture</Label><p>{selectedDepense.factureRef}</p></div>}
+                </div>
+              )}
+              {selectedDepense.invoiceId && (
+                <div className="border-t pt-4 mt-4">
+                  <Label className="text-base font-medium mb-3 block">Lignes de facture</Label>
+                  {invoiceItemsLoading ? (
+                    <p className="text-sm text-muted-foreground">Chargement...</p>
+                  ) : invoiceItems.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Aucune ligne détaillée</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Description</TableHead>
+                          <TableHead className="text-right">Qté</TableHead>
+                          <TableHead className="text-right">PU</TableHead>
+                          <TableHead className="text-right">Total HT</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {invoiceItems.map((item: any, i: number) => (
+                          <TableRow key={i}>
+                            <TableCell>{item.description}</TableCell>
+                            <TableCell className="text-right">{item.quantity}</TableCell>
+                            <TableCell className="text-right">{item.unit_price?.toFixed(2)}€</TableCell>
+                            <TableCell className="text-right">{item.total_ht?.toFixed(2)}€</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+              )}
+          </CardContent>
+        </Card>
+      )}
     </Card>
   );
 }

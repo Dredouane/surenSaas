@@ -70,18 +70,17 @@ class NotificationService:
         action_url: Optional[str] = None
     ) -> Dict[str, Any]:
         """Envoie une notification Telegram."""
-        # Récupérer le telegram_user_id
+        # Récupérer le telegram_id via user_id (FK vers auth.users)
         telegram_user = self.supabase.table('telegram_users') \
             .select('telegram_id') \
-            .eq('id', user_id) \
+            .eq('user_id', user_id) \
             .eq('notification_enabled', True) \
-            .single() \
             .execute()
         
-        if not telegram_user.data:
+        if not telegram_user.data or len(telegram_user.data) == 0:
             return {'sent': False, 'reason': 'user_not_linked_to_telegram'}
         
-        telegram_id = telegram_user.data['telegram_id']
+        telegram_id = telegram_user.data[0]['telegram_id']
         
         # Construire le message
         full_message = f"📋 *{title}*\n\n{message}"
@@ -152,8 +151,9 @@ class NotificationService:
             Résumé des notifications envoyées
         """
         # Récupérer les gérants (admins) de l'org
+        # Changement: sélectionne 'id' au lieu de 'user_id' pour correspondre à la table 'users'
         managers = self.supabase.table('users') \
-            .select('user_id, users:user_id(email, full_name)') \
+            .select('id') \
             .eq('org_id', org_id) \
             .eq('role', 'admin') \
             .execute()
@@ -165,7 +165,7 @@ class NotificationService:
         amount_str = f"{amount_ttc:.2f}€" if amount_ttc else "montant non précisé"
         title = "Nouvelle facture en attente"
         message = (
-            f"Une facture de *{supplier_name}* pour *{amount_str}* "
+            f"Une facture de *{supplier_name}* pour *{amount_ttc:.2f}*€ "
             f"est en attente de validation."
         )
         
@@ -173,7 +173,7 @@ class NotificationService:
         sent_count = 0
         for manager in managers.data:
             result = await self.send_to_user(
-                user_id=manager['user_id'],
+                user_id=manager['id'],
                 title=title,
                 message=message,
                 action_url=f"/{org_id}/construction/invoices/{invoice_id}",

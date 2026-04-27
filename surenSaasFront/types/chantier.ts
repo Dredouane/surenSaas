@@ -4,6 +4,17 @@ export type OperationSource = 'telegram_voice' | 'telegram_photo' | 'telegram_te
 export type OperationStatut = 'en_attente' | 'valide' | 'rejete';
 export type AuditAction = 'creation' | 'modification' | 'validation' | 'rejet' | 'suppression';
 
+// Nouveaux types pour les extensions
+export type ReceptionStatut = 'planifiee' | 'en_cours' | 'terminee' | 'annulee';
+export type ReceptionType = 'livraison' | 'validation' | 'probleme' | 'suivi';
+export type TacheStatut = 'en_attente' | 'en_cours' | 'terminee' | 'annulee';
+export type TacheType = 'information' | 'action' | 'validation' | 'rapport';
+export type TacheSource = 'direction' | 'systeme' | 'client';
+export type TachePriorite = 'basse' | 'moyenne' | 'haute';
+export type RessourceType = 'homme' | 'machine';
+export type PeriodePointage = 'matin' | 'apres_midi' | 'journee';
+export type NotificationType = 'tache' | 'reception' | 'pointage' | 'validation' | 'alerte' | 'info' | 'urgence';
+
 export interface Chantier {
   id: string;
   ref: string;
@@ -48,6 +59,9 @@ export interface Depense {
   description: string;
   montant: number;
   factureRef?: string;
+  invoiceId?: string;
+  statut?: 'en_attente' | 'validee' | 'rejetee';
+  validePar?: string;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -88,6 +102,108 @@ export interface ChantierWithDetails extends Chantier {
   depenses: Depense[];
   operations: Operation[];
   auditTrail: AuditEntry[];
+  receptions: Reception[];
+  taches: Tache[];
+  pointages: Pointage[];
+  notifications: Notification[];
+}
+
+// Nouvelles interfaces pour les extensions
+
+export interface Reception {
+  id: string;
+  chantierId: string;
+  date: Date | string;
+  type: ReceptionType;
+  statut: ReceptionStatut;
+  participants: string[];
+  ordreDuJour: string;
+  decisions: string;
+  pointsARegler: string;
+  documents: string[];
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface TacheReception {
+  id: string;
+  receptionId: string;
+  description: string;
+  assigneeId: string;
+  assigneeName: string;
+  echeance?: Date | string;
+  statut: TacheStatut;
+  priorite: TachePriorite;
+  commentaires?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface Tache {
+  id: string;
+  chantierId?: string;
+  titre: string;
+  description: string;
+  type: TacheType;
+  source: TacheSource;
+  createurId: string;
+  createurNom: string;
+  assigneeId: string;
+  assigneeNom: string;
+  echeance?: Date | string;
+  statut: TacheStatut;
+  priorite: TachePriorite;
+  reponse?: string;
+  documents: string[];
+  notifications: Notification[];
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface Ressource {
+  id: string;
+  nom: string;
+  type: RessourceType;
+  specialite?: string;
+  disponible: boolean;
+  chantierId?: string;
+  indisponibleJusquau?: Date | string;
+  raisonIndisponibilite?: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface Pointage {
+  id: string;
+  date: Date | string;
+  chantierId: string;
+  conducteurId: string;
+  ressources: {
+    ressourceId: string;
+    ressourceNom: string;
+    type: RessourceType;
+    periode: PeriodePointage;
+    heuresPrevues?: number;
+  }[];
+  commentaires?: string;
+  validePar?: string;
+  valideLe?: Date | string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  entityType: 'chantier' | 'tache' | 'reception' | 'pointage' | 'operation' | 'situation' | 'depense';
+  entityId: string;
+  titre: string;
+  message: string;
+  url?: string;
+  statut: 'envoyee' | 'lue' | 'validee' | 'refusee' | 'en_attente';
+  telegramMessageId?: string;
+  createdAt: Date | string;
 }
 
 // Types pour les formulaires
@@ -145,6 +261,58 @@ export interface ValidateOperationInput {
   validePar: string;
   commentaire?: string;
   statut: OperationStatut;
+}
+
+// Nouveaux types pour les formulaires
+
+export interface CreateReceptionInput {
+  chantierId: string;
+  date: Date | string;
+  type: ReceptionType;
+  participants: string[];
+  ordreDuJour: string;
+  decisions?: string;
+  pointsARegler?: string;
+  documents?: string[];
+}
+
+export interface CreateTacheInput {
+  chantierId?: string;
+  titre: string;
+  description: string;
+  type: TacheType;
+  assigneeId: string;
+  echeance?: Date | string;
+  priorite: TachePriorite;
+  documents?: string[];
+}
+
+export interface UpdateTacheInput {
+  id: string;
+  reponse?: string;
+  statut?: TacheStatut;
+  commentaires?: string;
+}
+
+export interface CreatePointageInput {
+  date: Date | string;
+  chantierId: string;
+  ressources: {
+    ressourceId: string;
+    periode: PeriodePointage;
+    heuresPrevues?: number;
+  }[];
+  commentaires?: string;
+}
+
+export interface CreateNotificationInput {
+  userId: string;
+  type: NotificationType;
+  entityType: 'chantier' | 'tache' | 'reception' | 'pointage' | 'operation' | 'situation' | 'depense';
+  entityId: string;
+  titre: string;
+  message: string;
+  url?: string;
 }
 
 // Types pour les réponses API

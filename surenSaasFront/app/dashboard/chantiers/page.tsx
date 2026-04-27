@@ -35,7 +35,6 @@ import {
   Clock,
 } from 'lucide-react';
 import { Chantier, ChantierStatut } from '@/types/chantier';
-import { tousLesChantiers } from '@/lib/chantier-data';
 
 export default function ChantiersPage() {
   const router = useRouter();
@@ -47,15 +46,48 @@ export default function ChantiersPage() {
     search: '',
   });
 
-  // Simuler le chargement des données
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setChantiers(tousLesChantiers);
-      setLoading(false);
-    }, 500);
-
-    return () => clearTimeout(timer);
+    fetchChantiers();
   }, []);
+
+  const fetchChantiers = async () => {
+    try {
+      const orgId = new URLSearchParams(window.location.search).get('org_id') || process.env.NEXT_PUBLIC_ORG_ID || '';
+      const params = new URLSearchParams({ org_id: orgId });
+      if (filters.statut !== 'all') params.append('statut', filters.statut);
+      if (filters.search) params.append('search', filters.search);
+      const res = await fetch(`/api/v1/chantiers?${params}`, { credentials: 'include' });
+      if (res.ok) {
+        const raw = await res.json();
+        setChantiers(raw.map((c: any) => ({
+          id: c.id,
+          ref: c.ref || 'CH-000',
+          nom: c.nom || '',
+          adresse: c.adresse || '',
+          conducteur: c.conducteur || '',
+          montantBase: Number(c.montant_base) || 0,
+          tsAvenants: Number(c.ts_avenants) || 0,
+          montantRevise: Number(c.montant_revise) || 0,
+          situationsFacturees: Number(c.situations_facturees) || 0,
+          pourcentageFacture: Number(c.pourcentage_facture) || 0,
+          totalDepenses: Number(c.total_depenses) || 0,
+          margeBrute: Number(c.marge_brute) || 0,
+          soldeAFacturer: Number(c.solde_a_facturer) || 0,
+          statut: c.statut,
+          priorite: c.priorite || 0,
+          dateOPRPrevue: c.date_opr_prevue,
+          dateOPRRealisee: c.date_opr_realisee,
+          commentaires: c.commentaires || '',
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+        })));
+      }
+    } catch (err) {
+      console.error('Erreur chargement chantiers:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Filtrer les chantiers
   const filteredChantiers = chantiers.filter(chantier => {
@@ -124,7 +156,8 @@ export default function ChantiersPage() {
   };
 
   // Formater un pourcentage
-  const formatPourcentage = (pourcentage: number) => {
+  const formatPourcentage = (pourcentage: number | undefined | null) => {
+    if (pourcentage == null) return '—';
     return `${pourcentage.toFixed(2)}%`;
   };
 

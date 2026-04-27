@@ -22,9 +22,11 @@ import {
 
 interface IndicateursProps {
   chantier: Chantier;
+  margeTarget?: number;
+  depenseRatio?: number;
 }
 
-export default function Indicateurs({ chantier }: IndicateursProps) {
+export default function Indicateurs({ chantier, margeTarget = 25, depenseRatio = 75 }: IndicateursProps) {
   // Calculer les indicateurs
   const pourcentageFacture = calculerPourcentageFacture(chantier.montantRevise, chantier.situationsFacturees);
   const margeBrute = calculerMargeBrute(chantier.montantRevise, chantier.totalDepenses);
@@ -326,20 +328,20 @@ export default function Indicateurs({ chantier }: IndicateursProps) {
               <div className="p-4 border rounded-lg">
                 <div className="text-sm font-medium mb-2">Marge cible</div>
                 <div className="text-2xl font-bold text-green-600">
-                  {formatPourcentage(25)}
+                  {formatPourcentage(margeTarget)}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Objectif: {formatMontant(chantier.montantRevise * 0.25)}
+                  Objectif: {formatMontant(chantier.montantRevise * margeTarget / 100)}
                 </div>
               </div>
               
               <div className="p-4 border rounded-lg">
                 <div className="text-sm font-medium mb-2">Dépenses prévisionnelles</div>
                 <div className="text-2xl font-bold text-blue-600">
-                  {formatMontant(chantier.montantRevise * 0.75)}
+                  {formatMontant(chantier.montantRevise * depenseRatio / 100)}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Basé sur 75% du CA
+                  Basé sur {depenseRatio}% du CA
                 </div>
               </div>
             </div>

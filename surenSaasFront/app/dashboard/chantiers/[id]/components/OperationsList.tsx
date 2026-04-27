@@ -1,176 +1,168 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import {
-  Plus,
-  Search,
-  Filter,
-  CheckCircle,
-  Clock,
-  XCircle,
-  Mic,
-  Camera,
-  MessageSquare,
-  FileText,
-  User,
-  Calendar,
-  History,
-} from 'lucide-react';
-import { Operation, OperationStatut, OperationType, OperationSource } from '@/types/chantier';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Plus, Search, CheckCircle, Clock, XCircle, Mic, Camera, MessageSquare, FileText, User, Calendar, ListChecks } from 'lucide-react';
+import { Operation } from '@/types/chantier';
+import { scrollToDetail } from '@/lib/scroll-to-detail';
 
 interface OperationsListProps {
   chantierId: string;
-  operations: Operation[];
+  orgId: string;
+  onRefresh?: () => void;
 }
 
-export default function OperationsList({ chantierId, operations }: OperationsListProps) {
+export default function OperationsList({ chantierId, orgId, onRefresh }: OperationsListProps) {
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [selectedOperation, setSelectedOperation] = useState<Operation | null>(null);
+  const [newOperation, setNewOperation] = useState({ description: '', type: 'autre', montant: '', quantite: '', unite: '' });
+  const [editOpMode, setEditOpMode] = useState(false);
+  const [editOpForm, setEditOpForm] = useState({ description: '', type: 'autre', montant: '', commentaire: '' });
 
-  // Filtrer les opérations
+  useEffect(() => {
+    fetchOperations();
+  }, [chantierId]);
+
+  const fetchOperations = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/v1/chantiers/${chantierId}/operations?org_id=${orgId}`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOperations(data.map((o: any) => ({
+            id: o.id,
+            chantierId: o.chantier_id,
+            description: o.description,
+            type: o.type || 'autre',
+            date: o.date || o.created_at,
+            source: o.source || 'manuel',
+            sourceDetails: o.source_details || '',
+            statut: o.statut || 'en_attente',
+            commentaire: o.commentaire,
+            montant: o.montant,
+            unite: o.unite,
+            quantite: o.quantite,
+            createdAt: o.created_at,
+            updatedAt: o.updated_at || o.created_at,
+        })));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredOperations = operations.filter(operation => {
-    if (search && !operation.description.toLowerCase().includes(search.toLowerCase())) {
-      return false;
-    }
-    if (filterStatut !== 'all' && operation.statut !== filterStatut) {
-      return false;
-    }
-    if (filterType !== 'all' && operation.type !== filterType) {
-      return false;
-    }
-    if (filterSource !== 'all' && operation.source !== filterSource) {
-      return false;
-    }
+    if (search && !operation.description.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterStatut !== 'all' && operation.statut !== filterStatut) return false;
+    if (filterType !== 'all' && operation.type !== filterType) return false;
+    if (filterSource !== 'all' && operation.source !== filterSource) return false;
     return true;
   });
 
-  // Statistiques
   const stats = {
     total: operations.length,
     valide: operations.filter(op => op.statut === 'valide').length,
     enAttente: operations.filter(op => op.statut === 'en_attente').length,
-    rejete: operations.filter(op => op.statut === 'rejete').length,
+    reject: operations.filter(op => op.statut === 'rejete').length,
   };
 
-  // Formater une date
-  const formatDate = (dateString: string | Date) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR') + ' à ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Formater un montant
-  const formatMontant = (montant?: number) => {
-    if (!montant) return '—';
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(montant);
-  };
-
-  // Obtenir la couleur du badge selon le statut
-  const getStatutBadge = (statut: OperationStatut) => {
+  const getStatutBadge = (statut: string) => {
     switch (statut) {
       case 'valide':
-        return <Badge className="bg-green-100 text-green-800 hover:bg-green-100 gap-1">
-          <CheckCircle className="h-3 w-3" />
-          Validé
-        </Badge>;
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200"><CheckCircle className="w-3 h-3 mr-1" /> Validée</Badge>;
       case 'en_attente':
-        return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 gap-1">
-          <Clock className="h-3 w-3" />
-          En attente
-        </Badge>;
+        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200"><Clock className="w-3 h-3 mr-1" /> En attente</Badge>;
       case 'rejete':
-        return <Badge className="bg-red-100 text-red-800 hover:bg-red-100 gap-1">
-          <XCircle className="h-3 w-3" />
-          Rejeté
-        </Badge>;
+        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200"><XCircle className="w-3 h-3 mr-1" /> Rejetée</Badge>;
       default:
         return <Badge variant="outline">{statut}</Badge>;
     }
   };
 
-  // Obtenir l'icône selon le type
-  const getTypeIcon = (type: OperationType) => {
+  const getTypeBadge = (type: string) => {
     switch (type) {
-      case 'demolition':
-        return <span className="text-red-500">⚒️</span>;
-      case 'nettoyage':
-        return <span className="text-blue-500">🧹</span>;
-      case 'pose_bso':
-        return <span className="text-green-500">🔧</span>;
-      case 'commande':
-        return <span className="text-purple-500">📦</span>;
-      case 'achat_materiel':
-        return <span className="text-amber-500">🛒</span>;
-      case 'sous_traitance':
-        return <span className="text-indigo-500">👥</span>;
-      default:
-        return <span className="text-gray-500">📝</span>;
+      case 'demolition': return <Badge variant="secondary" className="bg-orange-50 text-orange-700">Démolition</Badge>;
+      case 'nettoyage': return <Badge variant="secondary" className="bg-cyan-50 text-cyan-700">Nettoyage</Badge>;
+      case 'pose_bso': return <Badge variant="secondary" className="bg-blue-50 text-blue-700">Pose BSO</Badge>;
+      case 'commande': return <Badge variant="secondary" className="bg-purple-50 text-purple-700">Commande</Badge>;
+      case 'achat_materiel': return <Badge variant="secondary" className="bg-indigo-50 text-indigo-700">Achat matériel</Badge>;
+      case 'sous_traitance': return <Badge variant="secondary" className="bg-pink-50 text-pink-700">Sous-traitance</Badge>;
+      default: return <Badge variant="secondary">{type}</Badge>;
     }
   };
 
-  // Obtenir l'icône selon la source
-  const getSourceIcon = (source: OperationSource) => {
+  const getSourceIcon = (source: string) => {
     switch (source) {
-      case 'telegram_voice':
-        return <Mic className="h-4 w-4 text-blue-500" />;
-      case 'telegram_photo':
-        return <Camera className="h-4 w-4 text-green-500" />;
-      case 'telegram_text':
-        return <MessageSquare className="h-4 w-4 text-purple-500" />;
-      case 'telegram_pdf':
-        return <FileText className="h-4 w-4 text-red-500" />;
-      case 'email':
-        return <MessageSquare className="h-4 w-4 text-amber-500" />;
-      case 'manuel':
-        return <User className="h-4 w-4 text-gray-500" />;
-      default:
-        return <History className="h-4 w-4 text-gray-500" />;
+      case 'telegram_voice': return <Mic className="w-4 h-4 text-blue-500" />;
+      case 'telegram_photo': return <Camera className="w-4 h-4 text-green-500" />;
+      case 'telegram_text': return <MessageSquare className="w-4 h-4 text-gray-500" />;
+      case 'manuel': return <FileText className="w-4 h-4 text-orange-500" />;
+      default: return <ListChecks className="w-4 h-4 text-gray-400" />;
     }
   };
 
-  // Obtenir le libellé du type
-  const getTypeLabel = (type: OperationType) => {
-    switch (type) {
-      case 'demolition': return 'Démolition';
-      case 'nettoyage': return 'Nettoyage';
-      case 'pose_bso': return 'Pose BSO';
-      case 'commande': return 'Commande';
-      case 'achat_materiel': return 'Achat matériel';
-      case 'sous_traitance': return 'Sous-traitance';
-      case 'autre': return 'Autre';
-      default: return type;
+  const formatDate = (dateString: string | Date) => {
+    const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+    return date.toLocaleDateString('fr-FR', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  };
+
+  const handleCreateOperation = async () => {
+    if (!newOperation.description.trim()) { alert('Veuillez entrer une description'); return; }
+    try {
+      const res = await fetch(`/api/v1/chantiers/${chantierId}/operations?org_id=${orgId}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: newOperation.description,
+          type: newOperation.type,
+          source: 'manuel',
+          montant: parseFloat(newOperation.montant) || undefined,
+          quantite: parseFloat(newOperation.quantite) || undefined,
+          unite: newOperation.unite || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error('Erreur création opération');
+      setShowCreateDialog(false);
+      setNewOperation({ description: '', type: 'autre', montant: '', quantite: '', unite: '' });
+      fetchOperations();
+    } catch (err) {
+      alert('Erreur : ' + (err instanceof Error ? err.message : 'Erreur inconnue'));
     }
   };
 
-  // Handler pour ajouter une opération manuellement
-  const handleAddOperation = () => {
-    alert('Fonctionnalité d\'ajout manuel à implémenter dans la prochaine itération');
+  const handleValidateOperation = async (id: string, statut: string) => {
+    try {
+      const res = await fetch(`/api/v1/chantiers/${chantierId}/operations/${id}?org_id=${orgId}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statut }),
+      });
+      if (!res.ok) throw new Error('Erreur mise à jour opération');
+      setSelectedOperation(null);
+      fetchOperations();
+    } catch (err) {
+      alert('Erreur : ' + (err instanceof Error ? err.message : 'Erreur inconnue'));
+    }
   };
 
-  // Handler pour valider une opération (HITL)
-  const handleValidateOperation = (operationId: string) => {
-    alert(`Fonctionnalité de validation HITL à implémenter pour l'opération ${operationId}`);
-  };
-
-  // Handler pour réinitialiser les filtres
   const handleResetFilters = () => {
     setSearch('');
     setFilterStatut('all');
@@ -178,98 +170,91 @@ export default function OperationsList({ chantierId, operations }: OperationsLis
     setFilterSource('all');
   };
 
+  if (loading) return <div className="p-4">Chargement...</div>;
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <CardTitle>Opérations / Tâches à faire</CardTitle>
-            <p className="text-sm text-muted-foreground mt-2">
-              Suivi des opérations terrain avec mécanisme HITL (Human-in-the-Loop)
-            </p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3">
-            <Button onClick={handleAddOperation} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Ajouter manuellement
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {/* Statistiques */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <div className="p-4 border rounded-lg bg-green-50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-green-800">Validées</p>
-                <p className="text-2xl font-bold text-green-900">{stats.valide}</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-green-600" />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <CardTitle>Opérations ({stats.total})</CardTitle>
+            <div className="flex gap-2">
+              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-2"><Plus className="h-4 w-4" />Nouvelle opération</Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[500px]">
+                  <DialogHeader>
+                    <DialogTitle>Signaler une opération</DialogTitle>
+                    <DialogDescription>Ajouter une opération manuelle au chantier.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Description *</Label>
+                      <Textarea placeholder="Décrivez l'opération..." value={newOperation.description} onChange={(e) => setNewOperation({...newOperation, description: e.target.value})} rows={3} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Type</Label>
+                      <Select value={newOperation.type} onValueChange={(v) => setNewOperation({...newOperation, type: v})}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="demolition">Démolition</SelectItem>
+                          <SelectItem value="nettoyage">Nettoyage</SelectItem>
+                          <SelectItem value="pose_bso">Pose BSO</SelectItem>
+                          <SelectItem value="commande">Commande</SelectItem>
+                          <SelectItem value="achat_materiel">Achat matériel</SelectItem>
+                          <SelectItem value="sous_traitance">Sous-traitance</SelectItem>
+                          <SelectItem value="autre">Autre</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>Montant (€)</Label>
+                        <Input type="number" step="0.01" min="0" placeholder="0" value={newOperation.montant} onChange={(e) => setNewOperation({...newOperation, montant: e.target.value})} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Quantité</Label>
+                        <Input type="number" step="1" min="0" placeholder="0" value={newOperation.quantite} onChange={(e) => setNewOperation({...newOperation, quantite: e.target.value})} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Unité</Label>
+                        <Input placeholder="m², unités..." value={newOperation.unite} onChange={(e) => setNewOperation({...newOperation, unite: e.target.value})} />
+                      </div>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Annuler</Button>
+                    <Button onClick={handleCreateOperation}>Créer</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Button onClick={fetchOperations} size="sm">Rafraîchir</Button>
             </div>
           </div>
-          
-          <div className="p-4 border rounded-lg bg-amber-50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-amber-800">En attente</p>
-                <p className="text-2xl font-bold text-amber-900">{stats.enAttente}</p>
-              </div>
-              <Clock className="h-8 w-8 text-amber-600" />
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="bg-green-50 text-green-700">{stats.valide} validée(s)</Badge>
+            <Badge variant="secondary" className="bg-yellow-50 text-yellow-700">{stats.enAttente} en attente</Badge>
+            <Badge variant="secondary" className="bg-red-50 text-red-700">{stats.reject} rejetée(s)</Badge>
           </div>
-          
-          <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-800">Total opérations</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-              </div>
-              <History className="h-8 w-8 text-gray-600" />
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Rechercher..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
             </div>
-          </div>
-        </div>
-
-        {/* Filtres */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-6 p-4 border rounded-lg bg-muted/20">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Rechercher par description..."
-                className="pl-10"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3">
-            <Select
-              value={filterStatut}
-              onValueChange={setFilterStatut}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Statut" />
-              </SelectTrigger>
+            <Select value={filterStatut} onValueChange={setFilterStatut}>
+              <SelectTrigger className="w-[140px]"><SelectValue placeholder="Statut" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tous statuts</SelectItem>
-                <SelectItem value="valide">Validé</SelectItem>
+                <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="en_attente">En attente</SelectItem>
-                <SelectItem value="rejete">Rejeté</SelectItem>
+                <SelectItem value="valide">Validée</SelectItem>
+                <SelectItem value="rejete">Rejetée</SelectItem>
               </SelectContent>
             </Select>
-            
-            <Select
-              value={filterType}
-              onValueChange={setFilterType}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
+            <Select value={filterType} onValueChange={setFilterType}>
+              <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tous types</SelectItem>
+                <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="demolition">Démolition</SelectItem>
                 <SelectItem value="nettoyage">Nettoyage</SelectItem>
                 <SelectItem value="pose_bso">Pose BSO</SelectItem>
@@ -279,170 +264,143 @@ export default function OperationsList({ chantierId, operations }: OperationsLis
                 <SelectItem value="autre">Autre</SelectItem>
               </SelectContent>
             </Select>
-            
-            <Button
-              variant="outline"
-              onClick={handleResetFilters}
-              className="gap-2"
-            >
-              <Filter className="h-4 w-4" />
-              Réinitialiser
-            </Button>
+            <Select value={filterSource} onValueChange={setFilterSource}>
+              <SelectTrigger className="w-[140px]"><SelectValue placeholder="Source" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes</SelectItem>
+                <SelectItem value="telegram_text">Texte</SelectItem>
+                <SelectItem value="telegram_voice">Vocal</SelectItem>
+                <SelectItem value="telegram_photo">Photo</SelectItem>
+                <SelectItem value="manuel">Manuelle</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" onClick={handleResetFilters}>Réinitialiser</Button>
           </div>
         </div>
-
+      </CardHeader>
+      <CardContent>
         {filteredOperations.length === 0 ? (
-          <div className="text-center py-12">
-            <History className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-medium">Aucune opération trouvée</h3>
-            <p className="text-muted-foreground mt-2">
-              Aucune opération ne correspond à vos critères de recherche.
-            </p>
-            <Button onClick={handleResetFilters} className="mt-4">
-              Réinitialiser les filtres
-            </Button>
-          </div>
+          <p className="text-muted-foreground p-4">Aucune opération trouvée.</p>
         ) : (
-          <div className="space-y-4">
-            {filteredOperations.map((operation) => (
-              <div key={operation.id} className="border rounded-lg p-4 hover:bg-muted/30 transition-colors">
-                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1">
-                        {getTypeIcon(operation.type)}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-medium text-lg">{operation.description}</h4>
-                          {getStatutBadge(operation.statut)}
-                        </div>
-                        
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground mb-3">
-                          <div className="flex items-center gap-1">
-                            {getSourceIcon(operation.source)}
-                            <span>{operation.sourceDetails}</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-4 w-4" />
-                            <span>{formatDate(operation.date)}</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1">
-                            <span className="font-medium">{getTypeLabel(operation.type)}</span>
-                          </div>
-                          
-                          {operation.quantite && (
-                            <div className="flex items-center gap-1">
-                              <span className="font-medium">{operation.quantite} {operation.unite || 'unités'}</span>
-                            </div>
-                          )}
-                          
-                          {operation.montant && (
-                            <div className="flex items-center gap-1">
-                              <span className="font-medium">{formatMontant(operation.montant)}</span>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {operation.commentaire && (
-                          <div className="bg-muted/30 p-3 rounded-md">
-                            <p className="text-sm">{operation.commentaire}</p>
-                          </div>
-                        )}
-                        
-                        {operation.validePar && (
-                          <div className="mt-3 flex items-center gap-2 text-sm">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium">Validé par:</span>
-                            <span>{operation.validePar}</span>
-                            <span className="text-muted-foreground">le {formatDate(operation.valideLe!)}</span>
-                          </div>
-                        )}
-                      </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Statut</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredOperations.map((op) => (
+                <TableRow key={op.id}>
+                  <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+                    <Calendar className="w-3 h-3 inline mr-1" />
+                    {formatDate(op.date)}
+                  </TableCell>
+                  <TableCell className="font-medium max-w-xs truncate">{op.description}</TableCell>
+                  <TableCell>{getTypeBadge(op.type)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      {getSourceIcon(op.source)}
+                      <span className="text-xs text-muted-foreground">{op.source}</span>
                     </div>
-                  </div>
-                  
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    {operation.statut === 'en_attente' && (
-                      <>
-                        <Button
-                          size="sm"
-                          className="gap-2 bg-green-600 hover:bg-green-700"
-                          onClick={() => handleValidateOperation(operation.id)}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Valider
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-2"
-                          onClick={() => handleValidateOperation(operation.id)}
-                        >
-                          <XCircle className="h-4 w-4" />
-                          Rejeter
-                        </Button>
-                      </>
-                    )}
-                    <Button variant="ghost" size="sm">
-                      Voir détails
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                  </TableCell>
+                  <TableCell>{getStatutBadge(op.statut)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex gap-1 justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => { setSelectedOperation(op); scrollToDetail(); }}>Détails</Button>
+                      {op.statut === 'en_attente' && (
+                        <Button variant="outline" size="sm" className="text-green-600" onClick={() => handleValidateOperation(op.id, 'valide')}>Valider</Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
-        
-        {/* Note HITL */}
-        <div className="mt-8 p-4 border border-blue-200 rounded-lg bg-blue-50">
-          <div className="flex items-start gap-3">
-            <div className="mt-1">
-              <User className="h-5 w-5 text-blue-600" />
-            </div>
-            <div>
-              <h4 className="font-medium text-blue-900">Mécanisme HITL (Human-in-the-Loop)</h4>
-              <p className="text-sm text-blue-800 mt-1">
-                Cette section démontre le processus de validation humaine des opérations terrain.
-                Les conducteurs remontent des informations via Telegram (voice, photo, texte, PDF),
-                qui apparaissent ici en "En attente" pour validation par le gérant.
-              </p>
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="text-sm">
-                  <span className="font-medium">Flux actuel:</span>
-                  <ul className="list-disc list-inside mt-1 text-blue-800">
-                    <li>Conducteur → Telegram → Dashboard → "En attente"</li>
-                    <li>Gérant valide/rejette → Mise à jour automatique</li>
-                  </ul>
-                </div>
-                <div className="text-sm">
-                  <span className="font-medium">Prochaine itération:</span>
-                  <ul className="list-disc list-inside mt-1 text-blue-800">
-                    <li>Intégration réelle avec bot Telegram</li>
-                    <li>Classification automatique par IA</li>
-                    <li>Notifications en temps réel</li>
-                  </ul>
-                </div>
+      </CardContent>
+
+      {selectedOperation && (
+        <Card id="detail-card" className="mt-6">
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle className="flex items-center gap-2">
+                <ListChecks className="h-5 w-5" />
+                Détail de l'opération
+              </CardTitle>
+              <div className="flex gap-2">
+                {editOpMode && <Button size="sm" onClick={async () => {
+                  await fetch(`/api/v1/chantiers/${chantierId}/operations/${selectedOperation.id}?org_id=${orgId}`, {
+                    method: 'PUT', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...editOpForm, montant: parseFloat(editOpForm.montant) || undefined }),
+                  });
+                  setEditOpMode(false);
+                  fetchOperations();
+                }}>Sauvegarder</Button>}
+                <Button variant={editOpMode ? "outline" : "default"} size="sm" onClick={() => {
+                  if (!editOpMode) {
+                    setEditOpForm({
+                      description: selectedOperation.description,
+                      type: selectedOperation.type,
+                      montant: String(selectedOperation.montant || ''),
+                      commentaire: selectedOperation.commentaire || '',
+                    });
+                  }
+                  setEditOpMode(!editOpMode);
+                }}>{editOpMode ? 'Annuler' : 'Modifier'}</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedOperation(null); setEditOpMode(false); }}>Fermer</Button>
               </div>
             </div>
-          </div>
-        </div>
-        
-        {/* Note prototype */}
-        <div className="mt-6 text-sm text-muted-foreground">
-          <p>
-            <strong>Note prototype:</strong> Cette section "Opérations/Tâches à faire" est la nouveauté
-            qui démontre l'intégration Telegram + HITL. Les opérations sont classées par type, source
-            et statut de validation.
-          </p>
-          <p className="mt-2">
-            Dans la prochaine itération, cette section sera alimentée en temps réel par le bot Telegram
-            construction via les webhooks existants.
-          </p>
-        </div>
-      </CardContent>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {editOpMode ? (
+              <>
+                <div className="space-y-2"><Label>Description</Label><Textarea value={editOpForm.description} onChange={(e) => setEditOpForm({...editOpForm, description: e.target.value})} rows={3} /></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={editOpForm.type} onValueChange={(v) => setEditOpForm({...editOpForm, type: v})}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="demolition">Démolition</SelectItem>
+                        <SelectItem value="nettoyage">Nettoyage</SelectItem>
+                        <SelectItem value="pose_bso">Pose BSO</SelectItem>
+                        <SelectItem value="commande">Commande</SelectItem>
+                        <SelectItem value="achat_materiel">Achat matériel</SelectItem>
+                        <SelectItem value="sous_traitance">Sous-traitance</SelectItem>
+                        <SelectItem value="autre">Autre</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2"><Label>Montant (€)</Label><Input type="number" step="0.01" value={editOpForm.montant} onChange={(e) => setEditOpForm({...editOpForm, montant: e.target.value})} /></div>
+                </div>
+                <div className="space-y-2"><Label>Commentaire</Label><Textarea value={editOpForm.commentaire} onChange={(e) => setEditOpForm({...editOpForm, commentaire: e.target.value})} rows={2} /></div>
+              </>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2"><Label>Description</Label><p className="font-medium">{selectedOperation.description}</p></div>
+                <div><Label>Type</Label><p>{getTypeBadge(selectedOperation.type)}</p></div>
+                <div><Label>Statut</Label><p>{getStatutBadge(selectedOperation.statut)}</p></div>
+                <div><Label>Date</Label><p className="text-sm">{formatDate(selectedOperation.date)}</p></div>
+                <div><Label>Source</Label><p className="text-sm">{selectedOperation.source}</p></div>
+                {selectedOperation.montant && <div><Label>Montant</Label><p>{selectedOperation.montant}€</p></div>}
+                {selectedOperation.commentaire && <div><Label>Commentaire</Label><p className="text-sm">{selectedOperation.commentaire}</p></div>}
+              </div>
+            )}
+            {selectedOperation.statut === 'en_attente' && (
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button variant="outline" onClick={() => { handleValidateOperation(selectedOperation.id, 'rejete'); setSelectedOperation(null); }} className="text-red-600">Rejeter</Button>
+                <Button onClick={() => { handleValidateOperation(selectedOperation.id, 'valide'); setSelectedOperation(null); }}>Valider</Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </Card>
   );
 }

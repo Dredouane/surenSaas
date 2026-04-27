@@ -28,15 +28,33 @@ async def handle_construction_message(
     
     logger.info(f"📩 Message construction reçu de {chat_id}: {text[:50] if text else '(no text)'}")
     
+    # 1. Vérifier l'état (priorité absolue)
+    from app.services.telegram.chantier_context import get_state
+    state = await get_state(chat_id, supabase, org_id)
+    
+    if state and state.get('last_state') in ['op_awaiting_description', 'op_awaiting_validation']:
+        from app.api.bot_construction_operations import handle_operation_media
+        return await handle_operation_media(message, bot_config, supabase, org_id, state)
+
+    if state and state.get('last_state') in ['depense_awaiting_description', 'depense_awaiting_validation']:
+        from app.api.bot_construction_depenses import handle_depense_media
+        return await handle_depense_media(message, bot_config, supabase, org_id, state)
+
+    # 2. Commandes de contrôle
     if text and text.startswith('/start'):
         from app.api.bot_construction_commands import handle_start_command
         return await handle_start_command(message, bot_config, supabase, org_id)
+        
+    # 3. Traitement des factures
     elif message.get('photo') or message.get('document'):
         return await handle_invoice_upload(message, bot_config, supabase, org_id)
+        
+    # 4. Navigation par défaut
     else:
         from app.api.bot_construction_commands import send_menu_message
-        await send_menu_message(chat_id, bot_config)
+        await send_menu_message(chat_id, bot_config, supabase, org_id)
         return {"ok": True}
+
 
 
 async def handle_invoice_upload(
@@ -304,40 +322,58 @@ async def handle_invoice_validation(
     supabase: Any,
     org_id: str
 ) -> Dict[str, Any]:
-    """Valide une facture (bouton Valider)."""
+    """Valide une facture (bouton Valider). Crée aussi une dépense liée dans le chantier actif."""
     try:
-        supabase.table('invoices') \
+        from app.services.telegram.chantier_context import ensure_chantier_selected
+
+        update_res = supabase.table('invoices') \
             .update({'status': 'en_attente_validation', 'updated_at': datetime.utcnow().isoformat()}) \
             .eq('id', invoice_id) \
             .eq('org_id', org_id) \
             .execute()
-        
-        # Notifier gérants
-        bot_token = get_bot_token(bot_config)
-        notification_service = NotificationService(supabase, bot_token)
-        
+
+        logger.debug(f"Update res: {update_res.data}")
+
         invoice_result = supabase.table('invoices') \
-            .select('supplier_name, amount_ttc') \
+            .select('supplier_name, amount_ht, amount_ttc, description, invoice_number') \
             .eq('id', invoice_id) \
             .eq('org_id', org_id) \
-            .single() \
             .execute()
-        
-        if invoice_result.data:
-            data = invoice_result.data
+
+        invoice_data = invoice_result.data[0] if invoice_result.data else {}
+
+        chantier = await ensure_chantier_selected(chat_id, supabase, org_id)
+        if chantier:
+            supabase.table("chantier_depenses").insert({
+                "chantier_id": chantier["id"],
+                "org_id": org_id,
+                "invoice_id": invoice_id,
+                "date": datetime.utcnow().isoformat().split('T')[0],
+                "fournisseur": invoice_data.get('supplier_name', 'Fournisseur'),
+                "categorie": "fournisseur",
+                "description": invoice_data.get('description') or f"Facture {invoice_data.get('invoice_number', '')}",
+                "montant": float(invoice_data.get('amount_ht') or invoice_data.get('amount_ttc') or 0),
+                "facture_ref": invoice_data.get('invoice_number', ''),
+            }).execute()
+            logger.info(f"✅ Dépense créée pour chantier {chantier['id']} depuis facture {invoice_id}")
+
+        bot_token = get_bot_token(bot_config)
+        notification_service = NotificationService(supabase, bot_token)
+
+        if invoice_data:
             await notification_service.notify_invoice_pending(
                 org_id=org_id,
                 invoice_id=invoice_id,
-                supplier_name=data.get('supplier_name', 'Fournisseur inconnu'),
-                amount_ttc=data.get('amount_ttc')
+                supplier_name=invoice_data.get('supplier_name', 'Fournisseur inconnu'),
+                amount_ttc=invoice_data.get('amount_ttc')
             )
-        
+
         await send_simple_message(
             chat_id, bot_config,
             "✅ *Facture validée !*\n\nVotre facture est soumise aux gérants pour validation."
         )
         return {"ok": True}
-        
+
     except Exception as e:
         logger.error(f"Erreur validation: {e}")
         await send_simple_message(chat_id, bot_config, "❌ Erreur lors de la validation.")

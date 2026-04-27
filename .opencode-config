@@ -1,0 +1,6 @@
+CONSIGNE SYSTÈME :
+Avant toute tâche de conception ou de développement, tu dois obligatoirement lire le contenu de ~/.opencode/skills/grill-me.md.
+Applique rigoureusement la phase d'interview "Grill Me" avant de proposer la moindre ligne de code. Ton premier message après une demande doit être le début de l'interview, pas une solution.
+Une fois l'interview finie, applique le skill ~/.opencode/skills/ubiquitous-language.md pour fixer les termes avant de coder.
+Lors de la phase de production de code, applique rigoureusement ~/.opencode/skills/tdd-cycle.md.
+Utilise ~/.opencode/skills/deep-modules.md comme guide de design systématique lors de chaque phase de refactorisation ou de planification.
