@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from app.api.auth import get_current_user_from_cookie, get_supabase
+from app.api.auth import get_current_user_from_cookie, get_supabase, AuthenticationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,14 +31,14 @@ async def get_current_user_profile(request: Request):
         
         if not user_id or not user_email:
             logger.error("Token invalide: sub ou email manquant")
-            raise HTTPException(status_code=401, detail="Session invalide")
+            raise AuthenticationError("Session invalide", redirect_to_login=True)
         
         logger.info(f"🔍 Récupération profil pour {user_email} (ID: {user_id})")
         
         # Valeurs par défaut depuis le token
         org_id = user.get("org_id")
-        org_slug = user.get("org_slug", "")
-        role = user.get("role", "user")
+        org_slug = user.get("org_slug") or ""
+        role = user.get("role") or "user"
         
         # 2. Essayer de récupérer depuis la table users
         try:
@@ -50,8 +50,8 @@ async def get_current_user_profile(request: Request):
             
             if user_data_result.data:
                 user_data = user_data_result.data
-                org_id = user_data.get('org_id', org_id)
-                role = user_data.get('role', role)
+                org_id = user_data.get('org_id') or org_id
+                role = user_data.get('role') or role
                 logger.info(f"✅ Profil trouvé dans table users pour {user_email}")
             else:
                 logger.warning(f"⚠️ Utilisateur {user_id} non trouvé dans table users")
@@ -68,8 +68,8 @@ async def get_current_user_profile(request: Request):
                     .execute()
                 
                 if org_result.data:
-                    org_slug = org_result.data.get('slug', org_slug)
-                    org_name = org_result.data.get('name', '')
+                    org_slug = org_result.data.get('slug') or org_slug
+                    org_name = org_result.data.get('name') or ''
                     logger.info(f"✅ Org trouvée: {org_slug}")
                 else:
                     org_name = org_slug or "Mon Organisation"

@@ -1,0 +1,1020 @@
+from fastapi import APIRouter, HTTPException, Request, Query
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+
+from app.api.auth import get_current_user_from_cookie, get_supabase
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/chantiers", tags=["chantiers"])
+
+
+def check_user_org_access(request: Request, org_id: str):
+    user = get_current_user_from_cookie(request)
+    if user["org_id"] != org_id:
+        raise HTTPException(status_code=403, detail="Accès non autorisé à cette organisation")
+    return user
+
+
+# Schemas Pydantic
+
+class ChantierBase(BaseModel):
+    nom: str
+    description: Optional[str] = None
+    adresse: Optional[str] = None
+    ville: Optional[str] = None
+    code_postal: Optional[str] = None
+    statut: Optional[str] = "en_preparation"
+    date_debut: Optional[str] = None
+    date_fin_prevue: Optional[str] = None
+    date_fin_reelle: Optional[str] = None
+    client_name: Optional[str] = None
+    contact_telephone: Optional[str] = None
+    contact_email: Optional[str] = None
+    montant_initial: Optional[float] = 0
+    montant_revise: Optional[float] = 0
+    montant_facture: Optional[float] = 0
+    montant_depenses: Optional[float] = 0
+    marge_estimee: Optional[float] = 0
+    solde_restant: Optional[float] = 0
+    responsable_nom: Optional[str] = None
+    responsable_telephone: Optional[str] = None
+    responsable_email: Optional[str] = None
+    notes_internes: Optional[str] = None
+    priorite: Optional[str] = "normale"
+    tags: Optional[List[str]] = None
+
+class ChantierCreate(ChantierBase):
+    pass
+
+class ChantierUpdate(BaseModel):
+    nom: Optional[str] = None
+    description: Optional[str] = None
+    adresse: Optional[str] = None
+    ville: Optional[str] = None
+    code_postal: Optional[str] = None
+    statut: Optional[str] = None
+    date_debut: Optional[str] = None
+    date_fin_prevue: Optional[str] = None
+    date_fin_reelle: Optional[str] = None
+    client_name: Optional[str] = None
+    contact_telephone: Optional[str] = None
+    contact_email: Optional[str] = None
+    montant_initial: Optional[float] = None
+    montant_revise: Optional[float] = None
+    montant_facture: Optional[float] = None
+    responsable_nom: Optional[str] = None
+    responsable_telephone: Optional[str] = None
+    responsable_email: Optional[str] = None
+    notes_internes: Optional[str] = None
+    priorite: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class ChantierResponse(ChantierBase):
+    id: str
+    org_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SituationBase(BaseModel):
+    numero: int
+    montant: float
+    statut: Optional[str] = "en_attente"
+    date_emission: Optional[str] = None
+    date_paiement: Optional[str] = None
+    notes: Optional[str] = None
+
+class SituationCreate(SituationBase):
+    pass
+
+class SituationUpdate(BaseModel):
+    montant: Optional[float] = None
+    statut: Optional[str] = None
+    date_emission: Optional[str] = None
+    date_paiement: Optional[str] = None
+    notes: Optional[str] = None
+
+class SituationResponse(SituationBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DepenseBase(BaseModel):
+    libelle: str
+    montant: float
+    categorie: Optional[str] = "autre"
+    statut: Optional[str] = "prevue"
+    date_depense: Optional[str] = None
+    fournisseur: Optional[str] = None
+    notes: Optional[str] = None
+    invoice_id: Optional[str] = None
+
+class DepenseCreate(DepenseBase):
+    pass
+
+class DepenseUpdate(BaseModel):
+    libelle: Optional[str] = None
+    montant: Optional[float] = None
+    categorie: Optional[str] = None
+    statut: Optional[str] = None
+    date_depense: Optional[str] = None
+    fournisseur: Optional[str] = None
+    notes: Optional[str] = None
+    invoice_id: Optional[str] = None
+
+class DepenseResponse(DepenseBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OperationHtlBase(BaseModel):
+    operation: str
+    statut: Optional[str] = "planifie"
+    phase: Optional[str] = None
+    responsable: Optional[str] = None
+    date_debut: Optional[str] = None
+    date_fin: Optional[str] = None
+    notes: Optional[str] = None
+
+class OperationHtlCreate(OperationHtlBase):
+    pass
+
+class OperationHtlUpdate(BaseModel):
+    operation: Optional[str] = None
+    statut: Optional[str] = None
+    phase: Optional[str] = None
+    responsable: Optional[str] = None
+    date_debut: Optional[str] = None
+    date_fin: Optional[str] = None
+    notes: Optional[str] = None
+
+class OperationHtlResponse(OperationHtlBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReceptionBase(BaseModel):
+    titre: str
+    type_reception: Optional[str] = "intermediaire"
+    statut: Optional[str] = "planifie"
+    date_prevue: Optional[str] = None
+    date_reelle: Optional[str] = None
+    participants: Optional[str] = None
+    observations: Optional[str] = None
+    reserve: Optional[bool] = False
+
+class ReceptionCreate(ReceptionBase):
+    pass
+
+class ReceptionUpdate(BaseModel):
+    titre: Optional[str] = None
+    type_reception: Optional[str] = None
+    statut: Optional[str] = None
+    date_prevue: Optional[str] = None
+    date_reelle: Optional[str] = None
+    participants: Optional[str] = None
+    observations: Optional[str] = None
+    reserve: Optional[bool] = None
+
+class ReceptionResponse(ReceptionBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TacheBase(BaseModel):
+    titre: str
+    description: Optional[str] = None
+    statut: Optional[str] = "a_faire"
+    priorite: Optional[str] = "normale"
+    assigne_a: Optional[str] = None
+    date_echeance: Optional[str] = None
+    date_realisation: Optional[str] = None
+    categorie: Optional[str] = "autre"
+
+class TacheCreate(TacheBase):
+    pass
+
+class TacheUpdate(BaseModel):
+    titre: Optional[str] = None
+    description: Optional[str] = None
+    statut: Optional[str] = None
+    priorite: Optional[str] = None
+    assigne_a: Optional[str] = None
+    date_echeance: Optional[str] = None
+    date_realisation: Optional[str] = None
+    categorie: Optional[str] = None
+
+class TacheResponse(TacheBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RessourceBase(BaseModel):
+    nom: str
+    type_ressource: Optional[str] = "equipement"
+    quantite: Optional[float] = 1
+    unite: Optional[str] = "unite"
+    cout_unitaire: Optional[float] = 0
+    fournisseur: Optional[str] = None
+    notes: Optional[str] = None
+
+class RessourceCreate(RessourceBase):
+    pass
+
+class RessourceUpdate(BaseModel):
+    nom: Optional[str] = None
+    type_ressource: Optional[str] = None
+    quantite: Optional[float] = None
+    unite: Optional[str] = None
+    cout_unitaire: Optional[float] = None
+    fournisseur: Optional[str] = None
+    notes: Optional[str] = None
+
+class RessourceResponse(RessourceBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PointageBase(BaseModel):
+    date_pointage: str
+    equipe: Optional[str] = None
+    observateur: Optional[str] = None
+    conditions_meteo: Optional[str] = None
+    notes: Optional[str] = None
+    temps_passe: Optional[float] = 0
+
+class PointageCreate(PointageBase):
+    pass
+
+class PointageUpdate(BaseModel):
+    date_pointage: Optional[str] = None
+    equipe: Optional[str] = None
+    observateur: Optional[str] = None
+    conditions_meteo: Optional[str] = None
+    notes: Optional[str] = None
+    temps_passe: Optional[float] = None
+
+class PointageResponse(PointageBase):
+    id: str
+    chantier_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PointageRessourceBase(BaseModel):
+    pointage_id: str
+    ressource_id: str
+    quantite_utilisee: float
+    notes: Optional[str] = None
+
+class PointageRessourceCreate(PointageRessourceBase):
+    pass
+
+class PointageRessourceResponse(PointageRessourceBase):
+    id: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationBase(BaseModel):
+    type_notification: str
+    titre: str
+    message: str
+    lu: Optional[bool] = False
+    priorite: Optional[str] = "info"
+
+class NotificationCreate(NotificationBase):
+    pass
+
+class NotificationUpdate(BaseModel):
+    lu: Optional[bool] = None
+
+class NotificationResponse(NotificationBase):
+    id: str
+    chantier_id: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS CHANTIERS
+# ---------------------------------------------------------------------------
+
+@router.get("", response_model=List[ChantierResponse])
+async def list_chantiers(
+    request: Request,
+    org_id: str = Query(...),
+    statut: Optional[str] = None,
+    priorite: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantiers').select('*').eq('org_id', org_id).order('created_at', desc=True)
+        if statut:
+            query = query.eq('statut', statut)
+        if priorite:
+            query = query.eq('priorite', priorite)
+        if search:
+            query = query.or_(f"nom.ilike.%{search}%,client_name.ilike.%{search}%,ville.ilike.%{search}%")
+        result = query.limit(limit).offset(offset).execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste chantiers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("", response_model=ChantierResponse)
+async def create_chantier(request: Request, org_id: str = Query(...), chantier: ChantierCreate = None):
+    try:
+        user = check_user_org_access(request, org_id)
+        data = chantier.dict(exclude_none=True)
+        data['org_id'] = org_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantiers').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation chantier")
+        logger.info(f"Chantier cree: {result.data[0]['id']} par {user['email']}")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation chantier: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{chantier_id}", response_model=ChantierResponse)
+async def get_chantier(request: Request, org_id: str = Query(...), chantier_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        result = get_supabase().table('chantiers').select('*').eq('id', chantier_id).eq('org_id', org_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Chantier non trouve")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur recuperation chantier: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}", response_model=ChantierResponse)
+async def update_chantier(request: Request, org_id: str = Query(...), chantier_id: str = None, chantier: ChantierUpdate = None):
+    try:
+        user = check_user_org_access(request, org_id)
+        existing = get_supabase().table('chantiers').select('id').eq('id', chantier_id).eq('org_id', org_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Chantier non trouve")
+        update_data = chantier.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantiers').update(update_data).eq('id', chantier_id).execute()
+        logger.info(f"Chantier mis a jour: {chantier_id} par {user['email']}")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour chantier: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}")
+async def delete_chantier(request: Request, org_id: str = Query(...), chantier_id: str = None):
+    try:
+        user = check_user_org_access(request, org_id)
+        existing = get_supabase().table('chantiers').select('id').eq('id', chantier_id).eq('org_id', org_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Chantier non trouve")
+        get_supabase().table('chantiers').delete().eq('id', chantier_id).execute()
+        logger.info(f"Chantier supprime: {chantier_id} par {user['email']}")
+        return {"success": True, "message": "Chantier supprime"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression chantier: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS SITUATIONS
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/situations", response_model=List[SituationResponse])
+async def list_situations(request: Request, org_id: str = Query(...), chantier_id: str = None, statut: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_situations').select('*').eq('chantier_id', chantier_id).order('numero', desc=True)
+        if statut:
+            query = query.eq('statut', statut)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste situations: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/situations", response_model=SituationResponse)
+async def create_situation(request: Request, org_id: str = Query(...), chantier_id: str = None, situation: SituationCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = situation.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_situations').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation situation")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/situations/{situation_id}", response_model=SituationResponse)
+async def update_situation(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None, situation: SituationUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = situation.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_situations').update(update_data).eq('id', situation_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Situation non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/situations/{situation_id}")
+async def delete_situation(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_situations').delete().eq('id', situation_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS DEPENSES
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/depenses", response_model=List[DepenseResponse])
+async def list_depenses(request: Request, org_id: str = Query(...), chantier_id: str = None, categorie: Optional[str] = None, statut: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_depenses').select('*').eq('chantier_id', chantier_id).order('date_depense', desc=True)
+        if categorie:
+            query = query.eq('categorie', categorie)
+        if statut:
+            query = query.eq('statut', statut)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste depenses: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/depenses", response_model=DepenseResponse)
+async def create_depense(request: Request, org_id: str = Query(...), chantier_id: str = None, depense: DepenseCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = depense.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_depenses').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation depense")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation depense: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/depenses/{depense_id}", response_model=DepenseResponse)
+async def update_depense(request: Request, org_id: str = Query(...), chantier_id: str = None, depense_id: str = None, depense: DepenseUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = depense.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_depenses').update(update_data).eq('id', depense_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Depense non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour depense: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/depenses/{depense_id}")
+async def delete_depense(request: Request, org_id: str = Query(...), chantier_id: str = None, depense_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_depenses').delete().eq('id', depense_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression depense: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS OPERATIONS HTL
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/operations", response_model=List[OperationHtlResponse])
+async def list_operations(request: Request, org_id: str = Query(...), chantier_id: str = None, statut: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_operations_htl').select('*').eq('chantier_id', chantier_id).order('date_debut', desc=True)
+        if statut:
+            query = query.eq('statut', statut)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste operations: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/operations", response_model=OperationHtlResponse)
+async def create_operation(request: Request, org_id: str = Query(...), chantier_id: str = None, operation: OperationHtlCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = operation.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_operations_htl').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation operation")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation operation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/operations/{operation_id}", response_model=OperationHtlResponse)
+async def update_operation(request: Request, org_id: str = Query(...), chantier_id: str = None, operation_id: str = None, operation: OperationHtlUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = operation.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_operations_htl').update(update_data).eq('id', operation_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Operation non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour operation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/operations/{operation_id}")
+async def delete_operation(request: Request, org_id: str = Query(...), chantier_id: str = None, operation_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_operations_htl').delete().eq('id', operation_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression operation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS RECEPTIONS
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/receptions", response_model=List[ReceptionResponse])
+async def list_receptions(request: Request, org_id: str = Query(...), chantier_id: str = None, statut: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_receptions').select('*').eq('chantier_id', chantier_id).order('date_prevue', desc=True)
+        if statut:
+            query = query.eq('statut', statut)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste receptions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/receptions", response_model=ReceptionResponse)
+async def create_reception(request: Request, org_id: str = Query(...), chantier_id: str = None, reception: ReceptionCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = reception.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_receptions').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation reception")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation reception: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/receptions/{reception_id}", response_model=ReceptionResponse)
+async def update_reception(request: Request, org_id: str = Query(...), chantier_id: str = None, reception_id: str = None, reception: ReceptionUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = reception.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_receptions').update(update_data).eq('id', reception_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Reception non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour reception: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/receptions/{reception_id}")
+async def delete_reception(request: Request, org_id: str = Query(...), chantier_id: str = None, reception_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_receptions').delete().eq('id', reception_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression reception: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS TACHES
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/taches", response_model=List[TacheResponse])
+async def list_taches(request: Request, org_id: str = Query(...), chantier_id: str = None, statut: Optional[str] = None, priorite: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_taches').select('*').eq('chantier_id', chantier_id).order('date_echeance', desc=True)
+        if statut:
+            query = query.eq('statut', statut)
+        if priorite:
+            query = query.eq('priorite', priorite)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste taches: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/taches", response_model=TacheResponse)
+async def create_tache(request: Request, org_id: str = Query(...), chantier_id: str = None, tache: TacheCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = tache.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_taches').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation tache")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation tache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/taches/{tache_id}", response_model=TacheResponse)
+async def update_tache(request: Request, org_id: str = Query(...), chantier_id: str = None, tache_id: str = None, tache: TacheUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = tache.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_taches').update(update_data).eq('id', tache_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Tache non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour tache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/taches/{tache_id}")
+async def delete_tache(request: Request, org_id: str = Query(...), chantier_id: str = None, tache_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_taches').delete().eq('id', tache_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression tache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS RESSOURCES
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/ressources", response_model=List[RessourceResponse])
+async def list_ressources(request: Request, org_id: str = Query(...), chantier_id: str = None, type_ressource: Optional[str] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_ressources').select('*').eq('chantier_id', chantier_id).order('nom', desc=False)
+        if type_ressource:
+            query = query.eq('type_ressource', type_ressource)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste ressources: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/ressources", response_model=RessourceResponse)
+async def create_ressource(request: Request, org_id: str = Query(...), chantier_id: str = None, ressource: RessourceCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = ressource.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_ressources').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation ressource")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation ressource: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/ressources/{ressource_id}", response_model=RessourceResponse)
+async def update_ressource(request: Request, org_id: str = Query(...), chantier_id: str = None, ressource_id: str = None, ressource: RessourceUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = ressource.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_ressources').update(update_data).eq('id', ressource_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Ressource non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour ressource: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/ressources/{ressource_id}")
+async def delete_ressource(request: Request, org_id: str = Query(...), chantier_id: str = None, ressource_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_ressources').delete().eq('id', ressource_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression ressource: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS POINTAGES
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/pointages", response_model=List[PointageResponse])
+async def list_pointages(request: Request, org_id: str = Query(...), chantier_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_pointages').select('*').eq('chantier_id', chantier_id).order('date_pointage', desc=True)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste pointages: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/pointages", response_model=PointageResponse)
+async def create_pointage(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage: PointageCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = pointage.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_pointages').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation pointage")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/pointages/{pointage_id}", response_model=PointageResponse)
+async def update_pointage(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage_id: str = None, pointage: PointageUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = pointage.dict(exclude_none=True)
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_pointages').update(update_data).eq('id', pointage_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Pointage non trouve")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/pointages/{pointage_id}")
+async def delete_pointage(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_pointages').delete().eq('id', pointage_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS POINTAGE RESSOURCES
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/pointages/{pointage_id}/ressources", response_model=List[PointageRessourceResponse])
+async def list_pointage_ressources(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        result = get_supabase().table('chantier_pointage_ressources').select('*').eq('pointage_id', pointage_id).execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste ressources pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/pointages/{pointage_id}/ressources", response_model=PointageRessourceResponse)
+async def create_pointage_ressource(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage_id: str = None, pr: PointageRessourceCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = pr.dict(exclude_none=True)
+        data['pointage_id'] = pointage_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_pointage_ressources').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation ressource pointage")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation ressource pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS NOTIFICATIONS
+# ---------------------------------------------------------------------------
+
+@router.get("/{chantier_id}/notifications", response_model=List[NotificationResponse])
+async def list_notifications(request: Request, org_id: str = Query(...), chantier_id: str = None, lu: Optional[bool] = None):
+    try:
+        check_user_org_access(request, org_id)
+        query = get_supabase().table('chantier_notifications').select('*').eq('chantier_id', chantier_id).order('created_at', desc=True)
+        if lu is not None:
+            query = query.eq('lu', lu)
+        result = query.execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste notifications: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/notifications", response_model=NotificationResponse)
+async def create_notification(request: Request, org_id: str = Query(...), chantier_id: str = None, notification: NotificationCreate = None):
+    try:
+        check_user_org_access(request, org_id)
+        data = notification.dict(exclude_none=True)
+        data['chantier_id'] = chantier_id
+        data['created_at'] = datetime.utcnow().isoformat()
+        result = get_supabase().table('chantier_notifications').insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation notification")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation notification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/notifications/{notification_id}", response_model=NotificationResponse)
+async def update_notification(request: Request, org_id: str = Query(...), chantier_id: str = None, notification_id: str = None, notification: NotificationUpdate = None):
+    try:
+        check_user_org_access(request, org_id)
+        update_data = notification.dict(exclude_none=True)
+        result = get_supabase().table('chantier_notifications').update(update_data).eq('id', notification_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Notification non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour notification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chantier_id}/notifications/{notification_id}")
+async def delete_notification(request: Request, org_id: str = Query(...), chantier_id: str = None, notification_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        get_supabase().table('chantier_notifications').delete().eq('id', notification_id).execute()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur suppression notification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

@@ -51,18 +51,29 @@ class GmailClient:
     
     async def connect(self):
         """Établit la connexion à l'API Gmail."""
-        access_token = await self._get_access_token()
-        
-        self.credentials = Credentials(
-            token=access_token,
-            refresh_token=self.refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_ID"),
-            client_secret=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_SECRET")
-        )
-        
-        self.service = build('gmail', 'v1', credentials=self.credentials)
-        logger.info("Gmail client connected successfully")
+        try:
+            access_token = await self._get_access_token()
+            
+            self.credentials = Credentials(
+                token=access_token,
+                refresh_token=self.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_ID"),
+                client_secret=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_SECRET")
+            )
+            
+            self.service = build('gmail', 'v1', credentials=self.credentials)
+            logger.info("Gmail client connected successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to connect to Gmail API: {e}")
+            
+            # Vérifier si c'est une erreur de token invalide
+            if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+                logger.error("Refresh token invalide ou expiré. Un nouveau token est nécessaire.")
+                raise Exception(f"Refresh token invalide: {str(e)}")
+            
+            raise
     
     async def list_messages(
         self, 
@@ -132,7 +143,7 @@ class GmailClient:
     
     async def get_message(self, message_id: str) -> Dict[str, Any]:
         """
-        Récupère le détail complet d'un message.
+        Récupère un message Gmail complet.
         
         Args:
             message_id: ID du message Gmail
@@ -154,6 +165,27 @@ class GmailClient:
             
         except HttpError as e:
             logger.error(f"Error fetching message {message_id}: {e}")
+            
+            # Si c'est une erreur 401 (non authentifié), essayer de rafraîchir la connexion
+            if e.status_code == 401:
+                logger.info("Token expiré, tentative de reconnexion...")
+                try:
+                    # Recréer le service avec un nouveau token
+                    await self.connect()
+                    
+                    # Réessayer la requête
+                    message = self.service.users().messages().get(
+                        userId='me',
+                        id=message_id,
+                        format='full'
+                    ).execute()
+                    
+                    logger.info("Reconnexion réussie, message récupéré")
+                    return message
+                    
+                except Exception as retry_error:
+                    logger.error(f"Échec de reconnexion: {retry_error}")
+            
             raise
     
     def parse_headers(self, message: Dict[str, Any]) -> Dict[str, str]:
@@ -165,18 +197,118 @@ class GmailClient:
         """Extrait le corps texte du message."""
         parts = message.get('payload', {}).get('parts', [])
         
-        # Chercher la partie text/plain
-        for part in parts:
-            if part.get('mimeType') == 'text/plain':
+        # Fonction récursive pour collecter toutes les parties texte
+        def collect_text_parts(parts_list, depth=0):
+            text_parts = []
+            html_parts = []
+            
+            for part in parts_list:
+                mime_type = part.get('mimeType', '')
                 data = part.get('body', {}).get('data', '')
+                
                 if data:
-                    return base64.urlsafe_b64decode(data).decode('utf-8')
+                    try:
+                        content = base64.urlsafe_b64decode(data).decode('utf-8')
+                        
+                        if mime_type == 'text/plain':
+                            text_parts.append(content)
+                        elif mime_type == 'text/html':
+                            html_parts.append(content)
+                    except:
+                        pass
+                
+                # Sous-parties
+                if 'parts' in part and part['parts']:
+                    sub_text, sub_html = collect_text_parts(part['parts'], depth + 1)
+                    text_parts.extend(sub_text)
+                    html_parts.extend(sub_html)
+            
+            return text_parts, html_parts
+        
+        # Collecter toutes les parties texte et HTML
+        text_parts, html_parts = collect_text_parts(parts)
+        
+        # Vérifier si le texte brut contient des markers de forward
+        def contains_forward_markers(text):
+            import re
+            forward_markers = [
+                r'Forwarded message',
+                r'Original Message',
+                r'Begin forwarded message',
+                r'De\s*:.*\n.*\nDate\s*:',
+                r'From\s*:.*\n.*\nDate\s*:',
+                r'Subject\s*:.*\n.*\nTo\s*:',
+                r'Objet\s*:.*\n.*\nÀ\s*:',
+            ]
+            for marker in forward_markers:
+                if re.search(marker, text, re.IGNORECASE):
+                    return True
+            return False
+        
+        # Priorité 1: texte brut qui contient des markers de forward
+        if text_parts:
+            # Prendre la partie texte la plus longue
+            longest_text = max(text_parts, key=len)
+            
+            # Vérifier si c'est un forward
+            if contains_forward_markers(longest_text):
+                return longest_text
+            
+            # Si le texte est long mais ne contient pas de forward, c'est probablement juste une signature
+            # Dans ce cas, essayer le HTML
+            if len(longest_text.strip()) > 1000 and html_parts:
+                # Le texte est long mais pas un forward, essayer le HTML
+                pass
+            elif len(longest_text.strip()) > 100:
+                # Texte court mais valide
+                return longest_text
+        
+        # Priorité 2: HTML converti en texte
+        if html_parts:
+            # Prendre la partie HTML la plus longue
+            longest_html = max(html_parts, key=len)
+            
+            # Extraction améliorée de texte HTML
+            import re
+            
+            # Supprimer d'abord les balises <style> et <script> avec leur contenu
+            html_without_style_script = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', longest_html, flags=re.DOTALL | re.IGNORECASE)
+            
+            # Supprimer les commentaires HTML
+            html_without_comments = re.sub(r'<!--.*?-->', ' ', html_without_style_script, flags=re.DOTALL)
+            
+            # Extraire le texte entre balises
+            text = re.sub(r'<[^>]+>', ' ', html_without_comments)
+            
+            # Remplacer les entités HTML courantes
+            replacements = {
+                '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>',
+                '&quot;': '"', '&apos;': "'", '&cent;': '¢', '&pound;': '£',
+                '&yen;': '¥', '&euro;': '€', '&copy;': '©', '&reg;': '®',
+                '&#160;': ' ', '&#38;': '&', '&#60;': '<', '&#62;': '>',
+                '&#34;': '"', '&#39;': "'", '&#169;': '©', '&#174;': '®',
+                '&#8211;': '-', '&#8212;': '--', '&#8216;': "'", '&#8217;': "'",
+                '&#8220;': '"', '&#8221;': '"', '&#8230;': '...'
+            }
+            
+            for entity, replacement in replacements.items():
+                text = text.replace(entity, replacement)
+            
+            # Nettoyer les espaces multiples
+            text = re.sub(r'\s+', ' ', text)
+            text = text.strip()
+            
+            if text:
+                return text
         
         # Fallback: chercher dans le body direct
         body = message.get('payload', {}).get('body', {})
         data = body.get('data', '')
         if data:
-            return base64.urlsafe_b64decode(data).decode('utf-8')
+            try:
+                return base64.urlsafe_b64decode(data).decode('utf-8')
+            except:
+                return ""
         
         return ""
     

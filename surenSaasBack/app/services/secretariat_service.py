@@ -63,10 +63,10 @@ class SecretariatService:
             email_response = self.client.table("emails")\
                 .select("*")\
                 .eq("id", email_id)\
-                .single()\
+                .maybe_single()\
                 .execute()
             
-            if not email_response.data:
+            if not email_response or not email_response.data:
                 logger.error(f"Email {email_id} non trouvé")
                 return None
             

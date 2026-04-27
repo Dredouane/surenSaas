@@ -45,7 +45,7 @@ def _format_thread_list_item(thread: dict) -> dict:
         "subject_cleaned": thread.get("subject_cleaned"),
         "participants": {
             "emails": thread.get("participant_emails", []),
-            "names": thread.get("participant_names", [])
+            "names": [name for name in thread.get("participant_names", []) if name is not None]
         },
         "ai_summary": thread.get("ai_summary"),
         "ai_urgency": thread.get("ai_urgency", "medium"),
@@ -228,7 +228,7 @@ async def get_thread(
             "subject_cleaned": thread.get("subject_cleaned"),
             "participants": {
                 "emails": thread.get("participant_emails", []),
-                "names": thread.get("participant_names", [])
+                "names": [name for name in thread.get("participant_names", []) if name is not None]
             },
             "ai_summary": thread.get("ai_summary"),
             "ai_context": thread.get("ai_context"),

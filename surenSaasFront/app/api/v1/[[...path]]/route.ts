@@ -96,6 +96,7 @@ async function handleProxy(request: NextRequest, method: string) {
       method,
       headers,
       body: body || undefined,
+      cache: 'no-store',
     });
     
     console.log(`   ← Réponse: ${response.status} ${response.statusText}`);
@@ -109,9 +110,28 @@ async function handleProxy(request: NextRequest, method: string) {
         console.error(`   🔴 ERREUR: Cookie de session invalide ou expiré (${authError || 'unknown'})`);
         console.error(`   🔴 Redirection vers ${authRedirect} requise`);
         // Rediriger vers la page de login
-        return NextResponse.redirect(new URL(authRedirect, request.url));
+        // Utiliser l'URL publique du frontend si disponible
+        const frontendUrl = process.env.FRONTEND_URL;
+        if (frontendUrl) {
+          console.error(`   🔴 Utilisation de l'URL frontend: ${frontendUrl}`);
+          return NextResponse.redirect(new URL(authRedirect, frontendUrl));
+        } else {
+          return NextResponse.redirect(new URL(authRedirect, request.url));
+        }
       } else {
         console.error(`   🔴 ERREUR 401: Session invalide mais pas de header X-Auth-Redirect`);
+        // Rediriger quand même vers /login pour les endpoints qui nécessitent une authentification
+        // Sauf pour les endpoints publics comme /auth/*
+        const pathname = request.nextUrl.pathname;
+        if (!pathname.includes('/auth/')) {
+          console.error(`   🔴 Redirection vers /login pour ${pathname}`);
+          const frontendUrl = process.env.FRONTEND_URL;
+          if (frontendUrl) {
+            return NextResponse.redirect(new URL('/login', frontendUrl));
+          } else {
+            return NextResponse.redirect(new URL('/login', request.url));
+          }
+        }
       }
     }
     

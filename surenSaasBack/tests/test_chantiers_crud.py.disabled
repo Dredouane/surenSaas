@@ -1,0 +1,864 @@
+#!/usr/bin/env python3
+"""
+Tests d'intégration pour les endpoints chantiers CRUD.
+Utilise la base réelle. Nécessite SUREN_TEST_LOGIN et SUREN_TEST_PASSWORD.
+"""
+
+import sys
+import os
+import uuid as _uuid
+from datetime import datetime, timedelta
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from starlette.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+
+
+TEST_ORG_ID = "REDACTEDORG"
+TEST_LOGIN = os.getenv("SUREN_TEST_LOGIN")
+TEST_PASSWORD = os.getenv("SUREN_TEST_PASSWORD")
+
+EXISTING_REF = "CRF"
+EXISTING_UUID = "d02e9843-a3a5-46f3-a2d2-5a9bc9c31fb5"
+TEST_REF = f"__test_chantier_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}__"
+
+
+class Colors:
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    RESET = "\033[0m"
+
+
+def print_header(title):
+    print(f"\n{Colors.BLUE}{'=' * 60}{Colors.RESET}")
+    print(f"{Colors.BLUE}{title.center(60)}{Colors.RESET}")
+    print(f"{Colors.BLUE}{'=' * 60}{Colors.RESET}\n")
+
+
+def print_success(msg):
+    print(f"{Colors.GREEN}  PASS  {msg}{Colors.RESET}")
+
+
+def print_error(msg):
+    print(f"{Colors.RED}  FAIL  {msg}{Colors.RESET}")
+
+
+def print_warning(msg):
+    print(f"{Colors.YELLOW}  SKIP  {msg}{Colors.RESET}")
+
+
+_AUTH_CACHE = None
+
+
+def get_auth_session(force=False):
+    """Authentifie et retourne cookies + org_id (avec cache global)."""
+    global _AUTH_CACHE
+    if _AUTH_CACHE is not None and not force:
+        return _AUTH_CACHE
+
+    if not TEST_LOGIN:
+        print_warning("SUREN_TEST_LOGIN non défini")
+        _AUTH_CACHE = None
+        return None
+
+    try:
+        response = client.post("/api/v1/auth/check-email", json={"email": TEST_LOGIN})
+        if response.status_code != 200:
+            print_warning(f"check-email: {response.status_code}")
+            _AUTH_CACHE = None
+            return None
+
+        check_data = response.json()
+        if not check_data.get("authorized"):
+            print_warning("Email non autorisé")
+            _AUTH_CACHE = None
+            return None
+
+        org_id = check_data.get("org_id")
+
+        if TEST_PASSWORD:
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"email": TEST_LOGIN, "password": TEST_PASSWORD},
+            )
+            if response.status_code == 200:
+                session_token = response.cookies.get("session_token")
+                if session_token:
+                    _AUTH_CACHE = {"session_token": session_token, "org_id": org_id}
+                    return _AUTH_CACHE
+
+        from app.api.auth import get_supabase, create_session_token
+
+        supabase = get_supabase()
+        user_result = (
+            supabase.table("users")
+            .select("id")
+            .eq("email", TEST_LOGIN)
+            .single()
+            .execute()
+        )
+        if not user_result.data:
+            print_warning(f"Utilisateur {TEST_LOGIN} non trouvé en DB")
+            _AUTH_CACHE = None
+            return None
+
+        user_id = user_result.data["id"]
+        org_slug = ""
+        try:
+            org_result = (
+                supabase.table("organizations")
+                .select("slug")
+                .eq("id", org_id)
+                .single()
+                .execute()
+            )
+            if org_result.data:
+                org_slug = org_result.data.get("slug", "")
+        except Exception:
+            pass
+
+        token = create_session_token(
+            user_id=user_id,
+            email=TEST_LOGIN,
+            org_id=org_id,
+            org_slug=org_slug,
+            role="admin",
+        )
+        if token:
+            _AUTH_CACHE = {"session_token": token, "org_id": org_id}
+            return _AUTH_CACHE
+
+        _AUTH_CACHE = None
+        return None
+
+    except Exception as e:
+        print_warning(f"Auth échouée: {e}")
+        _AUTH_CACHE = None
+        return None
+
+
+def setup_test_chantier(supabase, org_id, user_id):
+    """Crée un chantier de test temporaire et retourne son id + ref."""
+    data = {
+        "org_id": org_id,
+        "ref": TEST_REF,
+        "nom": "Chantier de test CRUD",
+        "adresse": "42 Rue du Test, 75000 Paris",
+        "conducteur": "Test Conducteur",
+        "montant_base": 100000.00,
+        "statut": "en_cours",
+        "priorite": 1,
+        "created_by": user_id,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    result = supabase.table("chantiers").insert(data).execute()
+    if not result.data:
+        raise RuntimeError("Impossible de créer le chantier de test")
+    return result.data[0]["id"], TEST_REF
+
+
+def teardown_test_chantier(supabase, chantier_id):
+    """Supprime le chantier de test et ses enfants."""
+    for table in [
+        "chantier_notifications",
+        "chantier_pointage_ressources",
+        "chantier_pointages",
+        "chantier_situations",
+        "chantier_depenses",
+        "chantier_operations_htl",
+        "chantier_receptions",
+        "chantier_taches",
+        "chantier_ressources",
+    ]:
+        try:
+            supabase.table(table).delete().eq("chantier_id", chantier_id).execute()
+        except Exception:
+            pass
+    supabase.table("chantiers").delete().eq("id", chantier_id).execute()
+
+
+# ============================================================================
+# TESTS
+# ============================================================================
+
+
+def test_get_chantier_by_ref():
+    """GET /chantiers/{ref} → 200, retourne le bon chantier."""
+    print_header("GET chantier par ref")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}?org_id={org_id}", cookies=cookies
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    data = response.json()
+    if data.get("ref") != EXISTING_REF:
+        print_error(f"ref attendu={EXISTING_REF}, reçu={data.get('ref')}")
+        return False
+
+    print_success(f"OK — ref={data['ref']}, nom={data.get('nom')}")
+    return True
+
+
+def test_get_chantier_by_uuid():
+    """GET /chantiers/{uuid} → 200."""
+    print_header("GET chantier par UUID")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_UUID}?org_id={org_id}", cookies=cookies
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    data = response.json()
+    if data.get("id") != EXISTING_UUID:
+        print_error(f"id attendu={EXISTING_UUID}, reçu={data.get('id')}")
+        return False
+
+    print_success(f"OK — id={data['id'][:8]}..., ref={data['ref']}")
+    return True
+
+
+def test_get_chantier_404():
+    """GET /chantiers/{inexistant} → 404."""
+    print_header("GET chantier inexistant → 404")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    fake_ref = f"__inexistant_{datetime.utcnow().timestamp()}__"
+    response = client.get(
+        f"/api/v1/chantiers/{fake_ref}?org_id={org_id}", cookies=cookies
+    )
+    if response.status_code != 404:
+        print_error(f"Attendu 404, reçu {response.status_code}")
+        return False
+
+    print_success("OK — 404 correctement retourné")
+    return True
+
+
+def test_list_situations():
+    """GET /chantiers/{ref}/situations → 200."""
+    print_header("GET situations")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/situations?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} situation(s)")
+    return True
+
+
+def test_list_depenses():
+    """GET /chantiers/{ref}/depenses → 200."""
+    print_header("GET depenses")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/depenses?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} depense(s)")
+    return True
+
+
+def test_list_operations():
+    """GET /chantiers/{ref}/operations → 200."""
+    print_header("GET operations")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/operations?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} operation(s)")
+    return True
+
+
+def test_list_receptions():
+    """GET /chantiers/{ref}/receptions → 200."""
+    print_header("GET receptions")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/receptions?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} reception(s)")
+    return True
+
+
+def test_list_taches():
+    """GET /chantiers/{ref}/taches → 200."""
+    print_header("GET taches")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/taches?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} tache(s)")
+    return True
+
+
+def test_list_ressources():
+    """GET /chantiers/{ref}/ressources → 200."""
+    print_header("GET ressources")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/ressources?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} ressource(s)")
+    return True
+
+
+def test_list_pointages():
+    """GET /chantiers/{ref}/pointages → 200."""
+    print_header("GET pointages")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/pointages?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} pointage(s)")
+    return True
+
+
+def test_list_notifications():
+    """GET /chantiers/{ref}/notifications → 200."""
+    print_header("GET notifications")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    response = client.get(
+        f"/api/v1/chantiers/{EXISTING_REF}/notifications?org_id={org_id}",
+        cookies=cookies,
+    )
+    if response.status_code != 200:
+        print_error(f"HTTP {response.status_code}: {response.text[:100]}")
+        return False
+
+    print_success(f"OK — {len(response.json())} notification(s)")
+    return True
+
+
+def test_create_situation():
+    """POST /chantiers/{ref}/situations → 201/200."""
+    print_header("POST situation")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "numero": 999,
+        "libelle": "Situation test CRUD",
+        "montant": 1000.00,
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/situations?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_situations").delete().eq(
+            "id", data.get("id")
+        ).execute()
+    except Exception:
+        pass
+
+    from app.api.auth import get_supabase
+    return True
+
+
+def test_create_depense():
+    """POST /chantiers/{ref}/depenses → 201/200."""
+    print_header("POST depense")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "fournisseur": "Test Fournisseur",
+        "categorie": "autre",
+        "description": "Depense test CRUD",
+        "montant": 500.00,
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/depenses?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_depenses").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_create_operation():
+    """POST /chantiers/{ref}/operations → 201/200."""
+    print_header("POST operation")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "description": "Operation test CRUD",
+        "type": "autre",
+        "source": "manuel",
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/operations?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_operations_htl").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_create_tache():
+    """POST /chantiers/{ref}/taches → 201/200."""
+    print_header("POST tache")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "titre": "Tache test CRUD",
+        "description": "Description test",
+        "type": "action",
+        "source": "direction",
+        "priorite": "moyenne",
+        "statut": "en_attente",
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/taches?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_taches").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_create_pointage():
+    """POST /chantiers/{ref}/pointages → 201/200."""
+    print_header("POST pointage")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "commentaires": "Pointage test CRUD",
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/pointages?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_pointages").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_create_notification():
+    """POST /chantiers/{ref}/notifications → 201/200."""
+    print_header("POST notification")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "type": "information",
+        "titre": "Notification test CRUD",
+        "message": "Test creation via API",
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/notifications?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_notifications").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_create_ressource():
+    """POST /chantiers/{ref}/ressources → 201/200."""
+    print_header("POST ressource")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    payload = {
+        "nom": "Test Ressource CRUD",
+        "type": "homme",
+        "specialite": "Test",
+    }
+    response = client.post(
+        f"/api/v1/chantiers/{EXISTING_REF}/ressources?org_id={org_id}",
+        json=payload,
+        cookies=cookies,
+    )
+    if response.status_code not in (200, 201):
+        print_error(f"HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    data = response.json()
+    print_success(f"OK — id={data.get('id', '?')[:8]}...")
+
+    from app.api.auth import get_supabase
+    supabase = get_supabase()
+    try:
+        supabase.table("chantier_ressources").delete().eq("id", data.get("id")).execute()
+    except Exception:
+        pass
+
+    return True
+
+
+def test_full_create_update_delete_chantier():
+    """Test complet: POST → GET → PUT → DELETE d'un chantier par ref."""
+    print_header("Cycle CRUD complet chantier")
+    auth = get_auth_session()
+    if not auth:
+        print_warning("ignoré")
+        return True
+
+    from app.api.auth import get_supabase
+
+    supabase = get_supabase()
+    cookies = {"session_token": auth["session_token"]}
+    org_id = auth["org_id"]
+
+    user_id = (
+        supabase.table("users")
+        .select("id")
+        .eq("email", TEST_LOGIN)
+        .single()
+        .execute()
+        .data["id"]
+    )
+
+    # 1. Créer un chantier de test
+    print("1. POST create chantier...")
+    test_ref = TEST_REF
+    test_uuid, _ = setup_test_chantier(supabase, org_id, user_id)
+    print_success(f"Créé avec id={test_uuid[:8]}..., ref={test_ref}")
+
+    try:
+        # 2. GET par ref
+        print("2. GET par ref...")
+        r = client.get(
+            f"/api/v1/chantiers/{test_ref}?org_id={org_id}", cookies=cookies
+        )
+        if r.status_code != 200:
+            print_error(f"GET par ref: HTTP {r.status_code}")
+            return False
+        assert r.json()["ref"] == test_ref, "ref mismatch"
+        print_success("OK")
+
+        # 3. GET par UUID
+        print("3. GET par UUID...")
+        r = client.get(
+            f"/api/v1/chantiers/{test_uuid}?org_id={org_id}", cookies=cookies
+        )
+        if r.status_code != 200:
+            print_error(f"GET par UUID: HTTP {r.status_code}")
+            return False
+        assert r.json()["id"] == test_uuid, "id mismatch"
+        print_success("OK")
+
+        # 4. PUT (update) par ref
+        print("4. PUT update par ref...")
+        r = client.put(
+            f"/api/v1/chantiers/{test_ref}?org_id={org_id}",
+            json={"nom": "Nom modifié via test", "commentaires": "Test update"},
+            cookies=cookies,
+        )
+        if r.status_code != 200:
+            print_error(f"PUT: HTTP {r.status_code}: {r.text[:200]}")
+            return False
+        assert r.json()["nom"] == "Nom modifié via test", "nom not updated"
+        print_success("OK")
+
+        # 5. DELETE par UUID
+        print("5. DELETE par UUID...")
+        r = client.delete(
+            f"/api/v1/chantiers/{test_uuid}?org_id={org_id}", cookies=cookies
+        )
+        if r.status_code != 200:
+            print_error(f"DELETE: HTTP {r.status_code}: {r.text[:200]}")
+            return False
+        print_success("OK")
+
+        # 6. Vérifier 404 après suppression
+        print("6. Vérification 404 après delete...")
+        r = client.get(
+            f"/api/v1/chantiers/{test_uuid}?org_id={org_id}", cookies=cookies
+        )
+        if r.status_code != 404:
+            print_error(f"Attendu 404, reçu {r.status_code}")
+            return False
+        print_success("OK")
+
+        return True
+
+    finally:
+        teardown_test_chantier(supabase, test_uuid)
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+if __name__ == "__main__":
+    print_header("TESTS INTÉGRATION CHANTIERS CRUD")
+
+    tests = [
+        ("GET by ref", test_get_chantier_by_ref),
+        ("GET by UUID", test_get_chantier_by_uuid),
+        ("GET 404 inexistant", test_get_chantier_404),
+        ("GET situations", test_list_situations),
+        ("GET depenses", test_list_depenses),
+        ("GET operations", test_list_operations),
+        ("GET receptions", test_list_receptions),
+        ("GET taches", test_list_taches),
+        ("GET ressources", test_list_ressources),
+        ("GET pointages", test_list_pointages),
+        ("GET notifications", test_list_notifications),
+        ("POST situation", test_create_situation),
+        ("POST depense", test_create_depense),
+        ("POST operation", test_create_operation),
+        ("POST tache", test_create_tache),
+        ("POST pointage", test_create_pointage),
+        ("POST notification", test_create_notification),
+        ("POST ressource", test_create_ressource),
+        ("Cycle CRUD complet", test_full_create_update_delete_chantier),
+    ]
+
+    results = []
+    for name, fn in tests:
+        try:
+            ok = fn()
+        except Exception as e:
+            print_error(f"{name}: {e}")
+            import traceback
+
+            traceback.print_exc()
+            ok = False
+        results.append((name, ok))
+
+    print_header("RÉSUMÉ")
+    passed = sum(1 for _, ok in results if ok)
+    for name, ok in results:
+        (print_success if ok else print_error)(name)
+
+    print(f"\n{Colors.BLUE}Total: {passed}/{len(tests)} test(s) réussi(s){Colors.RESET}")
+    sys.exit(0 if passed == len(tests) else 1)

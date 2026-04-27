@@ -9,6 +9,10 @@ import re
 from dataclasses import dataclass
 from typing import Optional, List
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ExtractedEmail:
@@ -28,12 +32,31 @@ class ExtractedEmail:
 class ContentCleaner:
     """Extrait le mail original d'un forward et nettoie le contenu."""
     
-    # Patterns de détection forward (ordre de priorité)
-    FORWARD_PATTERNS = [
-        r"-+\s*Forwarded message\s*-+",           # Gmail standard (lenient dash count)
-        r"_+\s*Original Message\s*_+",            # Outlook (lenient underscore count)
-        r"Begin forwarded message:",               # Apple Mail
-        r"-{3,}\s*Original\s*-{3,}",              # Variante
+    # Patterns de détection forward - SÉPARATEURS seulement (ordre de priorité)
+    FORWARD_SEPARATOR_PATTERNS = [
+        r"-{3,}\s*Forwarded message\s*-{3,}",           # Gmail standard
+        r"_+\s*Original Message\s*_+",                  # Outlook
+        r"Begin forwarded message:",                    # Apple Mail
+        r"-{3,}\s*Original\s*-{3,}",                   # Variante
+        r"-{8,}\s*Message transféré\s*-{8,}",          # Thunderbird français
+        r"----- Original Message -----",                # Outlook variante
+        r"--- Forwarded message ---",                   # Gmail variante
+        r"-{5,}\s*Forwarded\s*-{5,}",                  # Autre variante
+        # Nouveaux patterns pour forwards sans séparateur explicite
+        r"\nDe\s*:\s*.+?<.+?@.+?>\s*\nEnvoyé\s*:\s*.+?\nÀ\s*:\s*.+?\nObjet\s*:\s*.+?\n",  # Pattern français complet
+        r"\nFrom\s*:\s*.+?<.+?@.+?>\s*\nDate\s*:\s*.+?\nTo\s*:\s*.+?\nSubject\s*:\s*.+?\n",  # Pattern anglais complet
+    ]
+    
+    # Patterns de headers (pour extraction après avoir trouvé le séparateur)
+    HEADER_PATTERNS = [
+        r"De\s*:\s*",                             # Format français "De :"
+        r"From\s*:\s*",                           # Format anglais "From :"
+        r"Envoyé\s*:\s*",                         # Format français "Envoyé :"
+        r"Date\s*:\s*",                           # "Date :" souvent au début d'un forward
+        r"À\s*:\s*",                              # Format français "À :"
+        r"To\s*:\s*",                             # Format anglais "To :"
+        r"Objet\s*:\s*",                          # Format français "Objet :"
+        r"Subject\s*:\s*",                        # Format anglais "Subject :"
     ]
     
     # Patterns pour extraire les headers originaux
@@ -84,31 +107,152 @@ class ContentCleaner:
     
     def detect_forward(self, content: str) -> bool:
         """Détecte si le contenu contient un forward."""
-        for pattern in self.FORWARD_PATTERNS:
+        # 1. Vérifier les séparateurs explicites
+        for pattern in self.FORWARD_SEPARATOR_PATTERNS:
             if re.search(pattern, content, re.IGNORECASE):
                 return True
+        
+        # 2. Vérifier les forwards sans séparateur 
+        # Pattern pour détecter un bloc de headers français complet
+        french_header_pattern = r'\nDe\s*:\s*.+?(?:\nEnvoyé\s*:\s*.+?)?(?:\nÀ\s*:\s*.+?)?(?:\nObjet\s*:\s*.+?)\n'
+        # Pattern pour détecter un bloc de headers anglais complet  
+        english_header_pattern = r'\nFrom\s*:\s*.+?(?:\nDate\s*:\s*.+?)?(?:\nTo\s*:\s*.+?)?(?:\nSubject\s*:\s*.+?)\n'
+        
+        # Vérifier la présence de plusieurs headers consécutifs (au moins 3)
+        header_patterns_to_check = [
+            r'De\s*:\s*', r'From\s*:\s*',
+            r'Envoyé\s*:\s*', r'Date\s*:\s*',
+            r'À\s*:\s*', r'To\s*:\s*',
+            r'Objet\s*:\s*', r'Subject\s*:\s*',
+        ]
+        
+        header_count = 0
+        for pattern in header_patterns_to_check:
+            if re.search(pattern, content, re.IGNORECASE):
+                header_count += 1
+        
+        # Si on trouve au moins 3 headers différents, c'est probablement un forward
+        if header_count >= 3:
+            return True
+        
+        # Vérifier les patterns spécifiques de blocs complets
+        if re.search(french_header_pattern, content, re.IGNORECASE | re.DOTALL):
+            return True
+        if re.search(english_header_pattern, content, re.IGNORECASE | re.DOTALL):
+            return True
+        
+        # 3. Vérifier les emails avec "TR:" (Transmis) dans le sujet ET des headers dans le corps
+        if "TR:" in content.upper() or "TRANSFÉRÉ" in content.upper() or "TRANSMIS" in content.upper():
+            # Vérifier si on a au moins "De :" et "Objet :" dans le corps
+            has_de = re.search(r'De\s*:\s*', content, re.IGNORECASE)
+            has_objet = re.search(r'(?:Objet|Subject)\s*:\s*', content, re.IGNORECASE)
+            if has_de and has_objet:
+                return True
+        
         return False
     
     def extract_original_headers(self, forwarded_content: str) -> dict:
         """Extrait les headers du mail original."""
         headers = {}
         
-        # Patterns simplifiés et plus robustes
-        header_patterns = {
-            "from": r"From:\s*([^\n]+)",
-            "to": r"To:\s*([^\n]+)",
-            "date": r"Date:\s*([^\n]+)",
-            "subject": r"Subject:\s*([^\n]+)",
-            "message_id": r"Message-ID:\s*([^\n]+)",
-            "in_reply_to": r"In-Reply-To:\s*([^\n]+)",
-        }
+        # Patterns pour les headers (anglais et français)
+        # Capture jusqu'au prochain header, début du corps, ou max 500 caractères
+        # Mots qui marquent le début du corps: Bonjour, Hello, Hi, Cher, Chère, etc.
+        body_start_patterns = r"(?:Bonjour|Hello|Hi|Cher|Chère|Madame|Monsieur|Mesdames|Messieurs|Dear|Ladies|Gentlemen)"
         
-        for key, pattern in header_patterns.items():
-            match = re.search(pattern, forwarded_content, re.IGNORECASE)
-            if match:
-                headers[key] = match.group(1).strip()
+        header_patterns = [
+            # Français
+            ("from", r"De\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("from", r"Expéditeur\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("date", r"Envoyé\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("date", r"Date\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("to", r"À\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("to", r"Destinataire\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("subject", r"Objet\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("subject", r"Sujet\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            # Anglais
+            ("from", r"From\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("date", r"Date\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("to", r"To\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("subject", r"Subject\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("message_id", r"Message-ID\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+            ("in_reply_to", r"In-Reply-To\s*:\s*([^\n]{1,500}?)(?=\s*(?:À|To|De|From|Envoyé|Date|Objet|Subject|Sujet|Cc|" + body_start_patterns + r"|$|\n))"),
+        ]
+        
+        # Trouver TOUS les séparateurs de forward (même logique que extract_original_body)
+        separator_matches = []
+        for pattern in self.FORWARD_SEPARATOR_PATTERNS:
+            for match in re.finditer(pattern, forwarded_content, re.IGNORECASE):
+                separator_matches.append((match.start(), match.end(), match.group()))
+        
+        if separator_matches:
+            # Cas 1: Forward avec séparateur explicite
+            # Trier par position (début)
+            separator_matches.sort(key=lambda x: x[0])
+            
+            # Prendre le DERNIER séparateur (le plus récent)
+            last_separator_start, last_separator_end, last_separator_pattern = separator_matches[-1]
+            
+            # Extraire ce qui vient après le DERNIER séparateur
+            content_after_last_separator = forwarded_content[last_separator_end:]
+            
+            # Chercher les headers seulement dans cette section
+            search_content = content_after_last_separator
+        else:
+            # Cas 2: Forward sans séparateur explicite
+            search_content = forwarded_content
+        
+        # Chercher les headers dans la section appropriée
+        for key, pattern in header_patterns:
+            if key not in headers:  # Ne pas écraser si déjà trouvé
+                match = re.search(pattern, search_content, re.IGNORECASE)
+                if match:
+                    headers[key] = match.group(1).strip()
         
         return headers
+    
+    def parse_french_date(self, date_str: str) -> str:
+        """
+        Convertit une date française en format ISO.
+        
+        Ex: "mardi 21 avril 2026 14:55" -> "2026-04-21T14:55:00"
+        Ex: "21 avril 2026 à 10:30" -> "2026-04-21T10:30:00"
+        """
+        if not date_str:
+            return ""
+        
+        # Noms des mois en français
+        french_months = {
+            "janvier": 1, "février": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+            "juillet": 7, "août": 8, "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12
+        }
+        
+        # Patterns de date françaises
+        patterns = [
+            # "mardi 21 avril 2026 14:55"
+            r"(?:\w+)\s+(\d{1,2})\s+(\w+)\s+(\d{4})\s+(\d{1,2}):(\d{2})",
+            # "21 avril 2026 à 10:30"
+            r"(\d{1,2})\s+(\w+)\s+(\d{4})\s+à\s+(\d{1,2}):(\d{2})",
+            # "21 avril 2026 10:30"
+            r"(\d{1,2})\s+(\w+)\s+(\d{4})\s+(\d{1,2}):(\d{2})",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, date_str, re.IGNORECASE)
+            if match:
+                day = int(match.group(1))
+                month_name = match.group(2).lower()
+                year = int(match.group(3))
+                hour = int(match.group(4))
+                minute = int(match.group(5))
+                
+                if month_name in french_months:
+                    month = french_months[month_name]
+                    # Retourner au format ISO
+                    return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:00"
+        
+        # Si aucun pattern ne match, retourner la chaîne originale
+        return date_str
     
     def parse_email_address(self, header_value: str) -> tuple[str, Optional[str]]:
         """
@@ -116,6 +260,8 @@ class ContentCleaner:
         
         Ex: "Service Commercial ACORUS <contact@acorus.fr>"
             -> ("contact@acorus.fr", "Service Commercial ACORUS")
+        Ex: "CAROFF, Enzo" (sans email)
+            -> ("", "CAROFF, Enzo")
         """
         # Pattern: Name <email@domain.com>
         match = re.match(r"(.+?)\s*<(.+?)>", header_value)
@@ -124,41 +270,186 @@ class ContentCleaner:
             email = match.group(2).strip()
             return email, name
         
-        # Juste l'email
-        return header_value.strip(), None
+        # Chercher un email dans le texte
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', header_value)
+        if email_match:
+            email = email_match.group(0)
+            # Extraire le nom (tout sauf l'email)
+            name = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', header_value).strip()
+            name = name.strip('"\'<> ')
+            return email, name if name else None
+        
+        # Pas d'email trouvé, retourner le texte comme nom
+        return "", header_value.strip()
     
     def extract_original_body(self, forwarded_content: str) -> str:
-        """Extrait le corps original du mail forwardé."""
-        # Trouver où commence le forward
-        forward_start = None
-        for pattern in self.FORWARD_PATTERNS:
-            match = re.search(pattern, forwarded_content, re.IGNORECASE)
-            if match:
-                forward_start = match.end()
+        """
+        Extrait le corps du mail original d'un forward.
+        Gère les chaînes d'emails imbriqués en prenant le PREMIER forward (le plus récent).
+        
+        Args:
+            forwarded_content: Contenu complet du forward
+            
+        Returns:
+            Corps du mail original (le PREMIER forward dans la chaîne)
+        """
+        # Trouver TOUS les séparateurs de forward
+        separator_matches = []
+        for pattern in self.FORWARD_SEPARATOR_PATTERNS:
+            for match in re.finditer(pattern, forwarded_content, re.IGNORECASE):
+                separator_matches.append((match.start(), match.end(), match.group()))
+        
+        if separator_matches:
+            # Cas 1: Forward avec séparateur explicite
+            # Trier par position (début)
+            separator_matches.sort(key=lambda x: x[0])
+            
+            # Prendre le DERNIER séparateur (le plus récent)
+            last_separator_start, last_separator_end, last_separator_pattern = separator_matches[-1]
+            
+            # Extraire ce qui vient après le DERNIER séparateur
+            content_after_last_separator = forwarded_content[last_separator_end:]
+            
+            # Maintenant, dans cette section, trouver où commencent les headers
+            # Chercher le premier header après le séparateur
+            lines = content_after_last_separator.split('\n')
+            
+            # Trouver la première ligne qui contient un header pattern
+            header_start = 0
+            for i, line in enumerate(lines):
+                for pattern in self.HEADER_PATTERNS:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        header_start = i
+                        break
+                if header_start > 0:
+                    break
+            
+            # Si pas de headers trouvés, retourner tout le contenu après le séparateur
+            if header_start == 0:
+                return content_after_last_separator.strip()
+            
+            # Trouver où finissent les headers (première ligne vide après header_start)
+            body_start = header_start
+            for i in range(header_start, min(header_start + 20, len(lines))):
+                if lines[i].strip() == '':
+                    body_start = i + 1
+                    break
+            
+            # Si on trouve un autre séparateur avant la fin des headers, c'est une chaîne imbriquée
+            # Dans ce cas, prendre tout jusqu'au prochain séparateur
+            for i in range(header_start, min(header_start + 20, len(lines))):
+                for pattern in self.FORWARD_SEPARATOR_PATTERNS:
+                    if re.search(pattern, lines[i], re.IGNORECASE):
+                        # C'est un nouveau forward imbriqué, s'arrêter avant
+                        body_start = i
+                        break
+            
+            body = '\n'.join(lines[body_start:])
+            
+            # Nettoyer les "De :", "From :", etc. qui pourraient rester
+            body = self.remove_internal_headers(body)
+            
+            return body.strip()
+        else:
+            # Cas 2: Forward sans séparateur explicite (ex: "De :" directement dans le corps)
+            # Chercher simplement la position de "De :" ou "From :"
+            de_match = re.search(r'De\s*:\s*', forwarded_content, re.IGNORECASE)
+            from_match = re.search(r'From\s*:\s*', forwarded_content, re.IGNORECASE)
+            
+            start_pos = -1
+            if de_match:
+                start_pos = de_match.start()
+            elif from_match:
+                start_pos = from_match.start()
+            
+            if start_pos == -1:
+                # Pas de headers trouvés, retourner le contenu original
+                return forwarded_content
+            
+            # Extraire le contenu à partir de "De :" ou "From :"
+            content_from_de = forwarded_content[start_pos:]
+            
+            # Maintenant, dans cette section, trouver où se trouve "Objet :" ou "Subject :"
+            # et extraire ce qui vient après
+            objet_match = re.search(r'Objet\s*:\s*', content_from_de, re.IGNORECASE)
+            subject_match = re.search(r'Subject\s*:\s*', content_from_de, re.IGNORECASE)
+            
+            headers_end = 0
+            if objet_match:
+                headers_end = objet_match.end()
+            elif subject_match:
+                headers_end = subject_match.end()
+            
+            if headers_end == 0:
+                # Pas trouvé "Objet :" ou "Subject :", essayer une autre approche
+                # Chercher la fin des headers (première ligne vide ou fin des headers typiques)
+                lines = content_from_de.split('\n')
+                for i, line in enumerate(lines):
+                    if line.strip() == '':
+                        headers_end = sum(len(lines[j]) + 1 for j in range(i))
+                        break
+                    # Si la ligne contient le début d'un email (ex: "Bonjour")
+                    if re.match(r'^(Bonjour|Hello|Hi|Cher|Dear)', line, re.IGNORECASE):
+                        headers_end = sum(len(lines[j]) + 1 for j in range(i))
+                        break
+            
+            if headers_end == 0:
+                # Toujours pas trouvé, prendre tout après "De :"
+                headers_end = len(content_from_de)
+            
+            # Extraire le contenu après les headers
+            content_after_headers = content_from_de[headers_end:]
+            
+            # Chercher où commence le vrai corps (première ligne non vide)
+            lines = content_after_headers.split('\n')
+            body_start = 0
+            for i, line in enumerate(lines):
+                if line.strip() != '':
+                    body_start = i
+                    break
+            
+            body = '\n'.join(lines[body_start:])
+            
+            # Nettoyer les headers internes qui pourraient rester
+            body = self.remove_internal_headers(body)
+            
+            # Nettoyer les chaînes de forwards (supprimer les forwards suivants)
+            body = self._remove_forward_chains(body)
+            
+            return body.strip()
+    
+    def _remove_forward_chains(self, content: str) -> str:
+        """
+        Supprime les forwards supplémentaires dans une chaîne.
+        Garde seulement le PREMIER bloc de forward.
+        
+        Args:
+            content: Contenu avec potentiellement plusieurs forwards
+            
+        Returns:
+            Contenu avec seulement le premier forward
+        """
+        # Chercher le DEUXIÈME occurrence de "De :" ou "From :"
+        de_patterns = [r'\nDe\s*:\s*', r'\nFrom\s*:\s*']
+        
+        first_pos = -1
+        second_pos = -1
+        
+        for pattern in de_patterns:
+            matches = list(re.finditer(pattern, content, re.IGNORECASE))
+            if len(matches) >= 2:
+                # Premier "De :" ou "From :"
+                first_pos = matches[0].start()
+                # Deuxième "De :" ou "From :" (début du forward suivant)
+                second_pos = matches[1].start()
                 break
         
-        if forward_start is None:
-            return forwarded_content
+        # Si on a trouvé un deuxième forward, supprimer tout ce qui vient après
+        if second_pos > first_pos:
+            logger.debug(f"🔍 Chaîne de forwards détectée, suppression après position {second_pos}")
+            return content[:second_pos]
         
-        # Extraire ce qui vient après le marker forward
-        content_after_marker = forwarded_content[forward_start:]
-        
-        # Supprimer les headers originaux (ils sont sur les premières lignes)
-        lines = content_after_marker.split('\n')
-        body_start = 0
-        
-        for i, line in enumerate(lines):
-            # Si ligne vide après headers, c'est le début du body
-            if line.strip() == '' and i > 0:
-                body_start = i + 1
-                break
-            # Si on a dépassé 10 lignes de headers, on arrête
-            if i > 10:
-                body_start = i
-                break
-        
-        body = '\n'.join(lines[body_start:])
-        return body.strip()
+        return content
     
     def remove_signature(self, text: str) -> str:
         """Supprime la signature de l'email."""
@@ -255,12 +546,17 @@ class ContentCleaner:
         if "references" in headers:
             references = [ref.strip() for ref in headers["references"].split()]
         
+        # Convertir la date française en format ISO si nécessaire
+        date_str = headers.get("date", "")
+        if date_str:
+            date_str = self.parse_french_date(date_str)
+        
         return ExtractedEmail(
             from_email=from_email,
             from_name=from_name,
             to_emails=to_emails,
             subject=subject.strip(),
-            date=headers.get("date", ""),
+            date=date_str,
             body=original_body,
             body_cleaned=cleaned_body,
             message_id=headers.get("message_id"),

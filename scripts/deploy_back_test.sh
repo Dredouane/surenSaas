@@ -131,20 +131,20 @@ create_or_update_secret() {
         echo -e "${YELLOW}  Mise à jour du secret: $name${NC}"
         echo -n "$value" | gcloud secrets versions add "$name" --data-file=- --project="$GCP_PROJECT_ID" > /dev/null 2>&1
         
-        # Nettoyer les anciennes versions (garder uniquement la plus récente)
+        # Nettoyer les anciennes versions (garder seulement la dernière version)
         echo -e "${BLUE}  Nettoyage des anciennes versions...${NC}"
-        # Lister toutes les versions et supprimer les anciennes
+        # Lister seulement les versions actives (ENABLED), triées par date décroissante
         local versions
-        versions=$(gcloud secrets versions list "$name" --project="$GCP_PROJECT_ID" --format="value(name)" --sort-by="~createTime" 2>/dev/null || echo "")
+        versions=$(gcloud secrets versions list "$name" --project="$GCP_PROJECT_ID" --filter="state:ENABLED" --format="value(name)" --sort-by="~createTime" 2>/dev/null || echo "")
         if [ ! -z "$versions" ]; then
             local count=0
             for version in $versions; do
                 if [ $count -ge 1 ]; then
                     # Supprimer les versions anciennes (garder seulement la plus récente)
+                    echo -e "${BLUE}    Suppression de la version $version...${NC}"
                     gcloud secrets versions destroy "$version" --secret="$name" --project="$GCP_PROJECT_ID" --quiet > /dev/null 2>&1
-                    echo -e "${BLUE}    Version $version supprimée${NC}"
                 fi
-                ((count++))
+                count=$((count+1))
             done
         fi
     else
@@ -255,7 +255,7 @@ gcloud run deploy $TEST_BACK_SERVICE_NAME \
     --allow-unauthenticated \
     --set-secrets "$SECRETS" \
     --env-vars-file $ENV_FILE \
-    --memory 1Gi \
+    --memory 2Gi \
     --cpu 1 \
     --concurrency 100 \
     --max-instances 10 \
@@ -301,14 +301,14 @@ if gcloud artifacts repositories describe "cloud-run-source-deploy" --location="
         echo -e "${BLUE}  Images trouvées: $(echo "$IMAGES" | wc -l)${NC}"
         
         # Garder seulement les 3 images les plus récentes
-        local count=0
+        count=0
         for digest in $IMAGES; do
             if [ $count -ge 3 ]; then
                 # Supprimer les images anciennes
                 echo -e "${YELLOW}    Suppression de l'image: ${digest:0:20}...${NC}"
                 gcloud artifacts docker images delete "$REPOSITORY@$digest" --quiet > /dev/null 2>&1
             fi
-            ((count++))
+            count=$((count+1))
         done
         
         echo -e "${GREEN}  ✅ Nettoyage Artifact Registry terminé (3 images conservées)${NC}"

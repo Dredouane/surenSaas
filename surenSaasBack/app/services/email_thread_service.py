@@ -134,15 +134,33 @@ class ThreadService:
         
         thread = thread_response.data
         
-        # Récupérer les emails du thread
+        # Récupérer les emails du thread (du plus récent au plus ancien)
         emails_response = self.client.table("emails")\
             .select("*")\
             .eq("gmail_thread_id", thread["gmail_thread_id"])\
             .eq("org_id", str(org_id))\
-            .order("sent_at", desc=False)\
+            .order("sent_at", desc=True)\
             .execute()
         
-        thread["emails"] = emails_response.data if emails_response.data else []
+        emails = emails_response.data if emails_response.data else []
+        
+        # Exclure le wrapper de chaîne (chain_index=0) car son body contient toute
+        # la chaîne non parsée — les vrais emails parsés sont chain_1..chain_N
+        emails = [e for e in emails if not e.get("gmail_message_id", "").endswith("_chain_0")]
+        
+        # Trier: chain_1..chain_N d'abord (les vrais forwards parsés),
+        # puis les emails normaux (non-chain)
+        chain_emails = sorted(
+            [e for e in emails if "_chain_" in e.get("gmail_message_id", "")],
+            key=lambda e: e.get("sent_at", "") or "",
+            reverse=True,
+        )
+        normal_emails = sorted(
+            [e for e in emails if "_chain_" not in e.get("gmail_message_id", "")],
+            key=lambda e: e.get("sent_at", "") or "",
+            reverse=True,
+        )
+        thread["emails"] = chain_emails + normal_emails
         
         # Récupérer la session de chat par défaut
         try:
@@ -233,7 +251,7 @@ class ThreadService:
             .maybe_single()\
             .execute()
         
-        if existing.data:
+        if existing and existing.data:
             return existing.data
         
         # Créer un nouveau thread
@@ -272,10 +290,10 @@ class ThreadService:
         thread_response = self.client.table("email_threads")\
             .select("gmail_thread_id")\
             .eq("id", str(thread_id))\
-            .single()\
+            .maybe_single()\
             .execute()
         
-        if not thread_response.data:
+        if not thread_response or not thread_response.data:
             return
         
         gmail_thread_id = thread_response.data["gmail_thread_id"]
@@ -366,9 +384,9 @@ class ThreadService:
             thread_response = self.client.table("email_threads")\
                 .select("subject, ai_summary, ai_context, ai_urgency")\
                 .eq("id", str(thread_id))\
-                .single()\
+                .maybe_single()\
                 .execute()
-            thread_data = thread_response.data
+            thread_data = thread_response.data if thread_response else None
         except Exception:
             pass
         

@@ -28,7 +28,23 @@ if [ ! -f .env.test ]; then
     exit 1
 fi
 
-# Lire les variables depuis .env.test
+# Fonction pour évaluer les variables
+eval_env() {
+    local content
+    content=$(cat .env.test)
+    
+    # Remplacer les références de variables
+    while [[ "$content" =~ (\$\{[A-Za-z0-9_]+\}) ]]; do
+        local var_ref="${BASH_REMATCH[1]}"
+        local var_name="${var_ref:2:-1}"
+        local var_value="${!var_name:-}"
+        content="${content//$var_ref/$var_value}"
+    done
+    
+    echo "$content"
+}
+
+# Lire les variables depuis .env.test avec évaluation
 while IFS='=' read -r key value; do
     # Ignorer les lignes vides et les commentaires
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
@@ -38,7 +54,7 @@ while IFS='=' read -r key value; do
     
     # Exporter la variable
     export "$key=$value"
-done < .env.test
+done < <(eval_env)
 
 # Charger les secrets depuis ~/.bashrc
 if [ -f ~/.bashrc ]; then
@@ -60,6 +76,24 @@ export SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID=${SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID:-
 export SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY=${SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY:-}
 export SUREN_GED_CLOUDFLARE_TOKEN=${SUREN_GED_CLOUDFLARE_TOKEN:-}
 export SUREN_GED_CLOUDFLARE_BUCKET_NAME=${SUREN_GED_CLOUDFLARE_BUCKET_NAME:-}
+
+# Variables GCP pour Vertex AI
+export GCP_PROJECT_ID=${GCP_PROJECT_ID:-suren-saas}
+export GCP_REGION=${GCP_REGION:-europe-west1}
+export VERTEX_AI_PROJECT_ID=${VERTEX_AI_PROJECT_ID:-${GCP_PROJECT_ID}}
+export VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-${GCP_REGION}}
+
+# Gemini API Key (nécessaire pour les nouveaux agents)
+export TEST_GOOGLE_GEMINI_CREDENTIALS_B64=${TEST_GOOGLE_GEMINI_CREDENTIALS_B64:-}
+export GOOGLE_GEMINI_CREDENTIALS_B64=${TEST_GOOGLE_GEMINI_CREDENTIALS_B64}
+
+# Variables Telegram
+export TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN:-}
+export TELEGRAM_CONSTRUCTION_BOT_TOKEN=${TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN}
+export TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN="REDACTED_BOT_TOKEN"
+# Ajout explicite du mapping pour le username
+export TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_USERNAME:-}
+export TELEGRAM_CONSTRUCTION_BOT_USERNAME=${TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME}
 
 echo "✅ Variables d'environnement exportées"
 
@@ -83,5 +117,5 @@ echo ""
 echo "Appuyez sur Ctrl+C pour arrêter"
 echo ""
 
-# Lancer uvicorn avec reload
-exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+# Lancer uvicorn avec workers pour le parallélisme
+exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --workers 8

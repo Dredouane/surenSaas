@@ -7,7 +7,7 @@ Orchestre le polling Gmail, le routing, l'extraction et la vectorisation.
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.core.logging import get_logger
 from app.services.email_database_service import email_db
@@ -19,6 +19,7 @@ from app.services.emails.alias_router import alias_router
 from app.services.emails.content_cleaner import content_cleaner
 from app.services.emails.embedding_service import embedding_service
 from app.services.file_storage_service import FileStorageService
+
 
 
 class SyncService:
@@ -149,6 +150,12 @@ class SyncService:
         headers = gmail_client.parse_headers(message)
         delivered_to = headers.get("Delivered-To", "")
         
+        # Log pour debug
+        from app.core.logging import get_logger
+        logger = get_logger(__name__)
+        logger.debug(f"Processing message {message_id}, Delivered-To: {delivered_to}")
+        logger.debug(f"All headers: {list(headers.keys())}")
+        
         # 3. Routing par alias
         routing = await alias_router.route(delivered_to)
         
@@ -170,8 +177,48 @@ class SyncService:
         raw_body = gmail_client.get_body_text(message)
         raw_subject = headers.get("Subject", "")
         
-        # Extraction du forward + nettoyage
+        logger.info(f"🔧 Extraction email - Sujet: {raw_subject[:50]}...")
+        logger.info(f"🔧 Taille du corps: {len(raw_body)} caractères")
+        
+        # Debug: vérifier si c'est un forward
+        from app.services.emails.content_cleaner import ContentCleaner
+        cleaner = ContentCleaner()
+        is_forward = cleaner.detect_forward(raw_body)
+        logger.info(f"🔧 Détecté comme forward: {is_forward}")
+        
+        # Détecter si c'est une chaîne de forwards (plusieurs "De :" ou "From :")
+        is_chain = False
+        de_count = raw_body.count("De :") + raw_body.count("From :")
+        if de_count > 1:
+            is_chain = True
+            logger.info(f"🔗 Détecté comme CHAÎNE de forwards: {de_count} blocs 'De :'/'From :'")
+        
+        # Debug: chercher des patterns spécifiques
+        if "TR:" in raw_subject.upper():
+            logger.info(f"🔧 Sujet contient 'TR:' (Transmis)")
+        
+        # Si c'est une chaîne, utiliser le parsing .eml
+        if is_chain:
+            logger.info(f"🔗 Utilisation du parsing .eml pour la chaîne {message_id}")
+            from app.services.emails.email_chain_service import email_chain_service
+
+            return await email_chain_service.process_chain(
+                gmail_client=gmail_client,
+                gmail_message_id=message_id,
+                gmail_thread_id=message.get("threadId"),
+                account_id=account_id,
+                org_id=str(routing.org_id),
+                company_id=str(routing.company_id) if routing.company_id else None,
+                delivered_to=delivered_to,
+                routing_status=routing.routing_status,
+            )
+        
+        # Extraction du forward + nettoyage avec content_cleaner (regex)
+        logger.info(f"🔧 Extraction avec content_cleaner (regex) pour message {message_id}")
         extracted = content_cleaner.extract_original(raw_body, raw_subject)
+        
+        logger.info(f"🔧 FIN extraction - Sujet extrait: {extracted.subject[:50]}...")
+        logger.info(f"🔧 From: {extracted.from_email}, To: {extracted.to_emails}")
         
         # 6. Stocker l'email
         email_data = {
@@ -209,7 +256,36 @@ class SyncService:
         # 7. Traiter les pièces jointes
         attachments = gmail_client.get_attachments(message)
         
+        # Types de fichiers à ignorer (images, Excel, etc.)
+        IGNORE_EXTENSIONS = {
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',  # Images
+            '.xlsx', '.xls', '.xlsm', '.xlsb', '.csv',  # Excel/CSV
+            '.zip', '.rar', '.7z', '.tar', '.gz',  # Archives
+            '.exe', '.dll', '.msi',  # Exécutables
+            '.mp3', '.mp4', '.avi', '.mov', '.wav',  # Médias
+        }
+        
+        # Types de fichiers à traiter (PDF, Word, etc.)
+        PROCESS_EXTENSIONS = {
+            '.pdf',  # PDF
+            '.doc', '.docx', '.odt',  # Word
+            '.txt', '.rtf',  # Texte
+            '.ppt', '.pptx', '.odp',  # PowerPoint
+        }
+        
         for att in attachments:
+            filename = att.get("filename", "").lower()
+            file_extension = f".{filename.split('.')[-1]}" if '.' in filename else ''
+            
+            # Vérifier si on doit ignorer ce fichier
+            if file_extension in IGNORE_EXTENSIONS:
+                logger.info(f"⚠️  Fichier ignoré (type non supporté): {filename}")
+                continue
+                
+            # Vérifier si on doit traiter ce fichier
+            if file_extension not in PROCESS_EXTENSIONS:
+                logger.info(f"⚠️  Fichier ignoré (type inconnu): {filename}")
+                continue
             try:
                 # Télécharger
                 content = await gmail_client.download_attachment(message_id, att["attachmentId"])
@@ -310,6 +386,22 @@ class SyncService:
                 
         except Exception as recon_error:
             logger.warning(f"⚠️ Erreur reconstruction thread (non bloquant): {recon_error}")
+            
+            # Créer un thread minimal même en cas d'erreur
+            try:
+                from app.services.email_thread_service import thread_service
+                thread_service.get_or_create_thread(
+                    gmail_thread_id=message.get("threadId"),
+                    org_id=routing.org_id,
+                    company_id=routing.company_id,
+                    subject=email_data.get("subject", "Sans sujet"),
+                    participant_emails=[email_data.get("sender_email", "")],
+                    first_email_at=email_data.get("sent_at"),
+                    last_email_at=email_data.get("sent_at")
+                )
+                logger.info(f"✅ Thread minimal créé après erreur de reconstruction")
+            except Exception as thread_error:
+                logger.error(f"❌ Échec création thread minimal: {thread_error}")
         
         # 9. Lancer la vectorisation async (après reconstruction)
         asyncio.create_task(embedding_service.vectorize_email_async(email_id))
@@ -320,6 +412,45 @@ class SyncService:
             "stored": True,
             "email_id": email_id
         }
+    
+    async def _process_email_chain(
+        self,
+        gmail_client,
+        gmail_message: Dict[str, Any],
+        account_id: str,
+        org_id: str
+    ) -> Dict[str, Any]:
+        """
+        Traite une chaîne d'emails via le parsing .eml.
+        Délègue à EmailChainService.
+        """
+        from app.services.emails.email_chain_service import email_chain_service
+
+        message = gmail_message
+        if isinstance(gmail_message, dict) and "id" in gmail_message:
+            message_id = gmail_message["id"]
+        else:
+            message_id = gmail_message
+
+        headers = gmail_client.parse_headers(message) if isinstance(message, dict) else {}
+        delivered_to = headers.get("Delivered-To", "")
+
+        routing = await alias_router.route(delivered_to)
+        if routing.routing_status != "routed":
+            return {"stored": False, "ignore_reason": routing.routing_status.replace("ignored_", ""), "email_ids": [], "chain_length": 0}
+
+        thread_id = message.get("threadId") if isinstance(message, dict) else None
+
+        return await email_chain_service.process_chain(
+            gmail_client=gmail_client,
+            gmail_message_id=message_id,
+            gmail_thread_id=thread_id or message_id,
+            account_id=account_id,
+            org_id=str(routing.org_id),
+            company_id=str(routing.company_id) if routing.company_id else None,
+            delivered_to=delivered_to,
+            routing_status=routing.routing_status,
+        )
 
 
 # Instance singleton

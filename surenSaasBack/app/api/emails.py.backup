@@ -1,0 +1,569 @@
+"""
+Contrôleurs API pour le module Emails.
+
+Routes:
+- POST /{org}/emails/sync : Déclencher la synchro
+- GET /{org}/emails/sync-status : Statut de la synchro
+- GET /{org}/emails : Lister les emails
+- GET /{org}/emails/{id} : Détails d'un email
+"""
+
+import os
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from app.services.email_database_service import email_db
+from app.services.emails.sync_service import sync_service
+from app.services.file_storage_service import file_storage_service
+from app.api.auth import get_supabase
+from app.core.logging import get_logger
+from fastapi.responses import RedirectResponse
+
+logger = get_logger(__name__)
+
+# TODO: Implémenter require_capability quand le système de capabilities sera migré
+def require_capability(capability: str):
+    """Vérifie que l'utilisateur a la capability requise."""
+    from fastapi import HTTPException
+    # Pour l'instant, autoriser tout
+    def _check():
+        return {"id": "test-user", "role": "admin"}
+    return _check
+
+def get_current_user():
+    """Récupère l'utilisateur courant."""
+    return {"id": "test-user", "role": "admin"}
+
+router = APIRouter(prefix="/{org}/emails", tags=["emails"])
+
+
+# Schemas
+class EmailSyncRequest(BaseModel):
+    """Requête de synchronisation des emails."""
+    account_id: str = Field(..., description="ID du compte Gmail à synchroniser")
+    sync_mode: str = Field(default="incremental", description="Mode: incremental ou historical")
+    date_range: Optional[dict] = Field(None, description="{start_date, end_date} si mode=historical")
+    max_emails: int = Field(default=1000, description="Nombre max d'emails à traiter")
+
+
+class EmailSyncResponse(BaseModel):
+    """Réponse de synchronisation."""
+    account_id: str
+    synced: int
+    ignored: int
+    ignored_breakdown: dict
+    vectorized: int
+    errors: int
+    last_uid: int
+    duration_seconds: int
+    completed_at: datetime
+
+
+class EmailSyncStatus(BaseModel):
+    """Statut de la synchronisation."""
+    account_id: str
+    status: str  # idle, syncing, error
+    last_sync: Optional[datetime]
+    last_sync_uid: int
+    stats: dict
+
+
+class EmailListParams(BaseModel):
+    """Paramètres de liste des emails."""
+    account_id: Optional[str] = None
+    company_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    status: Optional[str] = None
+    sender: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    search: Optional[str] = None
+    limit: int = 50
+    offset: int = 0
+
+
+# Routes
+@router.post("/sync", response_model=EmailSyncResponse)
+async def sync_emails(
+    org: str,
+    request: EmailSyncRequest,
+    current_user: dict = Depends(require_capability("emails:sync"))
+):
+    """
+    Déclenche la synchronisation des emails.
+    
+    Lance le polling synchrone Gmail jusqu'à la vectorisation complète.
+    Traitement incrémental (depuis last_uid) ou historique par période.
+    """
+    try:
+        logger.info(f"Starting email sync for account {request.account_id}")
+        
+        result = await sync_service.sync_account(
+            account_id=request.account_id,
+            sync_mode=request.sync_mode,
+            date_range=request.date_range,
+            max_emails=request.max_emails
+        )
+        
+        result["completed_at"] = datetime.utcnow()
+        
+        logger.info(f"Email sync completed: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Email sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sync-status", response_model=EmailSyncStatus)
+async def get_sync_status(
+    org: str,
+    account_id: str = Query(..., description="ID du compte email"),
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """
+    Récupère le statut de la dernière synchronisation.
+    """
+    try:
+        # Récupérer les infos du compte
+        account = await email_db.get_email_account(account_id)
+        
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Compter les emails par statut
+        emails = await email_db.list_emails({"account_id": account_id}, limit=1000)
+        
+        # Calculer les stats manuellement
+        from collections import Counter
+        status_counts = Counter(e.get("processing_status") for e in emails)
+        
+        # Calculer les stats
+        stats = {
+            "total_synced": 0,
+            "total_ignored": 0,
+            "pending": status_counts.get("pending", 0),
+            "processing": status_counts.get("processing", 0),
+            "vectorized": status_counts.get("vectorized", 0),
+            "error": status_counts.get("error", 0)
+        }
+        stats["total_synced"] = stats["vectorized"] + stats["error"]
+        
+        # Déterminer le statut
+        status = "idle"
+        if stats["processing"] > 0:
+            status = "syncing"
+        elif stats["error"] > stats["vectorized"]:
+            status = "error"
+        
+        return {
+            "account_id": account_id,
+            "status": status,
+            "last_sync": account.get("last_sync_at"),
+            "last_sync_uid": account.get("last_sync_uid", 0),
+            "stats": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting sync status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/")
+async def list_emails(
+    org: str,
+    account_id: Optional[str] = Query(None),
+    company_id: Optional[str] = Query(None),
+    thread_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None, enum=["pending", "processing", "vectorized", "error"]),
+    sender: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """
+    Liste les emails synchronisés.
+    
+    Filtres disponibles:
+    - company_id: Filtrer par entreprise
+    - thread_id: Filtrer par conversation
+    - status: pending/processing/vectorized/error
+    - sender: Email de l'expéditeur
+    - date_from/date_to: Plage de dates
+    - search: Recherche textuelle (sujet + contenu)
+    """
+    try:
+        # Construire les filtres
+        filters = {"org_id": org}
+        if account_id:
+            filters["account_id"] = account_id
+        if company_id:
+            filters["company_id"] = company_id
+        if thread_id:
+            filters["thread_id"] = thread_id
+        if status:
+            filters["status"] = status
+        
+        # Récupérer les emails (pour l'instant sans filtre sender/date/search)
+        # Ces filtres pourraient être ajoutés au service plus tard
+        emails = await email_db.list_emails(filters, limit=limit, offset=offset)
+        
+        # Filtrer manuellement pour sender et search si nécessaire
+        if sender:
+            emails = [e for e in emails if e.get("sender_email") == sender]
+        if search:
+            search_lower = search.lower()
+            emails = [e for e in emails if search_lower in e.get("subject", "").lower() or search_lower in e.get("content_text", "").lower()]
+        if date_from:
+            emails = [e for e in emails if e.get("sent_at") and e["sent_at"] >= date_from]
+        if date_to:
+            emails = [e for e in emails if e.get("sent_at") and e["sent_at"] <= date_to]
+        
+        return {
+            "emails": emails,
+            "total": len(emails),
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing emails: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{email_id}")
+async def get_email(
+    org: str,
+    email_id: str,
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """
+    Récupère les détails d'un email avec ses pièces jointes et statut d'embedding.
+    """
+    try:
+        # Email
+        email = await email_db.get_email_by_id(email_id)
+        
+        if not email:
+            raise HTTPException(status_code=404, detail="Email not found")
+        
+        # Pièces jointes
+        attachments = await email_db.get_attachments_by_email(email_id)
+        email["attachments"] = attachments
+        
+        # Statut embeddings
+        embeddings = await email_db.get_embeddings_by_email(email_id)
+        
+        body_vectorized = any(
+            e["source_type"] == "email_body" for e in embeddings
+        )
+        attachments_vectorized = sum(
+            1 for e in embeddings if e["source_type"] == "attachment"
+        )
+        
+        email["embeddings_status"] = {
+            "total_chunks": sum(e.get("chunk_total", 1) for e in embeddings),
+            "body_vectorized": body_vectorized,
+            "attachments_vectorized": attachments_vectorized
+        }
+        
+        # Thread (autres emails du même thread)
+        if email.get("gmail_thread_id"):
+            thread_emails = await email_db.get_emails_by_thread(
+                email["gmail_thread_id"], 
+                email["org_id"]
+            )
+            # Filtrer l'email courant
+            email["thread_emails"] = [
+                {
+                    "id": e["id"],
+                    "subject": e["subject"],
+                    "sender_email": e["sender_email"],
+                    "sent_at": e["sent_at"],
+                    "processing_status": e["processing_status"]
+                }
+                for e in thread_emails if e["id"] != email_id
+            ]
+        
+        return email
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Routes pour les comptes email
+@router.get("/accounts")
+async def list_email_accounts(
+    org: str,
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """Liste les comptes Gmail configurés."""
+    try:
+        # Récupérer l'org_id depuis le slug via le service legacy
+        from app.api.auth import get_supabase
+        supabase = get_supabase()
+        org_response = supabase.table("organizations")\
+            .select("id")\
+            .eq("slug", org)\
+            .single()\
+            .execute()
+        
+        if not org_response.data:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        org_id = org_response.data["id"]
+        
+        accounts = await email_db.get_email_accounts_by_org(org_id)
+        
+        # Filtrer les champs retournés
+        return [
+            {
+                "id": a["id"],
+                "email_address": a["email_address"],
+                "email_address_display": a.get("email_address_display"),
+                "is_active": a["is_active"],
+                "sync_enabled": a["sync_enabled"],
+                "last_sync_at": a.get("last_sync_at"),
+                "created_at": a["created_at"]
+            }
+            for a in accounts
+        ]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/accounts")
+async def create_email_account(
+    org: str,
+    email: str,
+    oauth_code: str,
+    redirect_uri: str,
+    email_address_display: Optional[str] = None,
+    current_user: dict = Depends(require_capability("emails:write"))
+):
+    """
+    Connecte un compte Gmail (OAuth2).
+    
+    Échange le code d'autorisation contre un refresh token.
+    """
+    try:
+        # TODO: Implémenter le flux OAuth2 complet
+        # Pour l'instant, retourner une erreur
+        raise HTTPException(
+            status_code=501, 
+            detail="OAuth2 flow not yet implemented. Use manual token setup."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_email_account(
+    org: str,
+    account_id: str,
+    current_user: dict = Depends(require_capability("emails:write"))
+):
+    """Déconnecte un compte Gmail."""
+    try:
+        # Vérifier que le compte existe et appartient à l'org
+        account_response = supabase_client.table("email_accounts")\
+            .select("*")\
+            .eq("id", account_id)\
+            .single()\
+            .execute()
+        
+        if not account_response.data:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Soft delete (désactiver)
+        supabase_client.table("email_accounts")\
+            .update({"is_active": False})\
+            .eq("id", account_id)\
+            .execute()
+        
+        return {"status": "deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Recherche Sémantique
+# ============================================================================
+
+@router.post("/search")
+async def search_emails(
+    org: str,
+    query: str,
+    company_id: Optional[str] = None,
+    match_threshold: float = Query(0.7, ge=0.0, le=1.0),
+    match_count: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """
+    Recherche sémantique dans les emails via embeddings.
+    
+    Args:
+        query: Texte de recherche
+        company_id: Filtrer par company (optionnel)
+        match_threshold: Seuil de similarité (0.0-1.0)
+        match_count: Nombre max de résultats
+        
+    Returns:
+        Liste d'emails similaires avec score
+    """
+    try:
+        from app.services.emails.embedding_service import embedding_service
+        
+        # 1. Générer l'embedding de la query
+        query_embedding = await embedding_service.generate_embedding(query)
+        
+        # 2. Récupérer l'org_id depuis le slug
+        supabase = get_supabase()
+        org_response = supabase.table("organizations")\
+            .select("id")\
+            .eq("slug", org)\
+            .single()\
+            .execute()
+        
+        if not org_response.data:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        org_id = org_response.data["id"]
+        
+        # 3. Recherche vectorielle
+        results = await email_db.search_similar_emails(
+            query_embedding=query_embedding,
+            org_id=org_id,
+            company_id=company_id,
+            match_threshold=match_threshold,
+            match_count=match_count
+        )
+        
+        # 3. Formater les résultats
+        formatted_results = []
+        for r in results:
+            formatted_results.append({
+                "email_id": r.get("email_id"),
+                "subject": r.get("subject"),
+                "sender_email": r.get("sender_email"),
+                "content_preview": r.get("content_chunk", "")[:200] + "...",
+                "similarity_score": r.get("similarity"),
+                "sent_at": r.get("sent_at"),
+                "source_type": r.get("source_type")  # email_body ou attachment
+            })
+        
+        return {
+            "query": query,
+            "results_count": len(formatted_results),
+            "results": formatted_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching emails: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Téléchargement des pièces jointes
+# ============================================================================
+
+@router.get("/{email_id}/attachments/{attachment_id}/download")
+async def download_email_attachment(
+    org: str,
+    email_id: str,
+    attachment_id: str,
+    current_user: dict = Depends(require_capability("emails:read"))
+):
+    """
+    Télécharge une pièce jointe d'email.
+    
+    Retourne une redirection 302 vers une URL signée R2 valide 1 heure.
+    """
+    try:
+        # Récupérer l'attachment depuis la DB
+        supabase = get_supabase()
+        
+        # Récupérer l'attachment avec vérification qu'il appartient bien à l'email
+        attachment_result = supabase.table("email_attachments")\
+            .select("*, emails!inner(org_id)")\
+            .eq("id", attachment_id)\
+            .eq("email_id", email_id)\
+            .single()\
+            .execute()
+        
+        if not attachment_result.data:
+            raise HTTPException(status_code=404, detail="Pièce jointe non trouvée")
+        
+        attachment = attachment_result.data
+        
+        # Vérifier que l'email appartient à l'org de l'utilisateur
+        # Note: org_id vient de la table emails via la jointure
+        attachment_org_id = attachment.get("emails", {}).get("org_id")
+        user_org_id = current_user.get("org_id")
+        
+        if str(attachment_org_id) != str(user_org_id):
+            logger.warning(
+                f"🚫 Tentative d'accès non autorisé à la PJ\n"
+                f"   User: {current_user.get('email')} (org: {user_org_id})\n"
+                f"   Attachment org: {attachment_org_id}"
+            )
+            raise HTTPException(status_code=403, detail="Accès non autorisé à cette pièce jointe")
+        
+        # Récupérer le storage_path
+        storage_path = attachment.get("storage_path")
+        if not storage_path:
+            raise HTTPException(status_code=404, detail="Fichier non disponible (storage_path manquant)")
+        
+        # Vérifier que le fichier existe sur R2
+        exists = await file_storage_service.file_exists(storage_path)
+        if not exists:
+            logger.warning(f"⚠️ Fichier R2 non trouvé: {storage_path}")
+            raise HTTPException(status_code=404, detail="Fichier non trouvé sur le stockage")
+        
+        # Générer URL signée avec nom de fichier original
+        filename = attachment.get("filename")
+        download_url = await file_storage_service.get_presigned_url(
+            key=storage_path,
+            filename=filename,
+            expires=3600
+        )
+        
+        logger.info(
+            f"📥 Téléchargement PJ email\n"
+            f"   User: {current_user.get('email')}\n"
+            f"   Attachment: {filename}\n"
+            f"   Email: {email_id}"
+        )
+        
+        # Rediriger vers l'URL signée R2
+        return RedirectResponse(url=download_url)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erreur téléchargement PJ: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur lors du téléchargement: {str(e)}")

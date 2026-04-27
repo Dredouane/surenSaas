@@ -33,7 +33,25 @@ class Settings(BaseSettings):
     telegram_construction_bot_token: str = ""
     telegram_construction_bot_username: str = ""
     
-    # Google Gemini API (préfixés TEST_ ou PROD_)
+    # Telegram API URL (pour pointer vers le Local Bot API Server en test)
+    telegram_api_url: str = "https://api.telegram.org"
+    
+    def model_post_init(self, __context) -> None:
+        """Charge les variables d'environnement (préfixées ou non)."""
+        env = self.environment.lower()
+        
+        # Mapping des variables avec fallback
+        var_mappings = [
+            # ... autres mappings ...
+            ("telegram_api_url", [
+                "TELEGRAM_API_URL",
+            ]),
+            ("supabase_url", [
+                "SUPABASE_URL",
+            ]),
+            # ...
+        ]
+        # (J'ajoute juste le champ au settings et je le mappe)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"  # Modèle recommandé pour nouveaux projets
     gemini_location: str = "europe-west1"  # Région Vertex AI
@@ -87,6 +105,9 @@ class Settings(BaseSettings):
             ("telegram_construction_bot_username", [
                 f"{env}_telegram_construction_bot_username",
                 "telegram_construction_bot_username",
+            ]),
+            ("telegram_api_url", [
+                "TELEGRAM_API_URL",
             ]),
             ("gemini_api_key", [
                 f"{env}_google_gemini_credentials_b64",

@@ -99,8 +99,8 @@ class AliasRouter:
         
         org_slug, company_slug = parsed
         
-        # 2. Valider que l'org_slug correspond à l'environnement courant
-        if org_slug != self.env_org_slug:
+        # 2. Valider que l'org_slug correspond à l'environnement courant (si configuré)
+        if self.env_org_slug and org_slug != self.env_org_slug:
             return RoutingResult(
                 org_id=None,
                 company_id=None,

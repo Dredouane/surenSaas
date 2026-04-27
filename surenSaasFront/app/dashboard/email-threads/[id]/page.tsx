@@ -6,13 +6,11 @@ import { useAuth } from "@/app/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
-  Send,
   Bot,
   User,
   Mail,
@@ -27,6 +25,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { DraftSandbox } from "@/components/secretary/DraftSandbox";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { Send } from "lucide-react";
 
 interface Email {
   id: string;
@@ -133,7 +133,7 @@ export default function EmailThreadDetailPage() {
 
   const [emails, setEmails] = useState<Email[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,31 +200,29 @@ export default function EmailThreadDetailPage() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || !user?.org_slug || !threadId || sending) return;
+  const handleSendMessage = async (message: string) => {
+    if (!message.trim() || sending || !user?.org_slug) return;
 
-    const userMessage = chatInput.trim();
-    setChatInput("");
-    setSending(true);
-
-    // Optimistically add user message
     const tempUserMessage: ChatMessage = {
       id: `temp-${Date.now()}`,
       role: "user",
-      content: userMessage,
+      content: message,
       created_at: new Date().toISOString(),
     };
+
     setChatMessages((prev) => [...prev, tempUserMessage]);
+    setSending(true);
 
     try {
-      const response = await fetch(
-        `/api/v1/${user.org_slug}/email-threads/${threadId}/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: userMessage }),
-        }
-      );
+      const response = await fetch(`/api/v1/${user.org_slug}/email-threads/${threadId}/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: message,
+        }),
+      });
 
       if (!response.ok) {
         throw new Error("Erreur lors de l'envoi du message");
@@ -248,18 +246,11 @@ export default function EmailThreadDetailPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   if (loading) {
     return (
       <div className="h-screen flex flex-col md:flex-row overflow-hidden">
         {/* Mobile: full width, Desktop: 55% */}
-        <div className="w-full md:w-[55%] flex flex-col border-r bg-gray-50">
+        <div className="w-full md:w-[55%] flex flex-col border-r bg-gray-50 h-full">
           <div className="bg-white border-b p-4">
             <Skeleton className="h-8 w-24 mb-4" />
             <div className="space-y-4">
@@ -269,7 +260,7 @@ export default function EmailThreadDetailPage() {
           </div>
         </div>
         {/* Desktop: right side */}
-        <div className="hidden md:block md:w-[45%] bg-white">
+        <div className="hidden md:block md:w-[45%] bg-white h-full">
           <div className="p-4 space-y-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-32 w-full" />
@@ -359,41 +350,46 @@ export default function EmailThreadDetailPage() {
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {emails.map((email) => (
           <Card key={email.id}>
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-8 w-8">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Avatar className="h-8 w-8 flex-shrink-0">
                     <AvatarFallback className="text-base bg-gradient-to-br from-blue-500 to-purple-600 text-white">
                       {(email.sender?.name || email.sender?.email || "?").charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <p className="text-base font-medium">
+                  <div className="min-w-0">
+                    <p className="text-base font-medium truncate">
                       {email.sender?.name || email.sender?.email || "-"}
                     </p>
-                    <p className="text-sm text-gray-500">{email.sender?.email || "-"}</p>
+                    <p className="text-sm text-gray-500 truncate">{email.sender?.email || "-"}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500">
+                <div className="flex items-center gap-2 text-sm text-gray-500 flex-shrink-0">
                   <Clock className="h-3 w-3" />
                   {email.sent_at ? formatFullDate(email.sent_at) : "-"}
                 </div>
               </div>
+              {email.subject && (
+                <p className="text-sm font-semibold text-gray-700 mt-2 truncate">
+                  {email.subject}
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               {email.content?.html ? (
                 <div
-                  className="prose prose-base max-w-none text-gray-800"
+                  className="prose prose-sm max-w-none text-gray-800 leading-relaxed [&_p]:my-1 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-300 [&_blockquote]:pl-4 [&_blockquote]:text-gray-600 [&_blockquote]:italic [&_a]:text-blue-600 [&_a]:underline"
                   dangerouslySetInnerHTML={{ __html: email.content.html }}
                 />
               ) : (
-                <pre className="whitespace-pre-wrap text-base text-gray-800 font-sans">
+                <p className="whitespace-pre-wrap text-sm text-gray-800 leading-relaxed">
                   {email.content?.text || "(Pas de contenu)"}
-                </pre>
+                </p>
               )}
 
               {email.has_attachments && (
-                <div className="mt-4 flex items-center gap-2 text-base text-gray-600">
+                <div className="mt-3 flex items-center gap-2 text-sm text-gray-600">
                   <Paperclip className="h-4 w-4" />
                   <span>Pièces jointes</span>
                 </div>
@@ -504,23 +500,7 @@ export default function EmailThreadDetailPage() {
 
       {/* Chat Input */}
       <div className="border-t p-4">
-        <div className="flex gap-2">
-          <Textarea
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Écrivez votre message..."
-            className="flex-1 min-h-[60px] max-h-[120px] resize-none text-base"
-            disabled={sending}
-          />
-          <Button
-            onClick={handleSendMessage}
-            disabled={!chatInput.trim() || sending}
-            className="self-end"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
+        <ChatInput onSend={handleSendMessage} sending={sending} />
         <p className="text-sm text-gray-500 mt-2">
           Appuyez sur Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne
         </p>
@@ -568,10 +548,10 @@ export default function EmailThreadDetailPage() {
       ) : (
         // Desktop: Split screen
         <>
-          <div className="w-[55%] flex flex-col border-r overflow-hidden">
+          <div className="w-[55%] flex flex-col border-r overflow-hidden h-full">
             <ConversationPanel />
           </div>
-          <div className="w-[45%] flex flex-col overflow-hidden">
+          <div className="w-[45%] flex flex-col overflow-hidden h-full">
             <AssistantPanel />
           </div>
         </>

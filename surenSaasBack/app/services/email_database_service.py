@@ -68,8 +68,17 @@ class EmailDatabaseService:
     
     async def create_email(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Crée un email."""
-        response = self.client.table("emails").insert(data).execute()
-        return response.data[0] if response.data else None
+        try:
+            response = self.client.table("emails").insert(data).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            err_str = str(e)
+            # Si colonne dedup_hash manquante, retry sans
+            if "dedup_hash" in err_str and "PGRST204" in err_str:
+                data_no_hash = {k: v for k, v in data.items() if k != "dedup_hash"}
+                response = self.client.table("emails").insert(data_no_hash).execute()
+                return response.data[0] if response.data else None
+            raise
     
     async def get_email_by_id(self, email_id: str) -> Optional[Dict[str, Any]]:
         """Récupère un email par son ID."""
@@ -82,12 +91,28 @@ class EmailDatabaseService:
     
     async def get_email_by_message_id(self, message_id: str) -> Optional[Dict[str, Any]]:
         """Récupère un email par son Gmail message ID."""
-        response = self.client.table("emails")\
-            .select("*")\
-            .eq("gmail_message_id", message_id)\
-            .single()\
-            .execute()
-        return response.data if response.data else None
+        try:
+            response = self.client.table("emails")\
+                .select("*")\
+                .eq("gmail_message_id", message_id)\
+                .single()\
+                .execute()
+            return response.data if response.data else None
+        except Exception:
+            return None
+
+    async def get_email_by_dedup_hash(self, dedup_hash: str, org_id: str) -> Optional[Dict[str, Any]]:
+        """Récupère un email par son hash de déduplication."""
+        try:
+            response = self.client.table("emails")\
+                .select("*")\
+                .eq("dedup_hash", dedup_hash)\
+                .eq("org_id", str(org_id))\
+                .limit(1)\
+                .execute()
+            return response.data[0] if response.data else None
+        except Exception:
+            return None
     
     async def get_emails_by_thread(self, thread_id: str, org_id: str) -> List[Dict[str, Any]]:
         """Récupère les emails d'un thread."""
@@ -106,6 +131,34 @@ class EmailDatabaseService:
             .eq("id", email_id)\
             .execute()
         return response.data[0] if response.data else None
+    
+    async def delete_email(self, email_id: str) -> bool:
+        """Supprime un email et ses pièces jointes."""
+        try:
+            # Supprimer d'abord les pièces jointes
+            self.client.table("email_attachments")\
+                .delete()\
+                .eq("email_id", email_id)\
+                .execute()
+            
+            # Supprimer les embeddings
+            self.client.table("email_embeddings")\
+                .delete()\
+                .eq("email_id", email_id)\
+                .execute()
+            
+            # Supprimer l'email
+            response = self.client.table("emails")\
+                .delete()\
+                .eq("id", email_id)\
+                .execute()
+            
+            return len(response.data) > 0
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error deleting email {email_id}: {e}")
+            return False
     
     async def update_email_status(self, email_id: str, status: str, error: str = None):
         """Met à jour le statut de traitement d'un email."""

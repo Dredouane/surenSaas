@@ -108,6 +108,13 @@ class GeminiClient:
             
             logger.info(f"✅ Vertex AI initialisé - Project: {project_id}, Location: {self.location}")
             
+            # Restreindre les permissions du fichier (chmod 600)
+            try:
+                os.chmod(self._credentials_file, 0o600)
+                logger.debug("Credentials file permissions restricted to 600")
+            except Exception as perm_error:
+                logger.warning(f"Could not restrict credentials file permissions: {perm_error}")
+            
         except Exception as e:
             logger.error(f"❌ Erreur initialisation Vertex AI: {e}")
             raise
@@ -262,6 +269,33 @@ class GeminiClient:
                 }]
             else:
                 raise
+    
+    def extract_from_text(self, text: str, prompt: str) -> str:
+        """Extrait des données depuis du texte pur."""
+        try:
+            config = self._create_config()
+            
+            # Créer le contenu avec texte seulement
+            contents = [
+                self._types.Content(
+                    role="user",
+                    parts=[
+                        self._types.Part.from_text(text=prompt + "\n\nTEXTE À ANALYSER:\n" + text)
+                    ]
+                )
+            ]
+            
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
+            
+            return response.text
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur extraction texte: {e}")
+            raise
     
     def extract_from_file(self, file_path: str, prompt: str) -> str:
         """Extrait du texte depuis un fichier local."""

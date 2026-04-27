@@ -286,3 +286,75 @@ surenSaasFront/
 **État**: ✅ **PROTOTYPE FRONT-ONLY COMPLET**
 
 Le prototype est fonctionnel, montre clairement le flux Telegram → HITL → Dashboard, et est prêt pour la prochaine itération de connexion au backend.
+
+---
+
+## 🚀 **EXTENSION: Nouvelles fonctionnalités (Phase 1: Foundation COMPLÉTÉE)**
+
+### **📋 Contexte**
+Suite au feedback client, extension du système avec 3 nouvelles fonctionnalités principales en mode prototypage front/backend Next.js avec données statiques.
+
+### **🎯 Nouvelles fonctionnalités**
+1. **Réceptions chantiers** - Système de réunions client avec validation et tâches
+2. **Tâches direction → conducteur** - Système de notifications push et assignation
+3. **Pointages hommes/machines** - Affectation quotidienne avec notification matinale
+
+### **✅ Phase 1: Foundation (COMPLÉTÉE)**
+
+#### **1. Types TypeScript étendus**
+- ✅ Nouveaux types: `ReceptionStatut`, `ReceptionType`, `TacheStatut`, `TacheType`, `TacheSource`, `TachePriorite`, `RessourceType`, `PeriodePointage`, `NotificationType`
+- ✅ Nouvelles interfaces: `Reception`, `TacheReception`, `Tache`, `Ressource`, `Pointage`, `Notification`
+- ✅ Types formulaires: `CreateReceptionInput`, `CreateTacheInput`, `CreatePointageInput`, `CreateNotificationInput`
+
+#### **2. Données statiques étendues**
+- ✅ `lib/chantier-data-extended.ts` - Données complètes pour démonstration
+- ✅ **Réceptions CRF**: 2 réceptions client (1 terminée, 1 en cours)
+- ✅ **Tâches**: 3 tâches génériques + 2 tâches réception
+- ✅ **Ressources**: 10 ressources (5 hommes, 5 machines) avec disponibilité
+- ✅ **Pointages**: 2 pointages validés avec affectation ressources
+- ✅ **Notifications**: 5 notifications démo avec liens Telegram
+- ✅ **Fonctions utilitaires**: `getChantierCompletById`, `getNotificationsUtilisateur`, `getRessourcesDisponiblesEntreprise`, etc.
+
+#### **3. Documentation**
+- ✅ `EXTENSION_CHANTIERS_DOCUMENTATION.md` - Documentation complète
+- ✅ Mise à jour `IMPLEMENTATION_SUMMARY.md`
+- ✅ Plan d'implémentation détaillé par phases
+
+### **🔄 Phase 2: Frontend MVP (EN COURS)**
+- 🔄 **Composant ReceptionsList** - Interface réunions client
+- 🔄 **Composant TachesList** - Système assignation tâches
+- 🔄 **Composant PointagesList** - Calendrier affectation ressources
+- 🔄 **Composant NotificationsPanel** - Système notifications unifié
+- 🔄 **Page détail étendue** - 8 onglets (6 existants + 2 nouveaux)
+- 🔄 **Dashboard amélioré** - Widgets "À valider", "Alertes", "Activité récente"
+
+### **🤖 Extension Bot Telegram (PLANIFIÉE)**
+- 🔄 **Menu principal étendu** - 10 boutons inline
+- 🔄 **Navigation ergonomique** - Sélection chantier → collecte données
+- 🔄 **Workflows multi-canal** - Texte, voix, photo, PDF
+- 🔄 **Notifications bi-directionnelles** - Conducteur ↔ Gérant
+- 🔄 **Validation HITL** - Lien vers page détail SaaS
+
+### **📊 Architecture technique**
+- **Frontend**: Extension progressive des composants existants
+- **Backend Next.js**: API routes mockées pour prototypage
+- **Données**: Statiques → PostgreSQL (future migration)
+- **Notifications**: Mockées → Telegram réel (future intégration)
+- **Workflows**: Simulation → Agents IA réels (future évolution)
+
+### **🎯 Valeur ajoutée**
+- **Pour les gérants**: Vue unifiée, tableau de bord temps réel, validation centralisée
+- **Pour les conducteurs**: Interface simple, collecte sans friction, notifications contextuelles
+- **Pour l'entreprise**: Traçabilité complète, optimisation ressources, base pour IA future
+
+### **📋 Prochaines étapes**
+1. **Phase 2**: Création composants frontend (semaines 2-3)
+2. **Phase 3**: API routes Next.js étendues (semaine 4)
+3. **Phase 4**: Documentation & tests utilisateur (semaine 5)
+4. **Intégration**: Connexion backend réel + bot Telegram
+
+---
+
+**État extension**: ✅ **PHASE 1 COMPLÉTÉE** - Foundation prête pour développement frontend
+
+La Phase 1 (Foundation) est complète avec tous les types, données et documentation nécessaires. Le système est prêt pour le développement des composants frontend dans la Phase 2.

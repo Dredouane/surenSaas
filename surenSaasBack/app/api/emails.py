@@ -27,16 +27,18 @@ logger = get_logger(__name__)
 
 # TODO: Implémenter require_capability quand le système de capabilities sera migré
 def require_capability(capability: str):
-    """Vérifie que l'utilisateur a la capability requise."""
-    from fastapi import HTTPException
-    # Pour l'instant, autoriser tout
-    def _check():
-        return {"id": "test-user", "role": "admin"}
-    return _check
+    """Dépendance temporaire pour les capabilities."""
+    async def _require_capability():
+        # Pour l'instant, permissif - retourner un utilisateur mock
+        return {"id": "test-user", "role": "admin", "org_id": "test"}
+    return _require_capability
 
-def get_current_user():
-    """Récupère l'utilisateur courant."""
-    return {"id": "test-user", "role": "admin"}
+# get_current_user n'est plus utilisé dans ce fichier
+# def get_current_user():
+#     """Récupère l'utilisateur courant."""
+#     async def _get_current_user():
+#         return {"id": "test-user", "role": "admin", "org_id": "test"}
+#     return _get_current_user
 
 router = APIRouter(prefix="/{org}/emails", tags=["emails"])
 
@@ -59,6 +61,26 @@ class EmailSyncResponse(BaseModel):
     vectorized: int
     errors: int
     last_uid: int
+    duration_seconds: int
+    completed_at: datetime
+
+
+class EmailSyncSingleRequest(BaseModel):
+    """Requête de synchronisation d'un seul email."""
+    account_id: str = Field(..., description="ID du compte Gmail")
+    gmail_message_id: str = Field(..., description="ID du message Gmail à synchroniser")
+
+
+class EmailSyncSingleResponse(BaseModel):
+    """Réponse de synchronisation d'un seul email."""
+    account_id: str
+    gmail_message_id: str
+    success: bool
+    email_id: Optional[str] = None
+    chain_email_ids: Optional[list[str]] = None
+    chain_length: Optional[int] = None
+    error: Optional[str] = None
+    processing_status: Optional[str] = None
     duration_seconds: int
     completed_at: datetime
 
@@ -117,6 +139,195 @@ async def sync_emails(
     except Exception as e:
         logger.error(f"Email sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-single", response_model=EmailSyncSingleResponse)
+async def sync_single_email(
+    org: str,
+    request: EmailSyncSingleRequest,
+    current_user: dict = Depends(require_capability("emails:sync"))
+):
+    """
+    Synchronise un seul email spécifique par son ID Gmail.
+    
+    Utile pour rejouer le traitement d'un email qui a échoué.
+    """
+    start_time = datetime.utcnow()
+    try:
+        logger.info(f"Starting single email sync for message {request.gmail_message_id}")
+        
+        from app.services.emails.sync_service import sync_service
+        from app.services.emails.gmail_client import create_gmail_client
+        from app.services.emails.alias_router import alias_router
+        from app.services.emails.content_cleaner import content_cleaner
+        from app.services.email_database_service import email_db
+        from app.services.emails.embedding_service import embedding_service
+        import asyncio
+        
+        # 1. Récupérer les infos du compte
+        account = await email_db.get_email_account(request.account_id)
+        
+        if not account:
+            raise HTTPException(status_code=404, detail=f"Account {request.account_id} not found")
+        
+        refresh_token = account["oauth_refresh_token"]
+        
+        # 2. Connecter le client Gmail
+        gmail_client = create_gmail_client(refresh_token)
+        await gmail_client.connect()
+        
+        # 3. Récupérer le message spécifique
+        try:
+            message = await gmail_client.get_message(request.gmail_message_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch message {request.gmail_message_id}: {e}")
+            raise HTTPException(status_code=404, detail=f"Message {request.gmail_message_id} not found or inaccessible")
+        
+        # 4. Extraire les headers
+        headers = gmail_client.parse_headers(message)
+        delivered_to = headers.get("Delivered-To", "")
+        
+        # 5. Routing par alias
+        routing = await alias_router.route(delivered_to)
+        
+        if routing.routing_status != "routed":
+            logger.warning(f"Message {request.gmail_message_id} ignored: {routing.routing_status}")
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            return {
+                "account_id": request.account_id,
+                "gmail_message_id": request.gmail_message_id,
+                "success": False,
+                "error": f"Email ignored: {routing.routing_status}",
+                "duration_seconds": int(duration),
+                "completed_at": datetime.utcnow()
+            }
+        
+        # 6. Vérifier si l'email existe déjà
+        existing = await email_db.get_email_by_message_id(request.gmail_message_id)
+        
+        if existing:
+            logger.info(f"Message {request.gmail_message_id} already exists, retraitement complet")
+            old_email_id = existing["id"]
+            
+            # Supprimer l'email existant pour un retraitement complet
+            await email_db.delete_email(old_email_id)
+            logger.info(f"Email {old_email_id} supprimé pour retraitement")
+        
+        # 7. Extraire le contenu
+        raw_body = gmail_client.get_body_text(message)
+        raw_subject = headers.get("Subject", "")
+        
+        logger.info(f"🔧 Extraction email (sync-single) - Sujet: {raw_subject[:50]}...")
+        
+        # Détecter si c'est une chaîne de forwards
+        is_chain = False
+        de_count = raw_body.count("De :") + raw_body.count("From :")
+        if de_count > 1:
+            is_chain = True
+            logger.info(f"🔗 Détecté comme CHAÎNE de forwards (sync-single): {de_count} blocs")
+        
+        # Utiliser le parsing .eml pour les chaînes
+        if is_chain:
+            logger.info("🔗 Utilisation du parsing .eml pour la chaîne (sync-single)...")
+            try:
+                from app.services.emails.email_chain_service import email_chain_service
+                
+                result = await email_chain_service.process_chain(
+                    gmail_client=gmail_client,
+                    gmail_message_id=request.gmail_message_id,
+                    gmail_thread_id=message.get("threadId"),
+                    account_id=request.account_id,
+                    org_id=str(routing.org_id),
+                    company_id=str(routing.company_id) if routing.company_id else None,
+                    delivered_to=delivered_to,
+                    routing_status=routing.routing_status,
+                )
+                
+                duration = (datetime.utcnow() - start_time).total_seconds()
+                return {
+                    "account_id": request.account_id,
+                    "gmail_message_id": request.gmail_message_id,
+                    "success": result["stored"],
+                    "email_id": result["email_ids"][0] if result.get("email_ids") else None,
+                    "chain_email_ids": result.get("email_ids", []),
+                    "chain_length": result.get("chain_length", 0),
+                    "duration_seconds": int(duration),
+                    "completed_at": datetime.utcnow()
+                }
+            except Exception as chain_error:
+                logger.error(f"❌ Extraction chaîne .eml échouée (sync-single): {chain_error}", exc_info=True)
+                logger.info("🔧 Fallback vers extraction simple après échec chaîne .eml")
+        
+        # Extraction simple (pas une chaîne ou échec chaîne)
+        logger.info("🔧 Utilisation du content_cleaner (regex) (sync-single)...")
+        extracted = content_cleaner.extract_original(raw_body, raw_subject)
+        
+        logger.info(f"🔧 FIN extraction (sync-single) - Sujet extrait: {extracted.subject[:50]}...")
+        
+        # 8. Stocker l'email
+        email_data = {
+            "org_id": str(routing.org_id),
+            "company_id": str(routing.company_id),
+            "email_account_id": request.account_id,
+            "delivered_to_alias": delivered_to,
+            "routing_status": routing.routing_status,
+            "gmail_thread_id": message.get("threadId"),
+            "gmail_message_id": request.gmail_message_id,
+            "gmail_history_id": int(message.get("historyId", 0)),
+            "subject": extracted.subject if extracted.subject else raw_subject,
+            "subject_cleaned": extracted.subject if extracted.subject else raw_subject,
+            "sender_email": extracted.from_email or headers.get("From", ""),
+            "sender_name": extracted.from_name,
+            "recipient_emails": extracted.to_emails or [delivered_to],
+            "sent_at": extracted.date or headers.get("Date"),
+            "received_at": datetime.utcnow().isoformat(),
+            "content_text": extracted.body_cleaned if extracted.body_cleaned else raw_body,
+            "content_text_raw": extracted.body if extracted.body else raw_body,
+            "content_html": raw_body,
+            "content_cleaned_at": datetime.utcnow().isoformat(),
+            "processing_status": "pending",
+            "in_reply_to": extracted.in_reply_to or headers.get("In-Reply-To"),
+            "references": extracted.references or ([headers["References"]] if "References" in headers else None),
+            "has_attachments": False,
+            "attachments_count": 0,
+            "total_size_bytes": int(message.get("sizeEstimate", 0)),
+            "headers": headers
+        }
+        
+        email = await email_db.create_email(email_data)
+        email_id = email["id"]
+        
+        # 9. Lancer la vectorisation async
+        asyncio.create_task(embedding_service.vectorize_email_async(email_id))
+        
+        # 10. Récupérer le statut final
+        updated_email = await email_db.get_email_by_id(email_id)
+        
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        
+        return {
+            "account_id": request.account_id,
+            "gmail_message_id": request.gmail_message_id,
+            "success": True,
+            "email_id": email_id,
+            "processing_status": updated_email.get("processing_status", "pending"),
+            "duration_seconds": int(duration),
+            "completed_at": datetime.utcnow()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Single email sync failed: {e}")
+        duration = (datetime.utcnow() - start_time).total_seconds() if 'start_time' in locals() else 0
+        raise HTTPException(status_code=500, detail={
+            "account_id": request.account_id,
+            "gmail_message_id": request.gmail_message_id,
+            "success": False,
+            "error": str(e),
+            "duration_seconds": int(duration),
+            "completed_at": datetime.utcnow().isoformat()
+        })
 
 
 @router.get("/sync-status", response_model=EmailSyncStatus)
@@ -294,7 +505,21 @@ async def get_email(
                 for e in thread_emails if e["id"] != email_id
             ]
         
-        return email
+        # Pour l'affichage frontend, utiliser content_text (nettoyé) comme contenu principal
+        # et garder content_html comme référence
+        formatted_email = dict(email)
+        
+        # Si content_text existe et est différent de content_html, l'utiliser pour l'affichage
+        if formatted_email.get("content_text") and formatted_email.get("content_html"):
+            # Garder les deux mais indiquer quel est le contenu d'affichage
+            formatted_email["display_content"] = formatted_email["content_text"]
+            formatted_email["raw_html_content"] = formatted_email["content_html"]
+        elif formatted_email.get("content_text"):
+            formatted_email["display_content"] = formatted_email["content_text"]
+        elif formatted_email.get("content_html"):
+            formatted_email["display_content"] = formatted_email["content_html"]
+        
+        return formatted_email
         
     except HTTPException:
         raise

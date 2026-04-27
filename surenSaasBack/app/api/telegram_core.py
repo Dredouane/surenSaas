@@ -7,9 +7,13 @@ import logging
 import httpx
 
 from app.api.auth import get_supabase
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["telegram-webhooks"])
+
+def get_api_url() -> str:
+    return settings.telegram_api_url.rstrip('/')
 
 
 # ==================== ROUTER PRINCIPAL ====================
@@ -42,8 +46,10 @@ async def handle_telegram_webhook(
         
         # Vérifier secret token
         expected_secret = bot_config.get('webhook_secret')
-        if expected_secret and x_telegram_bot_api_secret_token != expected_secret:
-            logger.warning("Token secret webhook invalide")
+        logger.debug(f"🔍 Vérification secret: Recu={x_telegram_bot_api_secret_token}, Attendu={expected_secret}")
+        # On ne vérifie que si expected_secret est une chaine non vide
+        if expected_secret and len(expected_secret) > 0 and x_telegram_bot_api_secret_token != expected_secret:
+            logger.warning(f"❌ Token secret webhook invalide. Recu: {x_telegram_bot_api_secret_token}, Attendu: {expected_secret}")
             raise HTTPException(status_code=403, detail="Invalid secret token")
         
         # Dispatcher selon le type de bot (extrait du bot_username)
@@ -59,13 +65,16 @@ async def handle_telegram_webhook(
         if message:
             return await _dispatch_message(message, bot_config, supabase, org_id, bot_slug)
         
+        # Cas où 'message' n'est pas présent (ex: edited_message)
+        logger.warning(f"Webhook reçu sans message ni callback: {body.keys()}")
         return {"ok": True}
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ Erreur traitement webhook: {e}", exc_info=True)
-        return {"ok": False, "error": str(e)}
+        # On ne veut pas que Telegram retente indéfiniment si on échoue ici
+        return {"ok": True, "error": str(e)}
 
 
 async def _dispatch_message(
@@ -87,7 +96,8 @@ async def _dispatch_message(
         return await handle_construction_message(message, bot_config, supabase, org_id)
     else:
         logger.warning(f"Bot non géré: {bot_slug}")
-        await send_simple_message(chat_id, bot_config, "🤖 Bot en cours de configuration.")
+        if chat_id:
+            await send_simple_message(chat_id, bot_config, "🤖 Bot en cours de configuration.")
         return {"ok": True}
 
 
@@ -106,17 +116,22 @@ async def _dispatch_callback(
     chat_id = from_user.get('id')
     data = callback_query.get('data', '')
     
-    logger.info(f"🔘 Callback reçu: {data} pour bot: {bot_slug}")
+    logger.info(f"🔘 CALLBACK REÇU: '{data}' from {chat_id} (QueryID: {query_id})")
     
     bot_token = get_bot_token(bot_config)
     if bot_token:
-        await answer_callback(query_id, bot_token)
+        # Debug: Log de la réponse à Telegram
+        answer_resp = await answer_callback(query_id, bot_token)
+        logger.debug(f"🔘 AnswerCallback réponse: {answer_resp}")
     
     # Dispatch vers le handler spécifique
     if bot_slug == 'construction':
-        return await handle_construction_callback(callback_query, bot_config, supabase, org_id)
+        # Assurer que chat_id est défini pour le dispatcher
+        result = await handle_construction_callback(callback_query, bot_config, supabase, org_id)
+        logger.info(f"🔘 Résultat du handler pour '{data}': {result}")
+        return result
     else:
-        logger.warning(f"Callback pour bot non géré: {bot_slug}")
+        logger.warning(f"Bot non géré: {bot_slug}")
         return {"ok": True}
 
 
@@ -159,6 +174,22 @@ def get_bot_token(bot_config: Dict[str, Any]) -> Optional[str]:
         logger.error("bot_username non trouvé dans bot_config")
         return None
     
+    # Cas spécial pour bot de test local
+    if "arev_travaux_test_e2e_bot" in bot_username.lower():
+        # Lecture directe dans l'environnement
+        token = os.environ.get("TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN")
+        if token:
+            logger.info(f"✅ Token local E2E chargé via os.environ: {token[:5]}...")
+            return token
+        else:
+            # Essayer de lire depuis settings si absent de l'env
+            token = getattr(settings, "telegram_construction_bot_token", None)
+            if token:
+                logger.info(f"✅ Token local E2E chargé via settings: {token[:5]}...")
+                return token
+            logger.error("❌ Token local E2E introuvable dans os.environ ET settings")
+            # Fallback vers config standard
+
     config = get_bot_config_from_username(bot_username)
     token = config.get('token')
     
@@ -231,7 +262,7 @@ async def answer_callback(query_id: str, bot_token: str):
     if not bot_token:
         return
     
-    url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+    url = f"{get_api_url()}/bot{bot_token}/answerCallbackQuery"
     payload = {"callback_query_id": query_id}
     
     try:
@@ -244,11 +275,16 @@ async def answer_callback(query_id: str, bot_token: str):
 def _extract_bot_slug_from_username(bot_username: str) -> str:
     """Extrait le slug du bot depuis le username.
     
-    Format: suren_{slug}_{env}_bot
-    Ex: suren_construction_test_bot → construction
+    Format supporté :
+    1. suren_{slug}_{env}_bot
+    2. Arev_travaux_test_e2e_bot (pour les tests locaux) -> renvoie 'construction'
     """
     if not bot_username:
         return ''
+    
+    # Matching spécifique pour bot local
+    if "arev_travaux_test_e2e_bot" in bot_username.lower():
+        return 'construction'
     
     match = re.match(r'suren_(.+?)_(test|prod)_bot', bot_username.lower())
     if match:
@@ -334,6 +370,8 @@ async def send_message_safe(
         if result.get('ok'):
             logger.info(f"{log_prefix}✅ Message envoyé avec succès (Markdown)")
             return {'success': True, 'mode': 'Markdown', 'message_id': result.get('result', {}).get('message_id')}
+        else:
+            logger.warning(f"{log_prefix}⚠️ Erreur Telegram Markdown: {result}")
     except Exception as e:
         logger.warning(f"{log_prefix}⚠️ Échec Markdown: {e}")
     
@@ -346,6 +384,8 @@ async def send_message_safe(
         if result.get('ok'):
             logger.info(f"{log_prefix}✅ Message envoyé avec succès (HTML fallback)")
             return {'success': True, 'mode': 'HTML', 'message_id': result.get('result', {}).get('message_id')}
+        else:
+            logger.warning(f"{log_prefix}⚠️ Erreur Telegram HTML: {result}")
     except Exception as e:
         logger.warning(f"{log_prefix}⚠️ Échec HTML: {e}")
     
@@ -358,6 +398,9 @@ async def send_message_safe(
         if result.get('ok'):
             logger.info(f"{log_prefix}✅ Message envoyé avec succès (texte brut fallback)")
             return {'success': True, 'mode': 'Plain', 'message_id': result.get('result', {}).get('message_id')}
+        else:
+            logger.error(f"{log_prefix}❌ Erreur Telegram brut: {result}")
+            return {'success': False, 'error': str(result), 'mode': None}
     except Exception as e:
         logger.error(f"{log_prefix}❌ Échec complet de l'envoi: {e}")
         return {'success': False, 'error': str(e), 'mode': None}
@@ -371,7 +414,7 @@ async def _send_message_with_mode(
     parse_mode: Optional[str]
 ) -> Dict[str, Any]:
     """Envoie un message avec un mode de parsing spécifique."""
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    url = f"{get_api_url()}/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,

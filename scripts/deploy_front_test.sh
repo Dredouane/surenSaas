@@ -57,6 +57,18 @@ if [ -z "$BACKEND_URL" ]; then
 fi
 
 echo -e "${GREEN}✅ Backend test trouvé: $BACKEND_URL${NC}"
+
+# Obtenir l'URL du frontend (pour les redirections)
+FRONTEND_URL=$(gcloud run services describe $TEST_FRONT_SERVICE_NAME \
+    --region $GCP_REGION \
+    --project $GCP_PROJECT_ID \
+    --format 'value(status.url)' 2>/dev/null || echo "")
+if [ -z "$FRONTEND_URL" ]; then
+    echo -e "${YELLOW}⚠️  Frontend test non encore déployé, URL sera définie après déploiement${NC}"
+    # URL par défaut basée sur le nom du service
+    FRONTEND_URL="https://${TEST_FRONT_SERVICE_NAME}-REDACTED-ew.a.run.app"
+fi
+echo -e "${GREEN}✅ Frontend URL: $FRONTEND_URL${NC}"
 echo ""
 
 # Préparation du build
@@ -65,12 +77,13 @@ cd surenSaasFront
 
 echo -e "${BLUE}📝 Création du fichier .env pour le build...${NC}"
 
-# Créer le fichier .env avec les variables pour Next.js
-# Ce fichier sera copié par le Dockerfile et lu par Next.js au build time
-cat > .env << EOF
+# Créer le fichier .env.production avec les variables pour Next.js
+# Ce fichier sera copié par le Dockerfile et lu par Next.js au build time (mode production)
+cat > .env.production << EOF
 NEXT_PUBLIC_API_URL=${BACKEND_URL}
 NEXT_PUBLIC_ORG_ID=${NEXT_PUBLIC_ORG_ID}
 NEXT_PUBLIC_ORG_SLUG=${NEXT_PUBLIC_ORG_SLUG}
+NEXT_PUBLIC_FRONTEND_URL=${FRONTEND_URL}
 EOF
 
 # Fonction de nettoyage
@@ -78,10 +91,10 @@ cleanup() {
     echo ""
     echo -e "${BLUE}🧹 Nettoyage...${NC}"
     
-    # Supprimer le fichier .env créé
-    if [ -f .env ]; then
-        rm -f .env
-        echo -e "${GREEN}   ✅ Fichier .env supprimé${NC}"
+    # Supprimer le fichier .env.production créé
+    if [ -f .env.production ]; then
+        rm -f .env.production
+        echo -e "${GREEN}   ✅ Fichier .env.production supprimé${NC}"
     fi
 }
 
@@ -99,7 +112,7 @@ gcloud run deploy $TEST_FRONT_SERVICE_NAME \
     --region $GCP_REGION \
     --project $GCP_PROJECT_ID \
     --allow-unauthenticated \
-    --set-env-vars "BUILD_ID=$BUILD_ID,API_URL=$BACKEND_URL,ENVIRONMENT=test" \
+    --set-env-vars "BUILD_ID=$BUILD_ID,API_URL=$BACKEND_URL,ENVIRONMENT=test,NEXT_PUBLIC_ORG_SLUG=$TEST_ORG_SLUG,FRONTEND_URL=$FRONTEND_URL" \
     --memory 512Mi \
     --cpu 1 \
     --concurrency 80 \
@@ -141,14 +154,14 @@ if gcloud artifacts repositories describe "cloud-run-source-deploy" --location="
         echo -e "${BLUE}  Images trouvées: $(echo "$IMAGES" | wc -l)${NC}"
         
         # Garder seulement les 3 images les plus récentes
-        local count=0
+        count=0
         for digest in $IMAGES; do
             if [ $count -ge 3 ]; then
                 # Supprimer les images anciennes
                 echo -e "${YELLOW}    Suppression de l'image: ${digest:0:20}...${NC}"
                 gcloud artifacts docker images delete "$REPOSITORY@$digest" --quiet > /dev/null 2>&1
             fi
-            ((count++))
+            count=$((count+1))
         done
         
         echo -e "${GREEN}  ✅ Nettoyage Artifact Registry terminé (3 images conservées)${NC}"
