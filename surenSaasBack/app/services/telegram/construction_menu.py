@@ -36,7 +36,7 @@ def build_main_menu(
         ],
         [
             {
-                "text": "📄 Opérations en attente",
+                "text": "📄 Opérations",
                 "callback_data": "op:list:pending",
             },
             {
@@ -46,19 +46,25 @@ def build_main_menu(
         ],
         [
             {
-                "text": "💰 Factures & Dépenses",
-                "callback_data": "menu:sub:finances",
+                "text": "📄 Situations/Factures",
+                "callback_data": "menu:sub:situations",
             },
             {
-                "text": "📅 Réunions",
-                "callback_data": "menu:sub:receptions",
+                "text": "💵 Dépenses",
+                "callback_data": "menu:sub:depenses",
             },
         ],
         [
             {
+                "text": "📈 Avancement chantier",
+                "callback_data": "avancement:list",
+            },
+            {
                 "text": "📊 Indicateurs",
                 "callback_data": "stats:show",
             },
+        ],
+        [
             {
                 "text": "🏗️ Changer de chantier",
                 "callback_data": "chantier:list",
@@ -130,6 +136,23 @@ def build_operations_submenu() -> Dict[str, Any]:
     return {"text": texte, "keyboard": {"inline_keyboard": lignes}}
 
 
+def build_pointages_date_menu() -> Dict[str, Any]:
+    texte = "📅 *Sélectionne la date du pointage*"
+    lignes = [
+        [
+            {"text": "📅 Aujourd'hui", "callback_data": "pointage:date:today"},
+            {"text": "📅 J-1", "callback_data": "pointage:date:j-1"},
+        ],
+        [
+            {"text": "📅 J-2", "callback_data": "pointage:date:j-2"},
+        ],
+        [
+            {"text": "← Retour au menu", "callback_data": "menu:main"},
+        ],
+    ]
+    return {"text": texte, "keyboard": {"inline_keyboard": lignes}}
+
+
 def build_pointages_submenu(date_str: str) -> Dict[str, Any]:
     texte = f"👷‍♂️ *Pointages du {date_str}*\n\nChoisis une catégorie :"
     lignes = [
@@ -144,6 +167,10 @@ def build_pointages_submenu(date_str: str) -> Dict[str, Any]:
             },
         ],
         [
+            {
+                "text": "📅 Changer de date",
+                "callback_data": "pointage:date:select",
+            },
             {
                 "text": "← Retour au menu",
                 "callback_data": "menu:main",
@@ -186,23 +213,19 @@ def build_taches_submenu() -> Dict[str, Any]:
     return {"text": texte, "keyboard": {"inline_keyboard": lignes}}
 
 
-def build_finances_submenu() -> Dict[str, Any]:
-    texte = "💰 *Factures & Dépenses*\n\nChoisis une option :"
+def build_situations_submenu() -> Dict[str, Any]:
+    texte = "📄 *Situations / Factures client*\n\nChoisis une option :"
     lignes = [
         [
             {
-                "text": "📄 Envoyer une facture",
+                "text": "📤 Envoyer une facture",
                 "callback_data": "service:invoice_upload",
-            },
-            {
-                "text": "💵 Signaler une dépense",
-                "callback_data": "depense:create",
             },
         ],
         [
             {
-                "text": "📊 Voir dépenses du mois",
-                "callback_data": "depense:list:month",
+                "text": "📊 Voir situations",
+                "callback_data": "situation:list",
             },
         ],
         [
@@ -215,19 +238,19 @@ def build_finances_submenu() -> Dict[str, Any]:
     return {"text": texte, "keyboard": {"inline_keyboard": lignes}}
 
 
-def build_receptions_submenu() -> Dict[str, Any]:
-    texte = "📅 *Réunions & Réceptions*\n\nChoisis une option :"
+def build_depenses_submenu() -> Dict[str, Any]:
+    texte = "💵 *Dépenses chantier*\n\nChoisis une option :"
     lignes = [
         [
             {
-                "text": "📋 Prochaines réunions",
-                "callback_data": "rec:list:upcoming",
+                "text": "💵 Signaler une dépense",
+                "callback_data": "depense:create",
             },
         ],
         [
             {
-                "text": "📝 Noter un point à régler",
-                "callback_data": "rec:add_point",
+                "text": "📊 Voir dépenses du mois",
+                "callback_data": "depense:list:month",
             },
         ],
         [
@@ -285,8 +308,8 @@ CALLBACK_ROUTES: Dict[str, str] = {
     "menu:sub:operations": "handle_sub_operations",
     "menu:sub:pointages": "handle_sub_pointages",
     "menu:sub:taches": "handle_sub_taches",
-    "menu:sub:finances": "handle_sub_finances",
-    "menu:sub:receptions": "handle_sub_receptions",
+    "menu:sub:situations": "handle_sub_situations",
+    "menu:sub:depenses": "handle_sub_depenses",
     "menu:help": "handle_menu_help",
     # Chantier
     "chantier:list": "handle_chantier_list",
@@ -295,6 +318,12 @@ CALLBACK_ROUTES: Dict[str, str] = {
     "op:create:": "handle_create_operation",
     "op:list:pending": "handle_list_pending_operations",
     # Pointages
+    "pointage:date:select": "handle_pointage_date_select",
+    "pointage:date:today": "handle_pointage_date_today",
+    "pointage:date:j-1": "handle_pointage_date_j1",
+    "pointage:date:j-2": "handle_pointage_date_j2",
+    "pointage:list:human": "handle_pointage_list_human",
+    "pointage:list:machine": "handle_pointage_list_machine",
     "pointage:list:recent": "handle_pointage_list_recent",
     # Tâches
     "tache:list:": "handle_tache_list",
@@ -302,11 +331,12 @@ CALLBACK_ROUTES: Dict[str, str] = {
     # Dépenses
     "depense:create": "handle_depense_create",
     "depense:list:month": "handle_depense_list_month",
-    # Réceptions
-    "rec:list:upcoming": "handle_rec_list_upcoming",
-    "rec:add_point": "handle_rec_add_point",
     # Statistiques
     "stats:show": "handle_stats_show",
-    # Factures (inchangé via service:invoice_upload, mais aussi depuis bot_construction.py)
+    # Avancements
+    "avancement:list": "handle_avancement_list",
+    "avancement:situation:": "handle_avancement_situation",
+    "avancement:final_save": "handle_avancement_final_save",
+    # Factures
     "service:invoice_upload": "handle_invoice_upload_menu",
 }

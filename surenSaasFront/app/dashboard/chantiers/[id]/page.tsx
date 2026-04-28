@@ -38,6 +38,7 @@ import ReceptionsList from './components/ReceptionsList';
 import TachesList from './components/TachesList';
 import PointagesList from './components/PointagesList';
 import NotificationsPanel from './components/NotificationsPanel';
+import ValidationProduction from './components/ValidationProduction';
 import type { ChantierWithDetails, Situation, Depense, Operation, Reception, Tache, Pointage, Notification } from '@/types/chantier';
 
 const DEFAULT_ORG_ID = process.env.NEXT_PUBLIC_ORG_ID;
@@ -345,6 +346,13 @@ export default function ChantierDetailPage() {
             <span>Notifications</span>
           </button>
           <button
+            onClick={() => setActiveTab('production')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-all ${activeTab === 'production' ? 'bg-white border border-b-0 border-gray-200 text-blue-600 font-medium' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+          >
+            <Target className="h-4 w-4" />
+            <span>Production</span>
+          </button>
+          <button
             onClick={() => setActiveTab('situations')}
             className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-all ${activeTab === 'situations' ? 'bg-white border border-b-0 border-gray-200 text-blue-600 font-medium' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
           >
@@ -405,6 +413,10 @@ export default function ChantierDetailPage() {
         
         {activeTab === 'notifications' && (
           <NotificationsPanel chantierId={chantierId} orgId={orgId} onRefresh={handleRefresh} />
+        )}
+        
+        {activeTab === 'production' && (
+          <ValidationProduction chantierId={chantierId} orgId={orgId} onRefresh={handleRefresh} />
         )}
         
         {activeTab === 'situations' && (

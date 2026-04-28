@@ -23,6 +23,7 @@ class NotificationService:
         title: str,
         message: str,
         action_url: Optional[str] = None,
+        action_label: Optional[str] = None,
         notification_type: str = 'general',
         channels: Optional[List[str]] = None
     ) -> Dict[str, Any]:
@@ -47,7 +48,7 @@ class NotificationService:
         
         if 'telegram' in channels:
             results['telegram'] = await self._send_telegram_notification(
-                user_id, title, message, action_url
+                user_id, title, message, action_url, action_label
             )
         
         if 'email' in channels:
@@ -67,10 +68,10 @@ class NotificationService:
         user_id: str,
         title: str,
         message: str,
-        action_url: Optional[str] = None
+        action_url: Optional[str] = None,
+        action_label: Optional[str] = None
     ) -> Dict[str, Any]:
         """Envoie une notification Telegram."""
-        # Récupérer le telegram_id via user_id (FK vers auth.users)
         telegram_user = self.supabase.table('telegram_users') \
             .select('telegram_id') \
             .eq('user_id', user_id) \
@@ -82,11 +83,11 @@ class NotificationService:
         
         telegram_id = telegram_user.data[0]['telegram_id']
         
-        # Construire le message
         full_message = f"📋 *{title}*\n\n{message}"
         
         if action_url:
-            full_message += f"\n\n[Voir la facture]({action_url})"
+            label = action_label or "Voir dans l'application"
+            full_message += f"\n\n[{label}]({action_url})"
         
         # Envoyer via API Telegram
         if not self.telegram_token:
@@ -137,6 +138,42 @@ class NotificationService:
         # TODO: Implémenter les push notifications
         return {'sent': False, 'reason': 'not_implemented'}
     
+    async def notify_admins(
+        self,
+        org_id: str,
+        title: str,
+        message: str,
+        action_url: Optional[str] = None,
+        action_label: str = "Voir dans l'application",
+        notification_type: str = 'general'
+    ) -> Dict[str, Any]:
+        """Notifie tous les admins d'une organisation via Telegram."""
+        managers = self.supabase.table('users') \
+            .select('id') \
+            .eq('org_id', org_id) \
+            .eq('role', 'admin') \
+            .execute()
+
+        if not managers.data:
+            return {'sent': 0, 'reason': 'no_managers_found'}
+
+        sent_count = 0
+        for manager in managers.data:
+            result = await self.send_to_user(
+                user_id=manager['id'],
+                title=title,
+                message=message,
+                action_url=action_url,
+                notification_type=notification_type
+            )
+            if result.get('telegram', {}).get('sent'):
+                sent_count += 1
+
+        return {
+            'sent': sent_count,
+            'total_admins': len(managers.data),
+        }
+
     async def notify_invoice_pending(
         self,
         org_id: str,

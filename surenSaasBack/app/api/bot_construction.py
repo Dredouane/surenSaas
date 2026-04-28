@@ -40,6 +40,10 @@ async def handle_construction_message(
         from app.api.bot_construction_depenses import handle_depense_media
         return await handle_depense_media(message, bot_config, supabase, org_id, state)
 
+    if state and state.get('last_state') in ['avancement_awaiting_ligne', 'avancement_awaiting_validation']:
+        from app.api.bot_construction_avancements import handle_avancement_input_data
+        return await handle_avancement_input_data(message, bot_config, supabase, org_id, state)
+
     # 2. Commandes de contrôle
     if text and text.startswith('/start'):
         from app.api.bot_construction_commands import handle_start_command

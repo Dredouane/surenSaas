@@ -8,6 +8,7 @@ export type AuditAction = 'creation' | 'modification' | 'validation' | 'rejet' |
 export type ReceptionStatut = 'planifiee' | 'en_cours' | 'terminee' | 'annulee';
 export type ReceptionType = 'livraison' | 'validation' | 'probleme' | 'suivi';
 export type TacheStatut = 'en_attente' | 'en_cours' | 'terminee' | 'annulee';
+export type SituationStatut = 'ouverte' | 'validee' | 'transmise' | 'payee';
 export type TacheType = 'information' | 'action' | 'validation' | 'rapport';
 export type TacheSource = 'direction' | 'systeme' | 'client';
 export type TachePriorite = 'basse' | 'moyenne' | 'haute';
@@ -46,6 +47,10 @@ export interface Situation {
   libelle: string;
   montant: number;
   reglementObservation?: string;
+  statut?: SituationStatut;
+  type?: string;
+  periodeDebut?: string;
+  periodeFin?: string;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -231,6 +236,7 @@ export interface CreateSituationInput {
   libelle: string;
   montant: number;
   reglementObservation?: string;
+  statut?: SituationStatut;
 }
 
 export interface CreateDepenseInput {

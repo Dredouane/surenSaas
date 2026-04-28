@@ -15,8 +15,8 @@ from app.services.telegram.construction_menu import (
     build_operations_submenu,
     build_pointages_submenu,
     build_taches_submenu,
-    build_finances_submenu,
-    build_receptions_submenu,
+    build_situations_submenu,
+    build_depenses_submenu,
     build_chantier_list,
     build_simple_message,
 )
@@ -74,16 +74,11 @@ async def handle_construction_callback(
         return await _handle_sub_pointages(chat_id, bot_config, supabase, org_id)
     if data == "menu:sub:taches":
         return await _handle_sub_taches(chat_id, bot_config)
-    # === Factures & Dépenses ===
-    if data == "menu:sub:finances":
-        from app.api.bot_construction_invoices import handle_invoice_menu
-        return await handle_invoice_menu(chat_id, bot_config)
-    if data.startswith("invoice:edit:"):
-        from app.api.bot_construction_invoices import handle_edit_invoice_step1
-        invoice_id = data.split(":", 2)[2]
-        return await handle_edit_invoice_step1(chat_id, invoice_id, bot_config)
-    if data == "menu:sub:receptions":
-        return await _handle_sub_receptions(chat_id, bot_config)
+    # === Situations / Factures ===
+    if data == "menu:sub:situations":
+        return await _handle_sub_situations(chat_id, bot_config)
+    if data == "menu:sub:depenses":
+        return await _handle_sub_depenses(chat_id, bot_config)
     if data == "menu:help":
         return await _handle_menu_help(chat_id, bot_config)
     if data == "service:invoice_upload":
@@ -131,6 +126,22 @@ async def handle_construction_callback(
             return await handle_list_human(chat_id, bot_config, supabase, org_id, page)
         else:
             return await handle_list_machine(chat_id, bot_config, supabase, org_id, page)
+    if data == "pointage:date:select":
+        return await _handle_pointage_date_select(chat_id, bot_config)
+    if data == "pointage:date:today":
+        from app.api.bot_construction_pointages import handle_pointage_date_select
+        today_str = date.today().isoformat()
+        return await handle_pointage_date_select(chat_id, today_str, bot_config, supabase, org_id)
+    if data == "pointage:date:j-1":
+        from app.api.bot_construction_pointages import handle_pointage_date_select
+        from datetime import timedelta
+        j1_str = (date.today() - timedelta(days=1)).isoformat()
+        return await handle_pointage_date_select(chat_id, j1_str, bot_config, supabase, org_id)
+    if data == "pointage:date:j-2":
+        from app.api.bot_construction_pointages import handle_pointage_date_select
+        from datetime import timedelta
+        j2_str = (date.today() - timedelta(days=2)).isoformat()
+        return await handle_pointage_date_select(chat_id, j2_str, bot_config, supabase, org_id)
     if data == "pointage:validate":
         from app.api.bot_construction_pointages import handle_validate_pointage
         return await handle_validate_pointage(chat_id, bot_config, supabase, org_id)
@@ -148,6 +159,10 @@ async def handle_construction_callback(
     if data == "depense:create":
         from app.api.bot_construction_depenses import handle_depense_create
         return await handle_depense_create(chat_id, bot_config, supabase, org_id)
+    if data.startswith("depense:type:"):
+        categorie = data.split(":", 2)[2]
+        from app.api.bot_construction_depenses import handle_depense_type_selected
+        return await handle_depense_type_selected(chat_id, categorie, bot_config, supabase, org_id)
     if data == "depense:final_save":
         from app.api.bot_construction_depenses import handle_save_depense
         return await handle_save_depense(chat_id, bot_config, supabase, org_id)
@@ -155,13 +170,22 @@ async def handle_construction_callback(
         from app.api.bot_construction_depenses import handle_list_depenses
         return await handle_list_depenses(chat_id, bot_config, supabase, org_id)
 
-    # === Réceptions ===
-    if data == "rec:list:upcoming":
-        from app.api.bot_construction_receptions import handle_list_receptions
-        return await handle_list_receptions(chat_id, bot_config, supabase, org_id)
-    if data == "rec:add_point":
-        from app.api.bot_construction_receptions import handle_add_point_reception
-        return await handle_add_point_reception(chat_id, bot_config)
+    # === Situations ===
+    if data == "situation:list":
+        from app.api.bot_construction_invoices import handle_situation_list
+        return await handle_situation_list(chat_id, bot_config, supabase, org_id)
+
+    # === Avancements ===
+    if data == "avancement:list":
+        from app.api.bot_construction_avancements import handle_avancement_choose_situation
+        return await handle_avancement_choose_situation(chat_id, bot_config, supabase, org_id)
+    if data.startswith("avancement:situation:"):
+        situation_id = data.split(":", 2)[2]
+        from app.api.bot_construction_avancements import handle_avancement_situation_selected
+        return await handle_avancement_situation_selected(chat_id, situation_id, bot_config, supabase, org_id)
+    if data == "avancement:final_save":
+        from app.api.bot_construction_avancements import handle_avancement_save
+        return await handle_avancement_save(chat_id, bot_config, supabase, org_id)
 
     # === Stats ===
     if data == "stats:show":
@@ -220,6 +244,14 @@ async def _handle_sub_operations(chat_id: int, bot_config: Dict[str, Any]) -> Di
     return {"ok": True}
 
 
+async def _handle_pointage_date_select(chat_id: int, bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Affiche le menu de sélection de date pour les pointages."""
+    from app.services.telegram.construction_menu import build_pointages_date_menu
+    menu = build_pointages_date_menu()
+    await send_message_with_keyboard(chat_id, bot_config, menu["text"], menu["keyboard"])
+    return {"ok": True}
+
+
 async def _handle_sub_pointages(
     chat_id: int, bot_config: Dict[str, Any], supabase: Any, org_id: str
 ) -> Dict[str, Any]:
@@ -243,12 +275,17 @@ async def _handle_sub_taches(chat_id: int, bot_config: Dict[str, Any]) -> Dict[s
     return {"ok": True}
 
 
-# (Handlers finances déplacés vers bot_construction_invoices.py)
+async def _handle_sub_situations(chat_id: int, bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sous-menu situations/factures."""
+    menu = build_situations_submenu()
+    await send_message_with_keyboard(
+        chat_id, bot_config, menu["text"], menu["keyboard"]
+    )
+    return {"ok": True}
 
-
-async def _handle_sub_receptions(chat_id: int, bot_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Sous-menu réunions."""
-    menu = build_receptions_submenu()
+async def _handle_sub_depenses(chat_id: int, bot_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sous-menu dépenses chantier."""
+    menu = build_depenses_submenu()
     await send_message_with_keyboard(
         chat_id, bot_config, menu["text"], menu["keyboard"]
     )
@@ -467,63 +504,6 @@ async def _handle_depense_list_month(
         texte += f"\n*Total : {total:,.2f}€*"
 
     menu = build_simple_message(texte, bouton_retour=True)
-    await send_message_with_keyboard(
-        chat_id, bot_config, menu["text"], menu["keyboard"]
-    )
-    return {"ok": True}
-
-
-# ================================================================
-# HANDLERS RÉCEPTIONS (placeholders)
-# ================================================================
-
-async def _handle_rec_list_upcoming(
-    chat_id: int, bot_config: Dict[str, Any], supabase: Any, org_id: str
-) -> Dict[str, Any]:
-    """Liste les prochaines réunions."""
-    chantier = await ensure_chantier_selected(chat_id, supabase, org_id)
-    if not chantier:
-        return await _handle_chantier_list(chat_id, bot_config, supabase, org_id)
-
-    aujourd_hui = date.today().isoformat()
-    try:
-        r = (
-            supabase.table("chantier_receptions")
-            .select("id, date, type, statut, participants")
-            .eq("org_id", org_id)
-            .eq("chantier_id", chantier["id"])
-            .gte("date", aujourd_hui)
-            .order("date")
-            .limit(10)
-            .execute()
-        )
-        recs = r.data or []
-    except Exception as e:
-        logger.error(f"Erreur liste réceptions: {e}")
-        recs = []
-
-    if not recs:
-        texte = f"📅 *Aucune réunion* prévue sur *{chantier.get('nom', 'le chantier')}*."
-    else:
-        texte = f"📅 *Prochaines réunions* — {chantier.get('nom', 'Chantier')}\n\n"
-        for r_ in recs:
-            texte += f"• {r_['date'][:10]} — *{r_.get('type', 'Réunion')}* — {r_.get('statut', '')}\n"
-
-    menu = build_simple_message(texte, bouton_retour=True)
-    await send_message_with_keyboard(
-        chat_id, bot_config, menu["text"], menu["keyboard"]
-    )
-    return {"ok": True}
-
-
-async def _handle_rec_add_point(chat_id: int, bot_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Ajoute un point à régler (placeholder)."""
-    menu = build_simple_message(
-        "📝 *Noter un point à régler*\n\n"
-        "Décris le point à aborder lors de la prochaine réunion.\n"
-        "Cette fonctionnalité sera détaillée dans une version future.",
-        bouton_retour=True,
-    )
     await send_message_with_keyboard(
         chat_id, bot_config, menu["text"], menu["keyboard"]
     )

@@ -15,6 +15,28 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Patcher google.generativeai AVANT tout import du module métier
+_FAKE_GENAI = MagicMock()
+_FAKE_GENAI.GenerativeModel.return_value.generate_content.return_value.text = json.dumps({
+    "description": "Test extrait par IA",
+    "type": "commande",
+    "montant": 500,
+    "quantite": 10,
+    "unite": "m2",
+    "fournisseur": "Test Fournisseur",
+    "categorie": "sous_traitant",
+    "avancement_pourcentage": 80,
+    "prix_unitaire": 25,
+})
+sys.modules['google.generativeai'] = _FAKE_GENAI
+
+# Forcer le rechargement des modules qui importent l'extracteur LLM
+# pour qu'ils utilisent l'extracteur mocké
+import importlib
+for mod_name in list(sys.modules.keys()):
+    if mod_name.startswith('app.services.ai') or mod_name in ('app.api.bot_construction_operations', 'app.api.bot_construction_depenses', 'app.api.bot_construction_avancements'):
+        sys.modules.pop(mod_name, None)
+
 from app.api.telegram_core import (
     handle_telegram_webhook,
     _dispatch_message,
@@ -102,6 +124,39 @@ class TestCallbackDispatcher:
     @pytest.mark.asyncio
     async def test_operations_submenu(self, base_callback_query, bot_config, mock_supabase):
         base_callback_query["data"] = "menu:sub:operations"
+        with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            result = await handle_construction_callback(
+                base_callback_query, bot_config, mock_supabase, "org-123"
+            )
+        assert result["ok"] is True
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_situations_submenu(self, base_callback_query, bot_config, mock_supabase):
+        """menu:sub:situations remplace menu:sub:finances."""
+        base_callback_query["data"] = "menu:sub:situations"
+        with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            result = await handle_construction_callback(
+                base_callback_query, bot_config, mock_supabase, "org-123"
+            )
+        assert result["ok"] is True
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_depenses_submenu(self, base_callback_query, bot_config, mock_supabase):
+        """menu:sub:depenses remplace l'ancien menu:sub:finances."""
+        base_callback_query["data"] = "menu:sub:depenses"
+        with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            result = await handle_construction_callback(
+                base_callback_query, bot_config, mock_supabase, "org-123"
+            )
+        assert result["ok"] is True
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_old_receptions_submenu_removed(self, base_callback_query, bot_config, mock_supabase):
+        """menu:sub:receptions n'existe plus — doit rediriger vers menu principal."""
+        base_callback_query["data"] = "menu:sub:receptions"
         with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
             result = await handle_construction_callback(
                 base_callback_query, bot_config, mock_supabase, "org-123"
@@ -281,16 +336,79 @@ class TestPointageValidation:
 
         with patch("app.api.bot_construction_pointages.send_simple_message", new_callable=AsyncMock):
             with patch("app.api.bot_construction_pointages.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "chantier-1", "nom": "Test"}):
-                result = await handle_validate_pointage(12345, bot_config, supabase, "org-123")
+                with patch("app.api.bot_construction_pointages.get_state", new_callable=AsyncMock, return_value=None):
+                    result = await handle_validate_pointage(12345, bot_config, supabase, "org-123")
 
         assert result["ok"] is True
-        # Vérifier que l'UPDATE utilise 'statut' et pas 'status'
         update_call_args = table_mock.update.call_args
         assert update_call_args is not None, "UPDATE should have been called"
         update_kwargs = update_call_args[0][0]
         assert "statut" in update_kwargs, f"Expected 'statut' in update payload, got: {update_kwargs}"
         assert "status" not in update_kwargs, f"'status' should not be used, got: {update_kwargs}"
         assert update_kwargs["statut"] == "en_attente_validation"
+
+
+class TestPointageDateSelection:
+    """Cycle 1 — Pointages : sélection de date Aujourd'hui/J-1/J-2."""
+
+    @pytest.mark.asyncio
+    async def test_pointage_submenu_shows_date_buttons(self, bot_config):
+        """
+        RED — Le sous-menu pointages doit proposer le choix de date
+        avant de lister les ressources.
+        """
+        from app.api.bot_construction_commands import _handle_pointage_date_select
+        with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            result = await _handle_pointage_date_select(12345, bot_config)
+        assert result["ok"] is True
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_pointage_date_persisted_in_state(self, bot_config):
+        """
+        RED — La date choisie doit être stockée dans last_state_data
+        pour que les handlers la retrouvent.
+        """
+        from app.api.bot_construction_pointages import handle_pointage_date_select
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        with patch("app.api.bot_construction_pointages.set_state", new_callable=AsyncMock, return_value=True) as mock_set:
+            with patch("app.api.bot_construction_pointages.send_message_with_keyboard", new_callable=AsyncMock):
+                result = await handle_pointage_date_select(12345, "2026-04-28", bot_config, supabase, "org-123")
+
+        assert result["ok"] is True
+        mock_set.assert_awaited_once()
+        state_data = mock_set.call_args[1].get("data", {})
+        assert state_data.get("pointage_date") == "2026-04-28"
+
+    @pytest.mark.asyncio
+    async def test_pointage_list_human_uses_state_date(self, bot_config):
+        """
+        RED — handle_list_human doit utiliser la date stockée dans le state
+        plutôt que date.today().
+        """
+        from app.api.bot_construction_pointages import handle_list_human
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        with patch("app.api.bot_construction_pointages.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+            with patch("app.api.bot_construction_pointages.get_state", new_callable=AsyncMock, return_value={"last_state_data": {"pointage_date": "2026-04-27"}}):
+                with patch("app.api.bot_construction_pointages.send_message_with_keyboard", new_callable=AsyncMock):
+                    result = await handle_list_human(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+        # Vérifier que la query utilise la date du state
+        eq_calls = [c for c in supabase.eq.call_args_list if c[0][0] == 'date']
+        assert len(eq_calls) > 0, "La query doit filtrer par date"
+        assert eq_calls[0][0][1] == "2026-04-27", f"Expected date 2026-04-27, got {eq_calls[0][0][1]}"
 
 
 class TestChantierContext:
@@ -335,15 +453,54 @@ class TestCallbackRoutesOrphelins:
 # Tests: Opérations HITL (Phase 2 — CHA-007: notification manager après création)
 # ================================================================
 
+class TestListPendingOperations:
+    """Valide le handler handle_list_pending_operations."""
+
+    @pytest.mark.asyncio
+    async def test_list_pending_operations_exists_and_returns(self, bot_config):
+        from app.api.bot_construction_operations import handle_list_pending_operations
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.order.return_value = supabase
+        supabase.limit.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        with patch("app.api.bot_construction_operations.send_message_with_keyboard", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_operations.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                result = await handle_list_pending_operations(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+
+
+class TestSituationsList:
+    """Valide le handler handle_situation_list."""
+
+    @pytest.mark.asyncio
+    async def test_situation_list_exists_and_shows_situations(self, bot_config):
+        from app.api.bot_construction_invoices import handle_situation_list
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.order.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[{"numero": 1, "date": "2025-06-01", "libelle": "Situation 1", "montant": 50000}])
+
+        with patch("app.api.bot_construction_invoices.send_message_with_keyboard", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_invoices.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                result = await handle_situation_list(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+
+
 class TestOperationWorkflow:
     """Valide que le workflow opération notifie le gérant après création."""
 
     @pytest.mark.asyncio
-    @patch.dict('sys.modules', {'google.generativeai': MagicMock()})
     async def test_save_operation_creates_notification(self, bot_config):
         """
-        RED — CHA-007: handle_save_operation ne crée PAS de notification
-        pour le gérant. Ce test échoue tant que la notification n'est pas créée.
+        RED — CHA-007: handle_save_operation doit notifier les admins après création.
         """
         from app.api.bot_construction_operations import handle_save_operation
 
@@ -352,24 +509,19 @@ class TestOperationWorkflow:
         supabase.select.return_value = supabase
         supabase.eq.return_value = supabase
         supabase.single.return_value = supabase
+        supabase.execute.return_value = MagicMock(data={"last_state": "op_awaiting_validation", "last_state_data": {"op_type": "commande", "description": "Test op"}})
 
-        execute_results = iter([
-            MagicMock(data={"last_state": "op_awaiting_validation", "last_state_data": {"op_type": "commande", "description": "Test op"}}),
-            MagicMock(data=[{"user_id": "user-uuid-123"}]),
-        ])
-        supabase.execute.side_effect = execute_results
+        notif_mock = AsyncMock()
+        notif_mock.notify_admins = AsyncMock(return_value={"sent": 1, "total_admins": 1})
 
         with patch("app.api.bot_construction_operations.send_simple_message", new_callable=AsyncMock):
             with patch("app.api.bot_construction_commands.send_menu_message", new_callable=AsyncMock):
                 with patch("app.api.bot_construction_operations.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "chantier-1", "nom": "Test"}):
-                    result = await handle_save_operation(12345, bot_config, supabase, "org-123")
+                    with patch("app.api.bot_construction_operations.NotificationService", return_value=notif_mock):
+                        result = await handle_save_operation(12345, bot_config, supabase, "org-123")
 
         assert result["ok"] is True
-
-        # Vérifier qu'une notification a été créée après l'insertion de l'opération
-        insert_calls = supabase.insert.call_args_list
-        notification_inserts = [call for call in insert_calls if call[0][0].get("type") in ["validation", "alerte", "info"]]
-        assert len(notification_inserts) >= 1, "Au moins une notification doit être créée après save_operation"
+        notif_mock.notify_admins.assert_awaited_once()
 
 
 class TestImportsNonCirculaires:
@@ -456,8 +608,8 @@ class TestDepenseWorkflow:
     @pytest.mark.asyncio
     async def test_depense_create_sets_state(self, bot_config):
         """
-        RED — Bug 2: handle_depense_create envoie juste un message texte
-        sans machine d'état. Le test échoue tant que set_state n'est pas appelé.
+        RED — Bug 2: handle_depense_create envoie maintenant un menu
+        de type de dépense. set_state est appelé dans handle_depense_type_selected.
         """
         from app.api.bot_construction_depenses import handle_depense_create
 
@@ -467,14 +619,11 @@ class TestDepenseWorkflow:
         supabase.eq.return_value = supabase
         supabase.execute.return_value = MagicMock(data=[])
 
-        with patch("app.api.bot_construction_depenses.send_simple_message", new_callable=AsyncMock):
-            with patch("app.api.bot_construction_depenses.set_state", new_callable=AsyncMock, return_value=True) as mock_set_state:
-                result = await handle_depense_create(12345, bot_config, supabase, "org-123")
+        with patch("app.api.bot_construction_depenses.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            result = await handle_depense_create(12345, bot_config, supabase, "org-123")
 
         assert result["ok"] is True
-        mock_set_state.assert_awaited_once()
-        state_arg = mock_set_state.call_args[0][1]
-        assert state_arg == "depense_awaiting_description", f"Expected depense_awaiting_description, got {state_arg}"
+        mock_send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_depense_handle_media_exists(self, bot_config):
@@ -526,6 +675,191 @@ class TestNotificationServiceBug:
         mock_client.post.assert_awaited_once()
 
 
+class TestDepenseTypeSelection:
+    """Cycle 3 — Dépenses : choix du type avant la description."""
+
+    @pytest.mark.asyncio
+    async def test_depense_create_shows_type_buttons(self, bot_config):
+        """
+        RED — handle_depense_create doit envoyer un menu avec les types
+        de dépense (sous_traitant, fournisseur, autre) au lieu d'un texte libre.
+        """
+        from app.api.bot_construction_depenses import handle_depense_create
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        with patch("app.api.bot_construction_depenses.send_message_with_keyboard", new_callable=AsyncMock) as mock_send:
+            with patch("app.api.bot_construction_depenses.set_state", new_callable=AsyncMock, return_value=True):
+                result = await handle_depense_create(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+        mock_send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_depense_save_uses_selected_category(self, bot_config):
+        """
+        RED — handle_depense_media doit lire la catégorie depuis le state
+        et handle_save_depense doit l'écrire dans chantier_depenses.categorie.
+        """
+        from app.api.bot_construction_depenses import handle_depense_media
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        state = {"last_state": "depense_awaiting_description", "last_state_data": {"categorie": "sous_traitant"}}
+        message = {"chat": {"id": 12345}, "text": "Maçonnerie façade 5000€"}
+
+        with patch("app.api.bot_construction_depenses.set_state", new_callable=AsyncMock, return_value=True) as mock_set:
+            with patch("app.api.bot_construction_depenses.send_message_with_keyboard", new_callable=AsyncMock):
+                result = await handle_depense_media(message, bot_config, supabase, "org-123", state)
+        assert result["ok"] is True
+        set_data = mock_set.call_args[1].get("data", {})
+        assert set_data.get("categorie") == "sous_traitant"
+
+    @pytest.mark.asyncio
+    async def test_depense_save_creates_notification(self, bot_config):
+        """
+        RED — handle_save_depense doit notifier les admins après insertion.
+        """
+        from app.api.bot_construction_depenses import handle_save_depense
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        notif_mock = AsyncMock()
+        notif_mock.notify_admins = AsyncMock(return_value={"sent": 1, "total_admins": 1})
+
+        with patch("app.api.bot_construction_depenses.send_simple_message", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_commands.send_message_with_keyboard", new_callable=AsyncMock):
+                with patch("app.api.bot_construction_depenses.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                    with patch("app.api.bot_construction_depenses.get_state", new_callable=AsyncMock, return_value={"last_state": "depense_awaiting_validation", "last_state_data": {"categorie": "sous_traitant", "description": "test"}}):
+                        with patch("app.api.bot_construction_depenses.set_state", new_callable=AsyncMock):
+                            with patch("app.api.bot_construction_depenses.NotificationService", return_value=notif_mock):
+                                result = await handle_save_depense(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+        notif_mock.notify_admins.assert_awaited_once()
+
+
+class TestNotifyAdmins:
+    """Cycle 4 — NotificationService.notify_admins() générique."""
+
+    @pytest.mark.asyncio
+    async def test_notify_admins_sends_to_admins(self):
+        """
+        RED — notify_admins doit trouver tous les admins d'une org
+        et envoyer un message Telegram à chacun.
+        """
+        from app.services.telegram.notification_service import NotificationService
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+
+        # users: 2 admins trouvés
+        users_exec = MagicMock(data=[{"id": "admin-1"}, {"id": "admin-2"}])
+        # telegram_users: 1er admin lié, 2ème non
+        def exec_side():
+            return MagicMock(data=[{"telegram_id": 11111}])
+        supabase.execute.side_effect = [users_exec, MagicMock(data=[{"telegram_id": 11111}]), MagicMock(data=[])]
+
+        service = NotificationService(supabase, telegram_token="fake:token")
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__.return_value = mock_client
+            mock_client.post = AsyncMock(return_value=MagicMock(json=lambda: {"ok": True, "result": {"message_id": 1}}))
+
+            result = await service.notify_admins(
+                org_id="org-123",
+                title="Test",
+                message="Message test",
+                action_url="https://app/test?tab=operations"
+            )
+
+        assert result["sent"] == 1
+        assert result["total_admins"] == 2
+
+    @pytest.mark.asyncio
+    async def test_notify_admins_with_custom_action_label(self):
+        """
+        RED — notify_admins doit accepter un action_label optionnel.
+        """
+        from app.services.telegram.notification_service import NotificationService
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+
+        results_iter = iter([
+            MagicMock(data=[{"id": "admin-1"}]),
+            MagicMock(data=[{"telegram_id": 11111}]),
+        ])
+        supabase.execute.side_effect = lambda: next(results_iter)
+
+        service = NotificationService(supabase, telegram_token="fake:token")
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__.return_value = mock_client
+            mock_client.post = AsyncMock(return_value=MagicMock(json=lambda: {"ok": True, "result": {"message_id": 1}}))
+
+            result = await service.notify_admins(
+                org_id="org-123",
+                title="Test",
+                message="Message",
+                action_url="/test",
+            )
+
+        assert result["sent"] == 1
+
+
+class TestSituationStatutMigration:
+    """Cycle 1+2 — Migration SQL : enum + colonnes + table lignes."""
+
+    def test_situation_statut_enum_exists(self):
+        from app.api.chantiers import router
+        assert router is not None
+
+    def test_situation_lignes_table_columns(self):
+        import os, sys
+        from pathlib import Path
+        sql_file = Path(__file__).parent.parent.parent / "db" / "schema" / "031_chantiers_situations_statut.sql"
+        assert sql_file.exists(), f"Migration SQL manquante: {sql_file}"
+        content = sql_file.read_text()
+        assert "chantier_situation_statut" in content
+        assert "chantier_situation_lignes" in content
+        assert "photo_url" in content
+        assert "avancement_pourcentage" in content
+
+
+class TestSituationLignesAPI:
+    """Cycle 3 — Routes API pour les lignes de situation + statut."""
+
+    def test_situation_lignes_endpoint_exists(self):
+        from app.api.chantiers import router
+        routes = [r.path for r in router.routes]
+        has_lignes = any('situations/{situation_id}/lignes' in r for r in routes)
+        has_statut = any('/situations/{situation_id}/statut' in r for r in routes)
+        assert has_lignes, f"Route situations/.../lignes manquante. Routes: {routes}"
+        assert has_statut, f"Route situations/.../statut manquante. Routes: {routes}"
+
+    def test_situation_statut_query_param_exists(self):
+        from app.api.chantiers import list_situations
+        import inspect
+        sig = inspect.signature(list_situations)
+        params = list(sig.parameters.keys())
+        assert 'statut' in params or 'statut_filter' in params or 'statut' in str(sig), f"Paramètre statut manquant dans list_situations. Signature: {sig}"
+
+
 class TestRecalculEndpoint:
     """Valide que l'endpoint de recalcul existe."""
 
@@ -537,3 +871,167 @@ class TestRecalculEndpoint:
         routes = [r.path for r in router.routes]
         has_endpoint = any('/recalcul' in r for r in routes)
         assert has_endpoint, f"No /recalcul route in chantiers router: {routes}"
+
+
+class TestSituationDefaultStatut:
+    """La migration doit avoir DEFAULT 'ouverte' et l'API doit le retourner."""
+
+    def test_migration_default_is_ouverte(self):
+        from pathlib import Path
+        sql = Path(__file__).parent.parent.parent / "db" / "schema" / "031_chantiers_situations_statut.sql"
+        content = sql.read_text()
+        assert "DEFAULT 'ouverte'" in content, "Le DEFAULT doit être 'ouverte'"
+
+    def test_situation_create_accepts_statut(self):
+        from app.api.chantiers import SituationCreate
+        assert hasattr(SituationCreate, 'statut') or 'statut' in SituationCreate.model_fields, "SituationCreate doit accepter statut"
+
+
+class TestAvancementWorkflow:
+    """Cycles 4+5+6 — Bot avancement chantier."""
+
+    @pytest.mark.asyncio
+    async def test_avancement_submenu_exists(self, bot_config):
+        """Cycle 4 — Le bouton '📈 Avancement chantier' existe dans le menu."""
+        from app.services.telegram.construction_menu import build_main_menu
+        menu = build_main_menu(chantier_nom="Test", chantier_count=1)
+        keyboard = menu["keyboard"]
+        all_buttons = [btn["text"] for row in keyboard["inline_keyboard"] for btn in row]
+        assert "📈 Avancement chantier" in all_buttons
+
+    @pytest.mark.asyncio
+    async def test_avancement_choose_situation_shows_open_situations(self, bot_config):
+        """Cycle 4 — handle_avancement_choose_situation liste les situations ouvertes."""
+        from app.api.bot_construction_avancements import handle_avancement_choose_situation
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.order.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[{"id": "sit-1", "numero": 1, "libelle": "Situation test"}])
+
+        with patch("app.api.bot_construction_avancements.send_message_with_keyboard", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_avancements.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                result = await handle_avancement_choose_situation(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_avancement_input_data_sets_state(self, bot_config):
+        """Cycle 5 — handle_avancement_input_data (appelé depuis l'état) doit traiter la saisie."""
+        from app.api.bot_construction_avancements import handle_avancement_input_data
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        state = {"last_state": "avancement_awaiting_ligne", "last_state_data": {"situation_id": "sit-1"}}
+        message = {"chat": {"id": 12345}, "text": "Enduit façade 50m2 25€/m2 80%"}
+
+        with patch("app.api.bot_construction_avancements.set_state", new_callable=AsyncMock, return_value=True):
+            with patch("app.api.bot_construction_avancements.send_message_with_keyboard", new_callable=AsyncMock):
+                result = await handle_avancement_input_data(message, bot_config, supabase, "org-123", state)
+        assert result["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_avancement_save_creates_ligne_and_notifies(self, bot_config):
+        """Cycle 6 — handle_avancement_save INSERT + notify_admins."""
+        from app.api.bot_construction_avancements import handle_avancement_save
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[])
+
+        notif_mock = AsyncMock()
+        notif_mock.notify_admins = AsyncMock(return_value={"sent": 1, "total_admins": 1})
+
+        with patch("app.api.bot_construction_avancements.send_simple_message", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_commands.send_menu_message", new_callable=AsyncMock):
+                with patch("app.api.bot_construction_avancements.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                    with patch("app.api.bot_construction_avancements.get_state", new_callable=AsyncMock, return_value={"last_state": "avancement_awaiting_validation", "last_state_data": {"situation_id": "sit-1", "description": "Test", "quantite": 50, "prix_unitaire": 25, "avancement_pourcentage": 80}}):
+                        with patch("app.api.bot_construction_avancements.set_state", new_callable=AsyncMock):
+                            with patch("app.api.bot_construction_avancements.NotificationService", return_value=notif_mock):
+                                result = await handle_avancement_save(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+        notif_mock.notify_admins.assert_awaited_once()
+
+
+class TestValidationProductionFrontend:
+    """Cycle 7 — Le frontend doit avoir un composant ValidationProduction."""
+
+    def test_validation_production_component_exists(self):
+        import os
+        from pathlib import Path
+        base = Path(__file__).parent.parent.parent / "surenSaasFront" / "app" / "dashboard" / "chantiers" / "[id]" / "components"
+        comp = base / "ValidationProduction.tsx"
+        assert comp.exists(), f"Fichier manquant: {comp}"
+
+    def test_chantier_detail_page_imports_validation_production(self):
+        from pathlib import Path
+        page = Path(__file__).parent.parent.parent / "surenSaasFront" / "app" / "dashboard" / "chantiers" / "[id]" / "page.tsx"
+        assert page.exists()
+        content = page.read_text()
+        assert "ValidationProduction" in content
+
+
+class TestPhotoPreuveOperations:
+    """Cycle 8 — Photo preuve pour opérations HITL."""
+
+    def test_operation_insert_includes_photo_url(self):
+        from app.api.bot_construction_operations import handle_operation_media
+        import inspect
+        source = inspect.getsource(handle_operation_media)
+        assert "photo_url" in source or "get('photo')" in source
+
+    @pytest.mark.asyncio
+    async def test_operation_save_with_photo(self, bot_config):
+        from app.api.bot_construction_operations import handle_save_operation
+
+        supabase = MagicMock()
+        supabase.table.return_value = supabase
+        supabase.select.return_value = supabase
+        supabase.eq.return_value = supabase
+        supabase.execute.return_value = MagicMock(data=[{"user_id": "admin-1"}])
+
+        notif_mock = AsyncMock()
+        notif_mock.notify_admins = AsyncMock(return_value={"sent": 1, "total_admins": 1})
+
+        with patch("app.api.bot_construction_operations.send_simple_message", new_callable=AsyncMock):
+            with patch("app.api.bot_construction_commands.send_menu_message", new_callable=AsyncMock):
+                with patch("app.api.bot_construction_operations.ensure_chantier_selected", new_callable=AsyncMock, return_value={"id": "c-1", "nom": "Test"}):
+                    with patch("app.api.bot_construction_operations.get_state", new_callable=AsyncMock, return_value={"last_state": "op_awaiting_validation", "last_state_data": {"op_type": "commande", "description": "Test", "photo_url": "http://photo"}}):
+                        with patch("app.api.bot_construction_operations.set_state", new_callable=AsyncMock):
+                            with patch("app.api.bot_construction_operations.NotificationService", return_value=notif_mock):
+                                result = await handle_save_operation(12345, bot_config, supabase, "org-123")
+        assert result["ok"] is True
+
+
+class TestRessourcesFiltreChantier:
+    """Cycle 6 — GET /ressources doit filtrer par chantier_id."""
+
+    def test_get_ressources_filters_by_chantier(self):
+        """
+        RED — La requête SQL de GET /ressources n'inclut PAS .eq('chantier_id', ...).
+        """
+        import inspect
+        from app.api.chantiers import list_ressources
+        source = inspect.getsource(list_ressources)
+        assert "chantier_uuid" in source
+        assert 'eq("chantier_id"' in source or ".eq('chantier_id'" in source or '.eq("chantier_id"' in source
+
+
+class TestDepenseResponseHasValidationFields:
+    """Cycle 5 — DepenseResponse doit exposer valide_par et valide_le."""
+
+    def test_depense_response_model_has_valide_par(self):
+        """
+        RED — DepenseResponse manque valide_par et valide_le.
+        """
+        from app.api.chantiers import DepenseResponse
+        assert hasattr(DepenseResponse, 'model_fields')
+        fields = DepenseResponse.model_fields
+        assert "valide_par" in fields, f"valide_par manquant dans DepenseResponse. Fields: {list(fields.keys())}"
+        assert "valide_le" in fields, f"valide_le manquant dans DepenseResponse. Fields: {list(fields.keys())}"

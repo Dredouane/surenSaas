@@ -33,7 +33,7 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | Chantier | `app/api/chantiers.py` | `dashboard/chantiers/` | `bot_construction*.py` | `chantiers` |
 | Opération HITL | `chantiers.py` (endpoints `/operations`) | `OperationsList.tsx` | `bot_construction_operations.py` | `chantier_operations_htl` |
 | Pointage | `chantiers.py` (endpoints `/pointages`) | `PointagesList.tsx` | `bot_construction_pointages.py` | `chantier_pointages`, `chantier_pointage_ressources`, `chantier_ressources` |
-| Situation | `chantiers.py` (endpoints `/situations`) | `SituationsTable.tsx` | — | `chantier_situations` |
+| Situation | `chantiers.py` (endpoints `/situations`) | `SituationsTable.tsx`, `ValidationProduction.tsx` | `bot_construction_avancements.py` | `chantier_situations`, `chantier_situation_lignes` |
 | Réception | `chantiers.py` (endpoints `/receptions`) | `ReceptionsList.tsx` | `bot_construction_receptions.py` | `chantier_receptions` |
 | Tâche | `chantiers.py` (endpoints `/taches`) | `TachesList.tsx` | `bot_construction_taches.py` | `chantier_taches` |
 | Notification | `chantiers.py` (endpoints `/notifications`) | `NotificationsPanel.tsx` | Notification non automatisée | `chantier_notifications` |
@@ -43,6 +43,18 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 
 ---
 
+## Termes du Domaine — Extension Situations
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **SituationOuverte** | Situation en cours, accumulant des lignes d'avancement terrain avant facturation finale | Chantier > Situations | `statut='ouverte'` — pas encore facturée |
+| **SituationLigne** | Ligne de détail d'une situation : description, quantité, prix unitaire, % avancement, photo | Chantier > Situations | Table `chantier_situation_lignes`, FK → `chantier_situations` |
+| **Item de production** | Saisie unitaire du conducteur via Telegram : ligne de situation + % + photo/note | Chantier > Bot > Telegram | Workflow HITL : signalement → validation → consolidation |
+| **Avancement** | Pourcentage réalisé (0-100%) sur une ligne de situation | Chantier > Situations > Lignes | Champ `avancement_pourcentage` dans `chantier_situation_lignes` |
+| **Consolidation** | Passage d'une SituationOuverte (`statut='ouverte'`) à facturée (`statut='validee'`) | Chantier > Situations | Déclenché par le gérant depuis le frontend |
+| **Photo de preuve** | Photo attachée à un item de production ou une opération HITL, stockée dans le cloud | Chantier > Preuves | Optionnelle, URL stockée dans `photo_url` (TEXT) |
+| **Validation de Production** | Écran gérant où les lignes accumulées sont approuvées ou ajustées avant consolidation | Frontend > Chantier > Situations | Vue dédiée dans l'onglet Situations |
+
 ## Workflows Telegram — Machine d'État
 
 | État | Déclencheur | Handler | Table concernée |
@@ -50,8 +62,11 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | `idle` | Menu principal / /start | `handle_start_command` | `telegram_users.last_state` |
 | `op_awaiting_description` | Click "Signaler opération" | `handle_operation_media` | `chantier_operations_htl` |
 | `op_awaiting_validation` | Saisie description opération | `handle_save_operation` | `chantier_operations_htl` |
-| `depense_awaiting_description` | Click "Signaler dépense" | *(manquant — à implémenter)* | `chantier_depenses` |
-| `depense_awaiting_validation` | Saisie description dépense | *(manquant — à implémenter)* | `chantier_depenses` |
+| `depense_awaiting_description` | Click "Signaler dépense" | `handle_depense_media` | `chantier_depenses` |
+| `depense_awaiting_validation` | Saisie description dépense | `handle_save_depense` | `chantier_depenses` |
+| `avancement_awaiting_situation` | Click "📈 Avancement chantier" | *(Créer)* | `chantier_situations` |
+| `avancement_awaiting_ligne` | Choix situation ouverte | *(Créer)* | `chantier_situation_lignes` |
+| `avancement_awaiting_validation` | Saisie ligne d'avancement | *(Créer)* | `chantier_situation_lignes` |
 
 **Règle :** Chaque workflow suit le pattern : `idle → await_X_description → await_X_validation → idle`
 
@@ -63,3 +78,6 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 4. **Toujours qualifier "opération"** par `HITL` dans le code (`chantier_operations_htl`, `handle_operation_media`, etc.)
 5. **Toujours utiliser les enums** DB (`chantier_statut`, `chantier_operation_type`, etc.) — pas de strings libres
 6. **`.execute()` sur Supabase retourne une liste** dans `.data` — toujours accéder via `data[0]['col']` pas `data['col']`
+7. **Les statuts de situation** sont : `ouverte`, `validee`, `transmise`, `payee` (enum `chantier_situation_statut`)
+8. **Une photo de preuve** est stockée comme URL TEXT, jamais comme blob en base
+9. **Le `%avancement`** est un DECIMAL(5,2) entre 0 et 100, stocké dans `chantier_situation_lignes.avancement_pourcentage`

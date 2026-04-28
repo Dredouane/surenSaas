@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.api.auth import get_current_user_from_cookie, get_supabase
@@ -101,6 +101,7 @@ class SituationBase(BaseModel):
     libelle: str
     montant: float
     reglement_observation: Optional[str] = None
+    statut: Optional[str] = None
 
 
 class SituationCreate(SituationBase):
@@ -157,6 +158,8 @@ class DepenseResponse(DepenseBase):
     chantier_id: str
     org_id: str
     statut: Optional[str] = "validee"
+    valide_par: Optional[str] = None
+    valide_le: Optional[str] = None
     created_by: Optional[str] = None
     created_at: str
     updated_at: Optional[str] = None
@@ -523,11 +526,14 @@ async def delete_chantier(request: Request, org_id: str = Query(...), chantier_i
 
 
 @router.get("/{chantier_id}/situations", response_model=List[SituationResponse])
-async def list_situations(request: Request, org_id: str = Query(...), chantier_id: str = None):
+async def list_situations(request: Request, org_id: str = Query(...), chantier_id: str = None, statut: Optional[str] = None):
     try:
         check_user_org_access(request, org_id)
         chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
-        query = get_supabase().table("chantier_situations").select("*").eq("chantier_id", chantier_uuid).order("numero", desc=True)
+        query = get_supabase().table("chantier_situations").select("*").eq("chantier_id", chantier_uuid)
+        if statut:
+            query = query.eq("statut", statut)
+        query = query.order("numero", desc=True)
         result = query.execute()
         return result.data or []
     except HTTPException:
@@ -588,6 +594,78 @@ async def delete_situation(request: Request, org_id: str = Query(...), chantier_
     except Exception as e:
         logger.error(f"Erreur suppression situation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/situations/{situation_id}/statut", response_model=Dict[str, Any])
+async def update_situation_statut(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None, statut: str = Query(...)):
+    try:
+        check_user_org_access(request, org_id)
+        chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
+        result = get_supabase().table("chantier_situations").update({"statut": statut, "updated_at": datetime.utcnow().isoformat()}).eq("id", situation_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Situation non trouvee")
+        return {"success": True, "statut": statut}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur mise a jour statut situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{chantier_id}/situations/{situation_id}/lignes", response_model=List[Dict[str, Any]])
+async def list_situation_lignes(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
+        result = get_supabase().table("chantier_situation_lignes").select("*").eq("situation_id", situation_id).order("created_at", desc=False).execute()
+        return result.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur liste lignes situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{chantier_id}/situations/{situation_id}/lignes", response_model=Dict[str, Any])
+async def create_situation_ligne(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None, ligne: Dict[str, Any] = None):
+    try:
+        user = check_user_org_access(request, org_id)
+        chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
+        data = ligne.dict() if hasattr(ligne, 'dict') else ligne
+        data["situation_id"] = situation_id
+        data["org_id"] = org_id
+        data["created_by"] = user["sub"]
+        data["created_at"] = datetime.utcnow().isoformat()
+        result = get_supabase().table("chantier_situation_lignes").insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Erreur creation ligne")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur creation ligne situation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/situations/{situation_id}/lignes/{ligne_id}/approuver", response_model=Dict[str, Any])
+async def approuver_situation_ligne(request: Request, org_id: str = Query(...), chantier_id: str = None, situation_id: str = None, ligne_id: str = None, approuver: bool = Query(True), avancement: Optional[float] = Query(None)):
+    try:
+        user = check_user_org_access(request, org_id)
+        chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
+        update_data = {"approuvee": approuver, "approuvee_par": user["sub"], "approuvee_le": datetime.utcnow().isoformat(), "updated_at": datetime.utcnow().isoformat()}
+        if avancement is not None:
+            update_data["avancement_pourcentage"] = avancement
+        result = get_supabase().table("chantier_situation_lignes").update(update_data).eq("id", ligne_id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Ligne non trouvee")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur approbation ligne: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------------------------------------------------------
 # ENDPOINTS DEPENSES
 # ---------------------------------------------------------------------------
@@ -915,7 +993,7 @@ async def list_ressources(request: Request, org_id: str = Query(...), chantier_i
         logger.info(f"list_ressources: chantier_uuid={chantier_uuid}, chantier_id_original={chantier_id}")
         from app.api.auth import get_supabase as get_sb
         sb = get_supabase()
-        query = sb.table("chantier_ressources").select("*").eq("org_id", org_id).order("nom", desc=False)
+        query = sb.table("chantier_ressources").select("*").eq("org_id", org_id).eq("chantier_id", chantier_uuid).order("nom", desc=False)
         if type_ressource:
             query = query.eq("type", type_ressource)
         result = query.execute()
