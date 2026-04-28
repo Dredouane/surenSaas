@@ -45,21 +45,14 @@ def get_ngrok_url() -> str:
     return ""
 
 
-def get_org_id_from_supabase() -> str:
-    """Récupère l'org_id depuis Supabase (table telegram_bots de l'org active)."""
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
-    if supabase_url and supabase_key:
-        try:
-            from supabase import create_client
-            sb = create_client(supabase_url, supabase_key)
-            r = sb.table("telegram_bots").select("org_id").limit(1).execute()
-            if r.data:
-                return r.data[0]["org_id"]
-        except Exception as e:
-            print(f"⚠️ Impossible de récupérer l'org_id depuis Supabase: {e}")
-    # Fallback
-    return os.getenv("TEST_ORG_ID") or "default"
+def get_org_id() -> str:
+    """Récupère l'org_id depuis les variables d'environnement."""
+    org_id = os.getenv("NEXT_PUBLIC_ORG_ID") or os.getenv("TEST_ORG_ID") or ""
+    if not org_id:
+        print("❌ NEXT_PUBLIC_ORG_ID non défini. Ajoute-le à ~/.bashrc ou dans le .env frontend.")
+        print("   Valeur attendue: REDACTEDORG")
+        sys.exit(1)
+    return org_id
 
 
 def set_telegram_webhook(public_url: str):
@@ -69,7 +62,7 @@ def set_telegram_webhook(public_url: str):
         print("❌ Token Telegram introuvable (SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN)")
         return
 
-    org_id = get_org_id_from_supabase()
+    org_id = get_org_id()
     webhook_url = f"{public_url}/api/v1/{org_id}/telegram/webhook/construction"
     print(f"🔗 Configuration du webhook vers: {webhook_url}")
 
