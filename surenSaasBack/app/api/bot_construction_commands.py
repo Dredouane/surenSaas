@@ -666,6 +666,10 @@ async def _send_welcome_message(
     org_id: str,
 ):
     """Envoie le message de bienvenue, puis le menu principal."""
+    # Reset l'état pour sortir de tout workflow bloqué
+    from app.services.telegram.chantier_context import set_state
+    await set_state(chat_id, "idle", {})
+
     await send_simple_message(
         chat_id,
         bot_config,
