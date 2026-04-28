@@ -15,28 +15,6 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Patcher google.generativeai AVANT tout import du module métier
-_FAKE_GENAI = MagicMock()
-_FAKE_GENAI.GenerativeModel.return_value.generate_content.return_value.text = json.dumps({
-    "description": "Test extrait par IA",
-    "type": "commande",
-    "montant": 500,
-    "quantite": 10,
-    "unite": "m2",
-    "fournisseur": "Test Fournisseur",
-    "categorie": "sous_traitant",
-    "avancement_pourcentage": 80,
-    "prix_unitaire": 25,
-})
-sys.modules['google.generativeai'] = _FAKE_GENAI
-
-# Forcer le rechargement des modules qui importent l'extracteur LLM
-# pour qu'ils utilisent l'extracteur mocké
-import importlib
-for mod_name in list(sys.modules.keys()):
-    if mod_name.startswith('app.services.ai') or mod_name in ('app.api.bot_construction_operations', 'app.api.bot_construction_depenses', 'app.api.bot_construction_avancements'):
-        sys.modules.pop(mod_name, None)
-
 from app.api.telegram_core import (
     handle_telegram_webhook,
     _dispatch_message,
@@ -57,6 +35,40 @@ from app.api.bot_construction_commands import (
 # ================================================================
 # Fixtures
 # ================================================================
+
+@pytest.fixture(autouse=True)
+def mock_workflow_extractor(monkeypatch):
+    """Mock le WorkflowExtractor pour tous les tests — évite les vrais appels Gemini."""
+    fake_wf = MagicMock()
+    async def fake_extract(text, workflow_type, file_path=None):
+        if workflow_type == "avancement":
+            return {
+                "description": "Enduit façade",
+                "quantite": 50,
+                "prix_unitaire": 25,
+                "avancement_pourcentage": 80,
+                "montant_total": 1250,
+                "avancement_montant": 1000,
+                "_raw": text,
+                "_workflow": workflow_type,
+            }
+        return {
+            "description": text,
+            "extracted_data": {
+                "type": "commande",
+                "montant": 500,
+                "quantite": 10,
+                "unite": "m2",
+                "fournisseur": "Fournisseur Test",
+                "categorie": "sous_traitant",
+                "description": text,
+            },
+            "metadata": {"confidence": "high"},
+            "_raw": text,
+            "_workflow": workflow_type,
+        }
+    fake_wf.extract = fake_extract
+    monkeypatch.setattr("app.agents.workflow_extractor.WorkflowExtractor", lambda *a, **kw: fake_wf)
 
 @pytest.fixture
 def mock_supabase():

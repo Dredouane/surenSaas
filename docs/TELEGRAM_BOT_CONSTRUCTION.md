@@ -476,7 +476,73 @@ flowchart TB
 
 ---
 
-## 13. Ubiquitous Language
+## 13. Extracteur IA agentique (WorkflowExtractor)
+
+### 13.1 Architecture
+
+Tous les workflows Telegram (avancement, opération, dépense) passent par un extracteur LLM unique :
+
+```
+app/services/ai/extractor.py          →  Proxy vers WorkflowExtractor (4 fonctions async)
+app/agents/workflow_extractor.py      →  Classe WorkflowExtractor
+app/agents/base/gemini_client.py      →  GeminiClient (nouvelle lib google-genai)
+app/agents/prompts/telegram/
+├── system_extraction.txt             →  Prompt système avec injection {workflow_instruction}
+└── user_instructions.json            →  Schémas JSON par workflow (avancement, operation, depense, tache, pointage)
+```
+
+### 13.2 Flux d'appel
+
+```
+Message Telegram (texte + optionnellement photo)
+    ↓
+handle_*_media (bot_construction_*.py)
+    ↓ await extract_*(text, file_path)
+services/ai/extractor.py
+    ↓ _get_extractor().extract()
+agents/workflow_extractor.py:WorkflowExtractor
+    ↓ prompt système + instruction workflow
+GeminiClient.extract_from_text() ou extract_from_file() (si photo jointe)
+    ↓ JSON structuré
+extracted_data → set_state → affichage → validation → INSERT DB
+    ↓ fallback si API indisponible
+_raw + _fallback=True
+```
+
+### 13.3 Variables d'environnement
+
+| Variable | Source | Utilisation |
+|----------|--------|-------------|
+| `SUREN_GOOGLE_GEMINI_CREDENTIALS_B64` | `.bashrc` | Vertex AI (production) |
+| `TEST_GOOGLE_GEMINI_CREDENTIALS_B64` | `.bashrc` | Vertex AI (test) |
+| `GEMINI_API_KEY` | `.bashrc` | AI Studio (fallback) |
+
+Le `GeminiClient` tente d'abord `settings.gemini_api_key`, puis `SUREN_GOOGLE_GEMINI_CREDENTIALS_B64`, puis `GOOGLE_GEMINI_CREDENTIALS_B64`, puis `GEMINI_API_KEY`.
+
+### 13.4 Tests d'intégration réels
+
+Fichier : `surenSaasBack/tests/scenarios-real-call-ai.py` (17 tests, vrais appels Gemini)
+
+```bash
+source ~/.bashrc && cd surenSaasBack
+python3 -m pytest tests/scenarios-real-call-ai.py -v -s -m integration
+```
+
+| Classe | Scénarios | Vérifie |
+|--------|-----------|---------|
+| `TestFluxAvancement` | 6 | extraction quantite/prix_unitaire/% + calculs montant |
+| `TestFluxOperation`  | 7 | classification type + montant/quantite |
+| `TestFluxDepense`    | 4 | extraction fournisseur/montant/categorie |
+
+Chaque test fait un vrai appel Gemini et valide le format exact attendu par les handlers.
+
+### 13.5 Fallback
+
+Si l'API Gemini est indisponible (quota, timeout, erreur réseau), l'extracteur retourne un dict avec `_fallback=True`. Le handler envoie alors un message de confirmation basique sans données extraites, et le gérant complète manuellement depuis le frontend.
+
+---
+
+## 14. Ubiquitous Language
 
 Voir le fichier `DOMAIN_LANGUAGE.md` à la racine du projet pour la terminologie complète.
 

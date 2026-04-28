@@ -1,0 +1,52 @@
+{
+    "avancement": {
+        "description": "Avancement de production sur une situation ouverte",
+        "schema": {
+            "description": "str: description du travail réalisé",
+            "quantite": "number ou null: quantité réalisée",
+            "unite": "str ou null: unité (m2, m3, ml, u, etc.)",
+            "prix_unitaire": "number ou null: prix unitaire en euros",
+            "avancement_pourcentage": "number entre 0 et 100 ou null: pourcentage d'avancement"
+        },
+        "instruction": "Extrais les informations d'avancement de chantier. Cherche les quantités (souvent suivies de m2, m3, ml), les prix unitaires (souvent en euros ou suivis de €), et les pourcentages (suivis de %). Calcule le montant total si possible."
+    },
+    "operation": {
+        "description": "Opération ou aléas de chantier",
+        "schema": {
+            "description": "str: description de l'opération",
+            "type": "str parmi: demolition, nettoyage, pose_bso, commande, achat_materiel, sous_traitance, autre",
+            "montant": "number ou null: montant estimé en euros",
+            "quantite": "number ou null: quantité concernée",
+            "unite": "str ou null: unité de mesure"
+        },
+        "instruction": "Extrais les informations d'une opération de chantier. Détermine le type d'opération parmi la liste fournie. Cherche un montant en euros, une quantité, et une unité si mentionnés."
+    },
+    "depense": {
+        "description": "Dépense chantier (fournisseur, sous-traitant)",
+        "schema": {
+            "fournisseur": "str ou null: nom du fournisseur ou entreprise",
+            "montant": "number ou null: montant de la dépense en euros",
+            "description": "str: description de la dépense",
+            "categorie": "str parmi: sous_traitant, fournisseur, autre"
+        },
+        "instruction": "Extrais les informations d'une dépense de chantier. Identifie le nom du fournisseur, le montant en euros, et la catégorie. Si un nom d'entreprise est mentionné, c'est probablement le fournisseur."
+    },
+    "tache": {
+        "description": "Tâche à réaliser sur le chantier",
+        "schema": {
+            "titre": "str: titre de la tâche",
+            "description": "str: description détaillée",
+            "priorite": "str parmi: basse, moyenne, haute"
+        },
+        "instruction": "Extrais les informations d'une tâche de chantier. Identifie le titre, la description et la priorité si mentionnée."
+    },
+    "pointage": {
+        "description": "Pointage de présence (ressources humaines ou machines)",
+        "schema": {
+            "type_ressource": "str parmi: homme, machine",
+            "nom_ressource": "str ou null: nom de la personne ou machine",
+            "commentaire": "str ou null: commentaire sur le pointage"
+        },
+        "instruction": "Extrais les informations d'un pointage. Identifie s'il s'agit d'une personne (homme) ou d'une machine, et le nom si mentionné."
+    }
+}
