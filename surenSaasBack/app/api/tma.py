@@ -57,17 +57,23 @@ async def tma_auth(body: AuthRequest, request: Request):
     if not data:
         raise HTTPException(status_code=401, detail="InitData invalide ou signature erronée")
 
-    telegram_id = int(data.get("id", 0))
-    if not telegram_id:
-        raise HTTPException(status_code=400, detail="telegram_id manquant dans initData")
-
+    # L'id Telegram est dans l'objet "user" du initData
+    import json as _json
     user_data = data.get("user", {})
     if isinstance(user_data, str):
-        import json
         try:
-            user_data = json.loads(user_data)
-        except json.JSONDecodeError:
+            user_data = _json.loads(user_data)
+        except _json.JSONDecodeError:
             user_data = {}
+
+    telegram_id = 0
+    if user_data and isinstance(user_data, dict):
+        telegram_id = int(user_data.get("id", 0))
+    if not telegram_id:
+        # Fallback : chercher à la racine du initData
+        telegram_id = int(data.get("id", 0))
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="telegram_id manquant dans initData")
 
     # Résoudre user_id + org_id depuis telegram_users
     tu_result = supabase_client.table("telegram_users").select(
