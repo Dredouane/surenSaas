@@ -31,7 +31,7 @@ async def handle_construction_message(
     # 0. Intercepter /start AVANT tout dispatch par état
     if text and text.startswith('/start'):
         from app.services.telegram.chantier_context import set_state
-        await set_state(chat_id, "idle", {}, supabase)
+        await set_state(chat_id, "idle", org_id, supabase, data={})
         from app.api.bot_construction_commands import handle_start_command
         return await handle_start_command(message, bot_config, supabase, org_id)
 
