@@ -28,7 +28,14 @@ async def handle_construction_message(
     
     logger.info(f"📩 Message construction reçu de {chat_id}: {text[:50] if text else '(no text)'}")
     
-    # 1. Vérifier l'état (priorité absolue)
+    # 0. Intercepter /start AVANT tout dispatch par état
+    if text and text.startswith('/start'):
+        from app.services.telegram.chantier_context import set_state
+        await set_state(chat_id, "idle", {})
+        from app.api.bot_construction_commands import handle_start_command
+        return await handle_start_command(message, bot_config, supabase, org_id)
+
+    # 1. Vérifier l'état (priorité si pas /start)
     from app.services.telegram.chantier_context import get_state
     state = await get_state(chat_id, supabase, org_id)
     
@@ -45,9 +52,6 @@ async def handle_construction_message(
         return await handle_avancement_input_data(message, bot_config, supabase, org_id, state)
 
     # 2. Commandes de contrôle
-    if text and text.startswith('/start'):
-        from app.api.bot_construction_commands import handle_start_command
-        return await handle_start_command(message, bot_config, supabase, org_id)
         
     # 3. Traitement des factures
     elif message.get('photo') or message.get('document'):
