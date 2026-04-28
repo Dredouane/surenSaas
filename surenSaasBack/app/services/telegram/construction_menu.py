@@ -1,12 +1,42 @@
 """Construction Menu — logique des menus et mapping callbacks → handlers."""
 from typing import Dict, Any, Optional, List, Callable, Awaitable
 
+from app.core.config import settings
+
 CallbackHandler = Callable[..., Awaitable[Dict[str, Any]]]
+
+TMA_BASE_URL = (
+    f"https://{settings.tma_host or 'suren-front-test-xxx.run.app'}/mini-app"
+    if settings.environment != "development"
+    else "http://localhost:3000/mini-app"
+)
+
+
+def _make_webapp_button(label: str, start_param: str = "") -> Dict[str, Any]:
+    url = TMA_BASE_URL
+    if start_param:
+        import urllib.parse
+        url += f"?start_param={urllib.parse.quote(start_param)}"
+    return {"text": label, "web_app": {"url": url}}
+
+
+def encode_start_param(workflow: str = "", chantier_id: str = "") -> str:
+    """Encode un start_param base64-url-safe pour le bouton WebApp."""
+    import json, base64
+    payload = {}
+    if workflow:
+        payload["w"] = workflow
+    if chantier_id:
+        payload["c"] = chantier_id
+    if not payload:
+        return ""
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
 
 def build_main_menu(
     chantier_nom: Optional[str] = None,
     chantier_count: int = 0,
+    chantier_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     texte_parts = ["📋 *Menu principal*"]
 
@@ -77,6 +107,11 @@ def build_main_menu(
             },
         ],
     ]
+
+    # Ajouter le bouton WebApp en bas si un chantier est actif
+    if chantier_id:
+        sp = encode_start_param(workflow="main", chantier_id=chantier_id)
+        lignes.append([_make_webapp_button("📱 Ouvrir l'application", sp)])
 
     return {
         "text": "\n".join(texte_parts),

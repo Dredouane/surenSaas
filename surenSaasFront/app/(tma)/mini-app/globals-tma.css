@@ -1,0 +1,73 @@
+/* Design System — Telegram Mini App */
+/* Safety Orange on Dark — optimisé outdoor */
+
+:root {
+  --tma-bg: #0F172A;
+  --tma-surface: #1E293B;
+  --tma-surface-hover: #334155;
+  --tma-border: #334155;
+  --tma-orange: #FF6B35;
+  --tma-orange-hover: #E55A2B;
+  --tma-orange-light: rgba(255, 107, 53, 0.15);
+  --tma-green: #22C55E;
+  --tma-green-light: rgba(34, 197, 94, 0.15);
+  --tma-red: #EF4444;
+  --tma-red-light: rgba(239, 68, 68, 0.15);
+  --tma-text: #F8FAFC;
+  --tma-text-muted: #94A3B8;
+  --tma-radius: 12px;
+  --tma-radius-sm: 8px;
+}
+
+/* Fallback si les vars Telegram ne sont pas dispo */
+body {
+  background-color: var(--tma-bg);
+  color: var(--tma-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+/* Surélévation tactile */
+.tma-touch {
+  min-height: 48px;
+  border-radius: var(--tma-radius);
+  transition: transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.tma-touch:active {
+  transform: scale(0.97);
+}
+
+.tma-card {
+  background-color: var(--tma-surface);
+  border: 1px solid var(--tma-border);
+  border-radius: var(--tma-radius);
+}
+
+.tma-orange {
+  color: var(--tma-orange);
+}
+
+.tma-green {
+  color: var(--tma-green);
+}
+
+.tma-red {
+  color: var(--tma-red);
+}
+
+/* Scrollbar discrète */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--tma-border);
+  border-radius: 2px;
+}

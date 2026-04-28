@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_cor
 
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger, log_request
+from app.services.database import set_correlation_id
 from app.api.auth import router as auth_router, AuthenticationError
 from app.api.users import router as users_router
 from app.api.clients import router as clients_router
@@ -20,6 +21,7 @@ from app.api.dossiers import router as dossiers_router
 from app.api.ao import router as ao_router
 from app.api.files import router as files_router
 from app.api.chantiers import router as chantiers_router
+from app.api.tma import router as tma_router
 
 # Initialiser le logging au démarrage
 setup_logging(
@@ -67,8 +69,11 @@ async def log_requests(request: Request, call_next):
     """Log toutes les requêtes HTTP avec corrélation ID, durée et statut."""
     start_time = time.time()
     import uuid as _uuid
-    correlation_id = str(_uuid.uuid4())
+    # Réutiliser le correlation_id entrant si présent (TMA → Backend)
+    incoming_correlation = request.headers.get("X-Correlation-ID")
+    correlation_id = incoming_correlation or str(_uuid.uuid4())
     request.state.correlation_id = correlation_id
+    set_correlation_id(correlation_id)
 
     logger.info(
         f"→ Requête {request.method} {request.url.path}",
@@ -201,6 +206,7 @@ app.include_router(ao_router, prefix="/api/v1")
 app.include_router(files_router, prefix="/api/v1")
 app.include_router(chantiers_router, prefix="/api/v1")
 app.include_router(telegram_webhooks_router)
+app.include_router(tma_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():

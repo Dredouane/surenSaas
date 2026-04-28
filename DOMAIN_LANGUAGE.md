@@ -81,3 +81,30 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 7. **Les statuts de situation** sont : `ouverte`, `validee`, `transmise`, `payee` (enum `chantier_situation_statut`)
 8. **Une photo de preuve** est stockée comme URL TEXT, jamais comme blob en base
 9. **Le `%avancement`** est un DECIMAL(5,2) entre 0 et 100, stocké dans `chantier_situation_lignes.avancement_pourcentage`
+
+---
+
+## Termes du Domaine — Extension Telegram Mini App (TMA)
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **TMA** | Telegram Mini App : WebApp SPA Next.js intégrée dans le WebView Telegram, isolée sous `/mini-app` | TMA > Route Group | Route Group `(tma)/mini-app/` avec layout dédié, aucun asset du SaaS Desktop |
+| **InitData** | Payload d'authentification signé HMAC-SHA256 du bot Telegram, envoyé par la TMA au backend | TMA > Auth Bridge | Seule source de vérité pour l'auth TMA ; `start_param` utilisé uniquement pour le routage métier |
+| **OriginContext** | Source du déclenchement IA : `TELEGRAM_BOT`, `TMA_PROGRESS_SLIDER`, `TMA_EXPENSE_SCANNER` | Architecture > Audit Trail | Stocké dans `logs_agents.origin_context` ; permet de tracer si une extraction vient du vocal bot ou du slider TMA |
+| **TargetEntity** | Référence métier ciblée par l'appel IA : `{type, id, project_id}` | Architecture > Audit Trail | Stocké dans `logs_agents.target_entity` (JSONB) ; permet de filter l'historique IA par chantier, tâche ou situation |
+| **DeviceInfo** | Empreinte matérielle/OS du terminal : `{platform, app_version, connection_type}` | Architecture > Audit Trail | Stocké dans `logs_agents.device_info` (JSONB) ; utile pour débugger les bugs liés au hardware terrain |
+| **CorrelationID** | UUID généré à l'entrée dans `/mini-app`, propagé sur chaque appel API en header `X-Correlation-ID` | TMA > Infrastructure | Permet de tracer une action utilisateur de bout en bout (click → API → IA → DB → notification) |
+| **Guardrails IA** | Validation Zod de la sortie IA avant affichage HITL : `avancement_pourcentage` 0-100, `montant` ≥ 0, etc. | TMA > Workflow Extraction | Si le validateur échoue → log dans `guardrail_issues`, fallback vers données brutes, pas de blocage |
+| **InitData Validation** | Vérification HMAC-SHA256 du `initData` Telegram avec le `BOT_TOKEN` ; génération d'un JWT short-lived (15 min) | TMA > Auth Bridge | Endpoint `POST /api/v1/tma/auth` ; JWT porté en `Authorization: Bearer` par chaque appel API TMA |
+| **WebView Fallback** | Si `window.Telegram.WebApp` est absent, affichage d'un message "Ouvrir dans Telegram" + QR code | TMA > Frontend | Pas de redirection vers le SaaS Desktop (isolation stricte des contextes) |
+| **Bottom Tab Bar** | Barre de navigation inférieure fixe (Sticky Bottom) avec 4 onglets : 📊 Chantier, 📈 Progression, 💰 Dépenses, 👷 Équipe | TMA > Navigation | Design one-handed thumb operation ; padding-bottom `pb-16` sur le contenu |
+
+## Mapping Termes TMA ↔ Fichiers
+
+| Terme | Backend | Frontend | Bot | DB |
+|-------|---------|----------|-----|----|
+| TMA | `app/api/tma.py` (2 endpoints : auth, context) | `(tma)/mini-app/` (route group complet) | `construction_menu.py` (WebApp buttons) | — |
+| InitData | `app/services/tma_auth_service.py` (HMAC validation) | `providers.tsx` (extraction + envoi) | `bot_construction_commands.py` (start_param encoding) | — |
+| Guardrails IA | `app/services/ai/validators.py` (Zod schemas) | — | `extractor.py` (intégré avant affichage) | `logs_agents.guardrail_issues` |
+| Audit Agent | `app/services/logs_agent_service.py` | — | — | `logs_agents` (enrichi : origin_context, target_entity, device_info) |
+| CorrelationID | `main.py` (middleware log_requests renforcé) | `providers.tsx` (génération + header) | — | `logs_agents.correlation_id` |

@@ -557,3 +557,137 @@ Voir le fichier `DOMAIN_LANGUAGE.md` à la racine du projet pour la terminologie
 - `matin` / `apres_midi` / `journee` — périodes de pointage
 - `ouverte` / `validee` / `transmise` / `payee` — statuts de situation
 - `photo_url` — stockage URL (pas blob) pour preuves photo
+
+---
+
+## 15. Telegram Mini App (TMA)
+
+### 15.1 Vision & Architecture
+
+La TMA remplace l'arborescence de menus inline-keyboard par une **SPA tactile mobile-first** intégrée dans le WebView Telegram. Le bot texte continue d'exister pour les notifications push, le chat intelligent, et le bouton "📱 Ouvrir dans l'app".
+
+```
+Bot (notification / menu)
+  ↓ bouton "📱 Ouvrir l'app" + web_app_data = {workflow, chantier_id, ...}
+  ↓
+Telegram WebView → https://suren-front-xxx.run.app/mini-app?start_param=...
+  ↓
+Route Group (tma)/mini-app/layout.tsx (layout vierge)
+  ↓
+providers.tsx → TelegramWebApp.init() → POST /api/v1/tma/auth (initData → JWT)
+  ↓
+GET /api/v1/tma/context → {chantier, user, org}
+  ↓
+MainMenu.tsx (mosaïque 3×2) + BottomTabs.tsx (barre 4 onglets)
+```
+
+### 15.2 Arborescence des fichiers
+
+```
+surenSaasFront/app/(tma)/mini-app/
+├── layout.tsx              ← Layout vierge (aucun asset SaaS)
+├── globals-tma.css         ← Design system Safety Orange
+├── providers.tsx           ← Auth + Context providers
+├── page.tsx                ← MainMenu (accueil chantier)
+├── dashboard/page.tsx      ← KPI + indicateurs
+├── operations/page.tsx     ← Liste opérations
+├── operations/new.tsx      ← Nouvelle opération
+├── progress/page.tsx       ← Feed avancements
+├── progress/[situationId].tsx ← Slider 0-100%
+├── expenses/page.tsx       ← Liste dépenses
+├── expenses/new.tsx        ← Scanner/saisie
+├── attendance/page.tsx     ← Pointage tactile
+└── components/
+    ├── TelegramBackend.tsx  ← Détection WebView + fallback
+    ├── MainMenu.tsx         ← Mosaïque 3×2
+    ├── BottomTabs.tsx       ← Barre 4 onglets
+    ├── ChantierHeader.tsx   ← Nom + ref + badge
+    ├── ProgressBar.tsx      ← Barre % facturé
+    ├── ActionCard.tsx       ← Card action rapide
+    ├── FeedItem.tsx         ← Item feed récent
+    ├── KpiCard.tsx          ← Carte KPI
+    └── ... (autres composants métier)
+```
+
+### 15.3 Design System
+
+Palette Safety Orange sur fond dark Telegram :
+
+```css
+--tma-bg: #0F172A;
+--tma-surface: #1E293B;
+--tma-border: #334155;
+--tma-orange: #FF6B35;
+--tma-green: #22C55E;
+--tma-red: #EF4444;
+--tma-text: #F8FAFC;
+--tma-radius: 12px;
+```
+
+Règles tactiles : `min-h-[48px]`, `rounded-xl`, `shadow-lg`, `active:scale-95`
+
+### 15.4 Auth Bridge (initData → JWT)
+
+| Étape | Qui | Action |
+|-------|-----|--------|
+| 1 | Bot | Encode `{workflow, chantier_id}` en base64 dans `start_param` |
+| 2 | TMA providers.tsx | Extrait `start_param` de l'URL ou `Telegram.WebApp.initDataUnsafe` |
+| 3 | TMA providers.tsx | Envoie `POST /api/v1/tma/auth {initData, start_param}` |
+| 4 | Backend tma.py | Valide HMAC-SHA256(initData, BOT_TOKEN) == hash |
+| 5 | Backend tma.py | Extrait `telegram_id, user_id, org_id` du initData |
+| 6 | Backend tma.py | Résout `chantier_id` depuis start_param ou last_chantier_id |
+| 7 | Backend tma.py | Génère JWT (15 min) avec payload `{telegram_id, user_id, org_id, chantier_id, role}` |
+| 8 | TMA providers.tsx | Stocke JWT en mémoire + appelle `GET /api/v1/tma/context` |
+| 9 | Backend tma.py | Retourne `{chantier, user, org}` |
+
+### 15.5 Bot → TMA Linking
+
+Dans `construction_menu.py`, les boutons `InlineKeyboardButton` avec `web_app` :
+
+```python
+InlineKeyboardButton(
+    text="📱 Ouvrir l'app",
+    web_app=WebAppInfo(url=f"{TMA_BASE_URL}?start_param={encoded}")
+)
+```
+
+Ajouté dans :
+- Menu principal → ouvre l'accueil TMA sur le chantier actif
+- Notifications gérant → ouvre directement la page concernée
+- Sous-menus → ouvre le formulaire adapté (nouvelle opération, etc.)
+
+### 15.6 Fallback WebView
+
+Si `window.Telegram.WebApp` est absent (Chrome Desktop, autre browser) :
+```tsx
+<FallbackScreen>
+  <h1>📱 Ouvrez cette application depuis Telegram</h1>
+  <p>Scannez le QR code ou cliquez sur le lien d'invitation</p>
+  <QRCode value={botInviteUrl} />
+  <a href={botInviteUrl}>Ouvrir dans Telegram</a>
+</FallbackScreen>
+```
+Pas de redirection vers le SaaS Desktop — isolation stricte des contextes.
+
+### 15.7 Nouveaux endpoints API
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| POST | `/api/v1/tma/auth` | Valide initData, retourne JWT short-lived |
+| GET | `/api/v1/tma/context` | Retourne chantier + user + org (nécessite JWT) |
+
+### 15.8 Couche Audit Trail (logs_agents enrichi)
+
+La table `logs_agents` est enrichie avec 3 colonnes :
+- `origin_context` (TEXT) : `TELEGRAM_BOT`, `TMA_PROGRESS_SLIDER`, `TMA_EXPENSE_SCANNER`
+- `target_entity` (JSONB) : `{type, id, project_id}` — entité métier ciblée
+- `device_info` (JSONB) : `{platform, app_version, connection_type}` — infos terminal
+
+Service associé : `app/services/logs_agent_service.py` avec méthodes :
+- `log_interaction()` — enregistre un appel IA complet
+- `record_hitl_feedback()` — ajoute le feedback HITL
+
+Guardrails (validateurs Zod) : `app/services/ai/validators.py` avec :
+- `AvancementSchema` : quantite ≥ 0, prix_unitaire ≥ 0, avancement_pourcentage 0-100
+- `OperationSchema` : montant ≥ 0, quantite ≥ 0
+- `DepenseSchema` : montant ≥ 0

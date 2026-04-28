@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     app_name: str = "SurenSaaS API"
     debug: bool = False
 
+    # TMA (Telegram Mini App)
+    tma_host: str = ""
+
     # Cloudflare R2 Configuration (S3-Compatible)
     # Mêmes credentials pour test et prod (isolation par folder)
     r2_endpoint_url: str = ""       # SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT
@@ -125,6 +128,10 @@ class Settings(BaseSettings):
             ]),
             ("allowed_origins", [
                 "ALLOWED_ORIGINS",
+            ]),
+            ("tma_host", [
+                "TMA_HOST",
+                "tma_host",
             ]),
             # Cloudflare R2 (SUREN_GED_CLOUDFLARE_* pour local, R2_* pour GCP)
             ("r2_endpoint_url", [
