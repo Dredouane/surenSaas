@@ -6,7 +6,7 @@ Endpoints :
   GET  /api/v1/tma/context → retourne chantier + user + org (nécessite JWT)
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 
@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.tma_auth_service import TmaAuthService, decode_start_param
 from app.services.database import supabase_client
+from app.api.tma_extract import extract_workflow
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/tma", tags=["tma"])
@@ -123,6 +124,27 @@ async def tma_auth(body: AuthRequest, request: Request):
 
     return AuthResponse(token=token, expires_at=str(expires_at))
 
+
+# ---------------------------------------------------------------------------
+# Extract endpoint — utilisé par les écrans TMA (progression, opérations, dépenses)
+# ---------------------------------------------------------------------------
+
+class ExtractRequest(BaseModel):
+    text: str
+    workflow: str
+
+
+@router.post("/extract")
+async def tma_extract(body: ExtractRequest, request: Request):
+    """
+    Extrait et valide les données depuis un texte utilisateur.
+    Workflows supportés : avancement, operation, depense
+    """
+    result = await extract_workflow(body.workflow, body.text)
+    return result
+
+
+# ---------------------------------------------------------------------------
 
 @router.get("/context", response_model=ContextResponse)
 async def tma_context(request: Request):
