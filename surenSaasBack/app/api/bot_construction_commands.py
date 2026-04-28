@@ -572,6 +572,20 @@ async def handle_start_command(
 
     parts = text.split(" ", 1)
     if len(parts) < 2:
+        # Vérifier si l'utilisateur est déjà lié dans telegram_users
+        telegram_id = from_user.get("id")
+        existing = (
+            supabase.table("telegram_users")
+            .select("*")
+            .eq("telegram_id", telegram_id)
+            .eq("org_id", org_id)
+            .execute()
+        )
+        if existing.data:
+            logger.info(f"User {telegram_id} déjà lié, affichage du menu")
+            first_name = from_user.get("first_name", "Utilisateur")
+            await _send_welcome_message(chat_id, first_name, bot_config, supabase, org_id)
+            return {"ok": True}
         logger.warning(f"User ID manquant dans /start de {chat_id}")
         await send_simple_message(
             chat_id,
@@ -666,9 +680,8 @@ async def _send_welcome_message(
     org_id: str,
 ):
     """Envoie le message de bienvenue, puis le menu principal."""
-    # Reset l'état pour sortir de tout workflow bloqué
     from app.services.telegram.chantier_context import set_state
-    await set_state(chat_id, "idle", {})
+    await set_state(chat_id, "idle", org_id, supabase, data={})
 
     await send_simple_message(
         chat_id,
