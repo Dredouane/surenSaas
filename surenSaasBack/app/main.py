@@ -64,14 +64,17 @@ async def add_auth_headers(request: Request, call_next):
 # Middleware de logging des requêtes
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log toutes les requêtes HTTP avec leur durée et statut."""
+    """Log toutes les requêtes HTTP avec corrélation ID, durée et statut."""
     start_time = time.time()
-    
-    # Log la requête entrante
+    import uuid as _uuid
+    correlation_id = str(_uuid.uuid4())
+    request.state.correlation_id = correlation_id
+
     logger.info(
         f"→ Requête {request.method} {request.url.path}",
         extra={
             "extra_data": {
+                "correlation_id": correlation_id,
                 "method": request.method,
                 "path": request.url.path,
                 "query": str(request.query_params),
@@ -80,63 +83,44 @@ async def log_requests(request: Request, call_next):
             }
         }
     )
-    
+
     try:
         response = await call_next(request)
-        
-        # Calculer la durée
         duration = time.time() - start_time
-        
-        # Log la réponse
+
+        log_kwargs = {
+            "extra": {
+                "extra_data": {
+                    "correlation_id": correlation_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": response.status_code,
+                    "duration_ms": duration * 1000,
+                    "query": str(request.query_params),
+                }
+            }
+        }
+
         if response.status_code >= 500:
-            logger.error(
-                f"← Réponse {response.status_code} ({duration:.3f}s)",
-                extra={
-                    "extra_data": {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": response.status_code,
-                        "duration_ms": duration * 1000,
-                        "query": str(request.query_params),
-                    }
-                }
-            )
+            logger.error(f"← Réponse {response.status_code} ({duration:.3f}s)", **log_kwargs)
         elif response.status_code >= 400:
-            logger.warning(
-                f"← Réponse {response.status_code} ({duration:.3f}s)",
-                extra={
-                    "extra_data": {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": response.status_code,
-                        "duration_ms": duration * 1000,
-                        "query": str(request.query_params),
-                    }
-                }
-            )
+            logger.warning(f"← Réponse {response.status_code} ({duration:.3f}s)", **log_kwargs)
         else:
-            logger.info(
-                f"← Réponse {response.status_code} ({duration:.3f}s)",
-                extra={
-                    "extra_data": {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": response.status_code,
-                        "duration_ms": duration * 1000,
-                        "query": str(request.query_params),
-                    }
-                }
-            )
-        
+            logger.info(f"← Réponse {response.status_code} ({duration:.3f}s)", **log_kwargs)
+
+        response.headers["X-Correlation-ID"] = correlation_id
         return response
-        
+
+    except HTTPException:
+        raise
+
     except Exception as e:
-        # Log l'erreur
         duration = time.time() - start_time
         logger.error(
             f"❌ Erreur pendant le traitement: {type(e).__name__}: {str(e)}",
             extra={
                 "extra_data": {
+                    "correlation_id": correlation_id,
                     "method": request.method,
                     "path": request.url.path,
                     "duration_ms": duration * 1000,
@@ -147,99 +131,7 @@ async def log_requests(request: Request, call_next):
             },
             exc_info=True
         )
-        
-        # Retourner une erreur 500
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Erreur interne",
-                "message": str(e) if settings.debug else "Une erreur est survenue"
-            }
-        )
-        
-        return response
-        
-    except Exception as e:
-        # Log l'erreur
-        duration = time.time() - start_time
-        
-        # Log la requête avec statut 500
-        log_request(
-            logger=logger,
-            method=request.method,
-            path=str(request.url.path),
-            status_code=500,
-            duration_ms=duration * 1000,
-        )
-        
-        # Log détaillé de l'erreur
-        logger.error(
-            f"❌ Erreur pendant le traitement: {type(e).__name__}: {str(e)}",
-            extra={
-                "extra_data": {
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status_code": 500,
-                    "duration_ms": duration * 1000,
-                    "query": str(request.query_params),
-                    "exception": traceback.format_exc(),
-                }
-            }
-        )
-        
-        # Si c'est une HTTPException, la propager
-        if isinstance(e, HTTPException):
-            raise e
-        
-        # Sinon, renvoyer une erreur 500 générique
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": "Une erreur interne est survenue",
-                "error": str(e) if settings.debug else None
-            }
-        )
-        
-        # Retourner une erreur 500
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Erreur interne",
-                "message": str(e) if settings.debug else "Une erreur est survenue"
-            }
-        )
-    
-    try:
-        response = await call_next(request)
-        duration = (time.time() - start_time) * 1000
-        
-        log_request(
-            logger,
-            request.method,
-            request.url.path,
-            response.status_code,
-            duration,
-        )
-        
-        return response
-        
-    except Exception as e:
-        duration = (time.time() - start_time) * 1000
-        
-        logger.error(
-            f"✗ Requête {request.method} {request.url.path} échouée après {duration:.2f}ms",
-            extra={
-                "extra_data": {
-                    "method": request.method,
-                    "path": request.url.path,
-                    "error": str(e),
-                    "duration_ms": duration,
-                }
-            },
-            exc_info=True
-        )
-        
-        # Retourner une réponse 500
+
         return JSONResponse(
             status_code=500,
             content={

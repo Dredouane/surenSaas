@@ -151,6 +151,49 @@ class FileStorageService:
             logger.error(f"❌ Erreur upload R2: {e}")
             raise
     
+    async def store_agent_interaction_blob(
+        self,
+        correlation_id: str,
+        agent_type: str,
+        data: dict,
+        org_id: Optional[str] = None
+    ) -> str:
+        """
+        Archive un payload d'interaction IA dans R2.
+        Format: {env}/agent/{correlation_id}/{agent_type}_{timestamp}.json
+
+        Args:
+            correlation_id: ID de corrélation de l'interaction
+            agent_type: Type d'agent (extraction, chat, ocr, etc.)
+            data: Dictionnaire contenant le payload (prompt, response, metadata)
+            org_id: ID de l'organisation (optionnel pour les logs)
+
+        Returns:
+            Clé S3 complète
+        """
+        import json as _json
+        payload_json = _json.dumps(data, default=str, ensure_ascii=False).encode('utf-8')
+        folder = f"agent/{correlation_id}"
+        filename = f"{agent_type}.json"
+        if org_id:
+            key = f"{self.environment}/org/{org_id}/{folder}/{filename}"
+        else:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            key = f"{self.environment}/system/agent/{correlation_id}/{ts}_{filename}"
+
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=payload_json,
+                ContentType='application/json'
+            )
+            logger.info(f"🤖 Blob agent archivé sur R2: {key} ({len(payload_json)} bytes)")
+            return key
+        except ClientError as e:
+            logger.error(f"❌ Erreur archivage blob agent R2: {e}")
+            raise
+
     async def get_file(self, key: str) -> Optional[bytes]:
         """
         Récupère un fichier depuis R2.
