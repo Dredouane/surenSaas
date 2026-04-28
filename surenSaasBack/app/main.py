@@ -22,6 +22,7 @@ from app.api.ao import router as ao_router
 from app.api.files import router as files_router
 from app.api.chantiers import router as chantiers_router
 from app.api.tma import router as tma_router
+from app.api.audit import router as audit_router
 
 # Initialiser le logging au démarrage
 setup_logging(
@@ -207,6 +208,7 @@ app.include_router(files_router, prefix="/api/v1")
 app.include_router(chantiers_router, prefix="/api/v1")
 app.include_router(telegram_webhooks_router)
 app.include_router(tma_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():

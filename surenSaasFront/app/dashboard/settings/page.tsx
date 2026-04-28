@@ -8,15 +8,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { 
-  Building2, 
-  User, 
-  Bell, 
-  Shield, 
-  Users, 
+import {
+  Building2,
+  User,
+  Bell,
+  Shield,
+  Users,
   ChevronRight,
   AlertCircle,
-  Lock
+  Lock,
+  Activity,
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -189,6 +190,24 @@ export default function SettingsPage() {
                     <CardContent>
                       <div className="flex items-center text-sm text-amber-600">
                         <span>Gérer les accès</span>
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="cursor-pointer hover:border-amber-300 transition-colors" onClick={() => router.push('/dashboard/settings/admin/audit')}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Activity className="h-5 w-5 text-amber-600" />
+                        Audit & Monitoring
+                      </CardTitle>
+                      <CardDescription className="text-sm">
+                        Consulter les activités, appels IA et corrélations
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center text-sm text-amber-600">
+                        <span>Voir les logs</span>
                         <ChevronRight className="h-4 w-4 ml-1" />
                       </div>
                     </CardContent>
