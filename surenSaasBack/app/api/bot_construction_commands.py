@@ -228,6 +228,7 @@ async def _handle_menu_main(
     menu = build_main_menu(
         chantier_nom=chantier.get("nom") if chantier else None,
         chantier_count=len(chantiers),
+        chantier_id=chantier.get("id") if chantier else None,
     )
     await send_message_with_keyboard(
         chat_id, bot_config, menu["text"], menu["keyboard"]
