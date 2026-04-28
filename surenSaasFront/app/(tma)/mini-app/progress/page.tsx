@@ -3,127 +3,61 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BottomTabs } from '../components/BottomTabs';
 import { ChantierHeader } from '../components/ChantierHeader';
-import { SituationCard } from '../components/SituationCard';
 import { useTma } from '../providers';
+import { tmaFetch, tmaExtract } from '../components/tmaFetch';
 
-interface Situation {
-  id: string;
-  numero: number;
-  libelle: string;
-  montant: number;
-  lignes?: {
-    description: string;
-    quantite: number;
-    unite?: string;
-    prix_unitaire: number;
-    avancement_pourcentage: number;
-    montant_total?: number;
-    photo_url?: string;
-  }[];
-}
-
-export default function ProgressPage() {
-  const { isReady, chantier, jwt } = useTma();
-  const [situations, setSituations] = useState<Situation[]>([]);
+export default function SituationsPage() {
+  const { isReady, chantier } = useTma();
+  const [situations, setSituations] = useState<any[]>([]);
   const [textInput, setTextInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [extracted, setExtracted] = useState<any>(null);
+  const [selectedSituation, setSelectedSituation] = useState<string | null>(null);
 
   const fetchSituations = useCallback(async () => {
-    if (!chantier || !jwt) return;
-    try {
-      const res = await fetch(`/api/v1/chantiers/${chantier.id}/situations?statut=ouverte`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const items = (data.data || data || []).map((s: any) => ({
-          id: s.id,
-          numero: s.numero,
-          libelle: s.libelle,
-          montant: s.montant,
-          lignes: [],
-        }));
-        setSituations(items);
-      }
-    } catch (err) {
-      console.error('Erreur chargement situations:', err);
-    } finally {
-      setLoading(false);
+    if (!chantier) return;
+    const res = await tmaFetch(`/api/v1/chantiers/${chantier.id}/situations?statut=ouverte`);
+    if (res.ok) {
+      const data = await res.json();
+      setSituations(data.data || data || []);
     }
-  }, [chantier, jwt]);
+    setLoading(false);
+  }, [chantier]);
 
-  useEffect(() => {
-    fetchSituations();
-  }, [fetchSituations]);
+  useEffect(() => { fetchSituations(); }, [fetchSituations]);
 
-  const handleExtractText = async () => {
+  const handleExtract = async () => {
     if (!textInput.trim()) return;
     setSaving(true);
-    try {
-      const res = await fetch('/api/v1/tma/extract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({
-          text: textInput,
-          workflow: 'avancement',
-        }),
-      });
-      if (res.ok) {
-        const extracted = await res.json();
-        if (situations.length > 0) {
-          const firstSit = situations[0];
-          const qte = extracted.quantite || 0;
-          const pu = extracted.prix_unitaire || 0;
-          const pct = extracted.avancement_pourcentage || 0;
-          const ligne = {
-            description: extracted.description || textInput,
-            quantite: qte,
-            prix_unitaire: pu,
-            avancement_pourcentage: pct,
-            montant_total: qte * pu,
-          };
-          await submitLigne(firstSit.id, ligne);
-        }
-      }
-    } catch (err) {
-      console.error('Erreur extraction:', err);
-    } finally {
-      setSaving(false);
-      setTextInput('');
+    setExtracted(null);
+    const result = await tmaExtract(textInput, 'avancement');
+    if (result?.data) {
+      setExtracted(result.data);
     }
+    setSaving(false);
   };
 
-  const submitLigne = async (situationId: string, ligne: any) => {
-    if (!chantier || !jwt) return;
-    try {
-      const res = await fetch(`/api/v1/chantiers/${chantier.id}/situations/${situationId}/lignes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify(ligne),
-      });
-      if (res.ok) {
-        setSituations((prev) =>
-          prev.map((s) =>
-            s.id === situationId
-              ? { ...s, lignes: [...(s.lignes || []), ligne] }
-              : s
-          )
-        );
-      }
-    } catch (err) {
-      console.error('Erreur sauvegarde ligne:', err);
-    }
-  };
-
-  const handleAddLigne = async (situationId: string, ligne: any) => {
-    await submitLigne(situationId, ligne);
+  const handleConfirm = async () => {
+    if (!extracted || !selectedSituation || !chantier) return;
+    setSaving(true);
+    const ligne = {
+      description: extracted.description || textInput,
+      quantite: extracted.quantite || 0,
+      prix_unitaire: extracted.prix_unitaire || 0,
+      unite: extracted.unite || 'u',
+      avancement_pourcentage: extracted.avancement_pourcentage || 0,
+      montant_total: (extracted.quantite || 0) * (extracted.prix_unitaire || 0),
+    };
+    await tmaFetch(`/api/v1/chantiers/${chantier.id}/situations/${selectedSituation}/lignes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ligne),
+    });
+    setTextInput('');
+    setExtracted(null);
+    await fetchSituations();
+    setSaving(false);
   };
 
   if (!isReady || !chantier) {
@@ -136,11 +70,11 @@ export default function ProgressPage() {
       <div style={{ padding: '16px 20px' }}>
         {/* Barre de saisie texte + extraction IA */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
             <input
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Décris l'avancement (ex: Enduit façade 50m2 25€/m2 80%)"
+              placeholder="Décris l'avancement (ou dicte-le)..."
               style={{
                 flex: 1,
                 padding: '12px 14px',
@@ -150,47 +84,85 @@ export default function ProgressPage() {
                 color: '#F8FAFC',
                 fontSize: 14,
               }}
-              onKeyDown={(e) => e.key === 'Enter' && handleExtractText()}
+              onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
             />
-            <button
-              onClick={handleExtractText}
-              disabled={saving || !textInput.trim()}
+            <button onClick={handleExtract} disabled={saving || !textInput.trim()}
               style={{
-                padding: '12px 18px',
-                backgroundColor: saving ? '#475569' : '#FF6B35',
-                border: 'none',
-                borderRadius: 10,
-                color: '#FFFFFF',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer',
-                opacity: saving ? 0.6 : 1,
+                padding: '12px 18px', backgroundColor: saving ? '#475569' : '#FF6B35',
+                border: 'none', borderRadius: 10, color: '#FFF',
+                fontSize: 14, fontWeight: 600,
+                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
               }}
-            >
-              {saving ? '...' : '📎 IA'}
-            </button>
+            >{saving ? '...' : '📎 IA'}</button>
           </div>
-          <div style={{ fontSize: 12, color: '#64748B', display: 'flex', gap: 16 }}>
-            <span>🎤 Dictée vocale (maintenir)</span>
-            <span>📸 Photo</span>
-          </div>
+          <div style={{ fontSize: 12, color: '#64748B' }}>🎤 Maintenir pour dicter · Ex: Enduit facade 50m2 25€/m2 80%</div>
         </div>
 
-        {/* Feed des situations */}
+        {/* Résultat extraction */}
+        {extracted && (
+          <div style={{ backgroundColor: '#1E293B', borderRadius: 10, padding: 14, marginBottom: 16, border: '1px solid #334155' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#FF6B35', marginBottom: 8 }}>📎 Données extraites</div>
+            <div style={{ fontSize: 13, color: '#F8FAFC', marginBottom: 4 }}>{extracted.description}</div>
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>
+              Qté: {extracted.quantite || '—'} · PU: {extracted.prix_unitaire || '—'}€ · %: {extracted.avancement_pourcentage || '—'}%
+            </div>
+            {!extracted.is_valid && extracted.guardrail_issues && (
+              <div style={{ fontSize: 12, color: '#EF4444', marginTop: 4 }}>
+                ⚠️ {extracted.guardrail_issues.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Sélection situation */}
         {loading ? (
-          <div style={{ color: '#94A3B8', textAlign: 'center', padding: 24 }}>Chargement des situations...</div>
+          <div style={{ color: '#94A3B8', textAlign: 'center', padding: 24 }}>Chargement...</div>
         ) : situations.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 24, color: '#94A3B8' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📈</div>
-            <div style={{ fontSize: 15 }}>Aucune situation ouverte sur ce chantier.</div>
-            <div style={{ fontSize: 13, marginTop: 4 }}>Crée une situation depuis l'application web.</div>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
+            <div style={{ fontSize: 15 }}>Aucune situation ouverte.</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {situations.map((s) => (
-              <SituationCard key={s.id} situation={s} onAddLigne={handleAddLigne} />
-            ))}
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: '#94A3B8', marginBottom: 8 }}>
+              Situations ouvertes
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {situations.map((s: any) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelectedSituation(s.id)}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '12px 14px',
+                    backgroundColor: selectedSituation === s.id ? 'rgba(255,107,53,0.15)' : '#1E293B',
+                    border: '1px solid', borderColor: selectedSituation === s.id ? '#FF6B35' : '#334155',
+                    borderRadius: 10, cursor: 'pointer', width: '100%',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}
+                >
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: '#F8FAFC' }}>N°{s.numero} — {s.libelle}</div>
+                    <div style={{ fontSize: 12, color: '#64748B' }}>{s.montant?.toLocaleString('fr-FR')}€</div>
+                  </div>
+                  {selectedSituation === s.id && <span style={{ color: '#FF6B35' }}>✓</span>}
+                </button>
+              ))}
+            </div>
           </div>
+        )}
+
+        {/* Bouton confirmer */}
+        {extracted && selectedSituation && (
+          <button onClick={handleConfirm} disabled={saving}
+            style={{
+              width: '100%', padding: 14, marginTop: 16,
+              backgroundColor: saving ? '#475569' : '#FF6B35',
+              border: 'none', borderRadius: 10, color: '#FFF',
+              fontSize: 15, fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >{saving ? 'Enregistrement...' : '✅ Confirmer l\'avancement'}</button>
         )}
       </div>
       <BottomTabs />

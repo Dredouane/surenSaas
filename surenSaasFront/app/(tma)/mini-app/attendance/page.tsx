@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BottomTabs } from '../components/BottomTabs';
 import { ChantierHeader } from '../components/ChantierHeader';
 import { useTma } from '../providers';
+import { tmaFetch } from '../components/tmaFetch';
 
 type RessourceType = 'homme' | 'machine';
 
@@ -29,7 +30,7 @@ function formatDisplay(date: Date): string {
 }
 
 export default function AttendancePage() {
-  const { isReady, chantier, jwt } = useTma();
+  const { isReady, chantier } = useTma();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [ressources, setRessources] = useState<Ressource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,12 +39,10 @@ export default function AttendancePage() {
   const [selectedType, setSelectedType] = useState<RessourceType>('homme');
 
   const fetchRessources = useCallback(async () => {
-    if (!chantier || !jwt) return;
+    if (!chantier) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/chantiers/${chantier.id}/ressources`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
+      const res = await tmaFetch(`/api/v1/chantiers/${chantier.id}/ressources`);
       if (res.ok) {
         const data = await res.json();
         const items = (data.data || data || []).map((r: any) => ({
@@ -60,7 +59,7 @@ export default function AttendancePage() {
     } finally {
       setLoading(false);
     }
-  }, [chantier, jwt]);
+  }, [chantier]);
 
   useEffect(() => { fetchRessources(); }, [fetchRessources]);
 
@@ -71,17 +70,16 @@ export default function AttendancePage() {
   };
 
   const handleValidate = async () => {
-    if (!chantier || !jwt) return;
+    if (!chantier) return;
     setSaving(true);
     try {
       const dateStr = formatDate(currentDate);
-      const hommes = ressources.filter((r) => r.type === 'homme' && selectedType === 'homme' ? true : r.type === selectedType);
-      const presentes = hommes.filter((r) => r.present);
-      const absentes = hommes.filter((r) => !r.present);
+      const presentes = displayed.filter((r) => r.present);
+      const absentes = displayed.filter((r) => !r.present);
 
-      await fetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
+      await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: dateStr,
           commentaires: `${presentes.length} présent(s), ${absentes.length} absent(s)`,

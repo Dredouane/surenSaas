@@ -1,21 +1,29 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
+
 interface FeedItemProps {
   emoji: string;
   label: string;
   description: string;
   time?: string;
+  href?: string;
 }
 
-export function FeedItem({ emoji, label, description, time }: FeedItemProps) {
-  return (
+export function FeedItem({ emoji, label, description, time, href }: FeedItemProps) {
+  const router = useRouter();
+
+  const content = (
     <div
+      onClick={href ? () => router.push(href) : undefined}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 12,
         padding: '10px 0',
         borderBottom: '1px solid #1E293B',
+        cursor: href ? 'pointer' : 'default',
+        WebkitTapHighlightColor: 'transparent',
       }}
     >
       <span style={{ fontSize: 20, lineHeight: 1, marginTop: 2 }}>{emoji}</span>
@@ -32,4 +40,6 @@ export function FeedItem({ emoji, label, description, time }: FeedItemProps) {
       )}
     </div>
   );
+
+  return content;
 }
