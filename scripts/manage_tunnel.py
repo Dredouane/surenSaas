@@ -57,13 +57,30 @@ def get_org_id() -> str:
 
 def set_telegram_webhook(public_url: str):
     """Configure le webhook Telegram sur l'URL publique du backend."""
+    org_id = get_org_id()
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+    # Récupérer le webhook_token actuel depuis la DB
+    webhook_token = "construction"
+    if supabase_url and supabase_key:
+        try:
+            from supabase import create_client
+            sb = create_client(supabase_url, supabase_key)
+            r = sb.table("telegram_bots").select("webhook_url").eq("org_id", org_id).eq("is_active", True).limit(1).execute()
+            if r.data:
+                old_url = r.data[0]["webhook_url"]
+                webhook_token = old_url.rstrip("/").rsplit("/", 1)[-1]
+                print(f"ℹ️  Webhook token existant : {webhook_token}")
+        except Exception as e:
+            print(f"⚠️ Impossible de lire le webhook_token depuis Supabase: {e}")
+
     token = os.getenv("SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN")
     if not token:
         print("❌ Token Telegram introuvable (SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN)")
         return
 
-    org_id = get_org_id()
-    webhook_url = f"{public_url}/api/v1/{org_id}/telegram/webhook/construction"
+    webhook_url = f"{public_url}/api/v1/{org_id}/telegram/webhook/{webhook_token}"
     print(f"🔗 Configuration du webhook vers: {webhook_url}")
 
     try:
