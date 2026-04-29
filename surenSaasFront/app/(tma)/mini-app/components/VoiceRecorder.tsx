@@ -42,26 +42,20 @@ export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
     }, 200);
   }, []);
 
-  const getStream = useCallback(async (): Promise<MediaStream | null> => {
-    if (streamRef.current) return streamRef.current;
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = s;
-      return s;
-    } catch {
-      setBlocked(true);
-      onError?.('Microphone bloqué. Utilise le bot Telegram pour envoyer un vocal.');
-      return null;
-    }
-  }, [onError]);
-
   const startRecording = useCallback(async () => {
     if (state !== 'idle') return;
     chunksRef.current = [];
-    const stream = await getStream();
-    if (!stream) return;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = s;
+    } catch {
+      setBlocked(true);
+      onError?.('Microphone bloqué. Utilise le bot Telegram pour envoyer un vocal.');
+      return;
+    }
+    if (!streamRef.current) return;
 
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    const recorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
     recorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
@@ -82,11 +76,13 @@ export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
     recorder.start(250);
     startTimer();
     setState('recording');
-  }, [state, getStream, clearTimer, startTimer, onError]);
+  }, [state, clearTimer, startTimer, onError]);
 
   const stopRecording = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
   }, []);
 

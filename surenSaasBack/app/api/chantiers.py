@@ -13,6 +13,11 @@ router = APIRouter(prefix="/chantiers", tags=["chantiers"])
 _tma_auth = TmaAuthService()
 
 
+def _get_user_id(user: dict) -> str:
+    """Retourne l'ID utilisateur depuis le payload JWT (TMA ou cookie SaaS)."""
+    return user.get("user_id") or user.get("sub", "")
+
+
 def check_user_org_access(request: Request, org_id: str):
     """Vérifie l'accès : cookie de session SaaS ou JWT TMA (Authorization Bearer)."""
     # Essayer d'abord le JWT TMA
@@ -478,7 +483,7 @@ async def create_chantier(request: Request, org_id: str = Query(...), chantier: 
         user = check_user_org_access(request, org_id)
         data = chantier.dict(exclude_none=True)
         data["org_id"] = org_id
-        data["created_by"] = user["sub"]
+        data["created_by"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantiers").insert(data).execute()
         if not result.data:
@@ -571,7 +576,7 @@ async def create_situation(request: Request, org_id: str = Query(...), chantier_
         data = situation.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["created_by"] = user["sub"]
+        data["created_by"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_situations").insert(data).execute()
         if not result.data:
@@ -654,7 +659,7 @@ async def create_situation_ligne(request: Request, org_id: str = Query(...), cha
         data = ligne.dict() if hasattr(ligne, 'dict') else ligne
         data["situation_id"] = situation_id
         data["org_id"] = org_id
-        data["created_by"] = user["sub"]
+        data["created_by"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_situation_lignes").insert(data).execute()
         if not result.data:
@@ -672,7 +677,7 @@ async def approuver_situation_ligne(request: Request, org_id: str = Query(...), 
     try:
         user = check_user_org_access(request, org_id)
         chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
-        update_data = {"approuvee": approuver, "approuvee_par": user["sub"], "approuvee_le": datetime.utcnow().isoformat(), "updated_at": datetime.utcnow().isoformat()}
+        update_data = {"approuvee": approuver, "approuvee_par": _get_user_id(user), "approuvee_le": datetime.utcnow().isoformat(), "updated_at": datetime.utcnow().isoformat()}
         if avancement is not None:
             update_data["avancement_pourcentage"] = avancement
         result = get_supabase().table("chantier_situation_lignes").update(update_data).eq("id", ligne_id).execute()
@@ -716,7 +721,7 @@ async def create_depense(request: Request, org_id: str = Query(...), chantier_id
         data = depense.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["created_by"] = user["sub"]
+        data["created_by"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_depenses").insert(data).execute()
         if not result.data:
@@ -880,7 +885,7 @@ async def create_reception(request: Request, org_id: str = Query(...), chantier_
         data = reception.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["created_by"] = user["sub"]
+        data["created_by"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_receptions").insert(data).execute()
         if not result.data:
@@ -957,7 +962,7 @@ async def create_tache(request: Request, org_id: str = Query(...), chantier_id: 
         data = tache.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["createur_id"] = user["sub"]
+        data["createur_id"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_taches").insert(data).execute()
         if not result.data:
@@ -1261,7 +1266,7 @@ async def create_notification(request: Request, org_id: str = Query(...), chanti
         data = notification.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["user_id"] = user["sub"]
+        data["user_id"] = _get_user_id(user)
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_notifications").insert(data).execute()
         if not result.data:
