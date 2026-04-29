@@ -687,7 +687,132 @@ Service associé : `app/services/logs_agent_service.py` avec méthodes :
 - `log_interaction()` — enregistre un appel IA complet
 - `record_hitl_feedback()` — ajoute le feedback HITL
 
-Guardrails (validateurs Zod) : `app/services/ai/validators.py` avec :
+Guardrails (validateurs Pydantic) : `app/services/ai/validators.py` avec :
 - `AvancementSchema` : quantite ≥ 0, prix_unitaire ≥ 0, avancement_pourcentage 0-100
 - `OperationSchema` : montant ≥ 0, quantite ≥ 0
 - `DepenseSchema` : montant ≥ 0
+
+---
+
+### 15.9 Écrans TMA (Phase 5)
+
+| Écran | Route | Fonctionnalités |
+|-------|-------|----------------|
+| **📈 Situations** | `/mini-app/progress` | Feed situations ouvertes + sélection → saisie texte/voice/photo → extraction IA → modal confirmation → POST ligne |
+| **📸 Opérations** | `/mini-app/operations` | Saisie texte/voice/photo → extraction IA → modal confirmation → POST opération → historique détaché |
+| **💰 Dépenses** | `/mini-app/expenses` | Saisie texte/voice/photo → extraction IA → modal confirmation → POST dépense → guardrail_issues warning |
+| **👷 Équipe** | `/mini-app/attendance` | Sélecteur date ◀▶, toggle Homme/Machine, cycle 1-clic null→present→absent→null, POST pointage + liaison ressources |
+| **📅 Réunions** | `/mini-app/reunions` | Liste lectures seule (GET receptions) |
+
+### 15.10 Composants TMA
+
+| Composant | Fichier | Rôle |
+|-----------|---------|------|
+| `MediaInput` | `components/MediaInput.tsx` | Input unifié : champ texte + 🎤 VoiceRecorder + 📸 CameraCapture + 📄 PDF → endpoint `/api/v1/tma/process` |
+| `CameraCapture` | `components/CameraCapture.tsx` | Plein écran caméra avec preview live, snapshot canvas, miniatures multi-photos, bouton "Tout envoyer" |
+| `VoiceRecorder` | `components/VoiceRecorder.tsx` | Appui long enregistre → relâche → boutons Envoyer/Annuler → upload audio → extraction structurée |
+| `ModalConfirm` | `components/ModalConfirm.tsx` | Modal bottom-sheet : affiche les données extraites par l'IA + boutons ✅ Envoyer / ❌ Annuler |
+| `tmaFetch` | `components/tmaFetch.ts` | Wrapper fetch : ajoute `org_id`, `Authorization: Bearer`, `X-Correlation-ID` à chaque appel |
+| `ChantierHeader` | `components/ChantierHeader.tsx` | Header : nom chantier, ref, statut badge |
+| `BottomTabs` | `components/BottomTabs.tsx` | Barre de navigation inférieure (5 onglets) |
+
+### 15.11 Flux d'extraction unifié (endpoint `/process`)
+
+```
+Texte saisi → POST /api/v1/tma/process (text + workflow)
+Voice → blob audio → POST /api/v1/tma/process (audio + workflow) → transcription Gemini → extraction structurée
+Photo → flux video → canvas snapshot → File → POST /api/v1/tma/process (file + workflow) → OCR Gemini → extraction structurée
+PDF → File → POST /api/v1/tma/process (file + workflow) → OCR Gemini → extraction structurée
+
+Tout retourne → { is_valid, data, guardrail_issues } → ModalConfirm → ✅ Envoyer → POST en DB
+```
+
+### 15.12 Problèmes résolus (itérations récentes)
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| **Photo → galerie au lieu de caméra** | Android Photo Picker détourne l'input file | `getUserMedia` → `<video>` preview → canvas snapshot → pas d'input file |
+| **Validation photo ne fait rien** | `capturing.current` gardé à true par `shoot` | Supprimer le guard `capturing.current` de `confirm` |
+| **3 appels `/process` au lieu d'1** | `CameraCapture` unmount/remount pendant l'appel | `setShowCamera(false)` après `await processInput()` |
+| **Microphone saute le recording** | Stream gardé en mémoire, tracks stoppées | `getUserMedia` à chaque fois, `stop()` des tracks après usage |
+| **Microphone permission redemandée** | `getUserMedia` à chaque clic | Stocker le stream dans `streamRef` |
+| **401 sur endpoints chantiers** | JWT TMA n'a pas `sub` | `_get_user_id(user)` → `user.get("user_id") or user.get("sub")` |
+| **Bouton WebApp en HTTP** | `TMA_HOST` vide sur GCP | Fallback `FRONTEND_URL` (env GCP) + URL GCP en dur |
+| **initTmaFetch pas dispo** | Appelé seulement dans `page.tsx` | Déplacé dans `TelegramWebAppProvider` |
+| **Ressources = 0** | Filtre `chantier_id` trop restrictif | Fallback org-wide si pas de ressources pour le chantier |
+| **Extraction lente** | Modèle `gemini-2.5-flash` lourd | `tma_extraction_model = gemini-2.5-flash-lite` |
+| **Webhook 404** | Mauvais `webhook_token` ou `org_id` | `NEXT_PUBLIC_ORG_ID`, lecture du token depuis DB |
+
+### 15.13 Architecture réseau (tunnel unique)
+
+```
+                    ┌──────────────────────────────────────────────┐
+                    │           Tunnel ngrok UNIQUE                │
+                    │  https://ethics-each-bonehead.ngrok-free.dev  │
+                    │         ↓ port 3000 (Frontend Next.js)       │
+                    └──────────────────────────────────────────────┘
+                              │
+                    ┌─────────┴──────────┐
+                    ▼                    ▼
+           /mini-app (TMA)      /api/v1/* (proxy Next.js)
+                    │                    │
+                    │              ┌─────┴──────┐
+                    │              ▼            ▼
+                    │        backend:8000  auth/TMA
+                    │
+           WebView Telegram ← bot → webhook
+```
+
+**Principe : un seul tunnel ngrok** sur le port 3000 (frontend Next.js). Next.js proxyfie tous les appels `/api/v1/*` vers le backend sur le port 8080. Le webhook Telegram et la TMA partagent la même URL publique.
+
+### 15.14 Auth Bridge (initData → JWT)
+
+| Étape | Qui | Action |
+|-------|-----|--------|
+| 1 | Bot | Encode `{workflow, chantier_id}` en base64 dans `start_param` |
+| 2 | TMA providers.tsx | Extrait `start_param` de l'URL ou `Telegram.WebApp.initDataUnsafe` |
+| 3 | TMA providers.tsx | Envoie `POST /api/v1/tma/auth {initData, start_param}` |
+| 4 | Backend tma.py | Valide HMAC-SHA256(initData, BOT_TOKEN) == hash |
+| 5 | Backend tma.py | Extrait `telegram_id` depuis `user.id` du initData |
+| 6 | Backend tma.py | Résout `chantier_id` depuis start_param ou last_chantier_id |
+| 7 | Backend tma.py | Génère JWT (15 min) avec payload `{telegram_id, user_id, org_id, chantier_id, role}` |
+| 8 | TMA providers.tsx | Stocke JWT en mémoire + appelle `initTmaFetch(jwt, orgId, correlationId)` |
+| 9 | TMA providers.tsx | Appelle `GET /api/v1/tma/context` pour charger chantier + user + org |
+
+### 15.15 Fichiers clés
+
+```
+surenSaasFront/app/(tma)/mini-app/
+├── layout.tsx                       ← Layout vierge TMA
+├── globals-tma.css                  ← Design system Safety Orange
+├── providers.tsx                    ← Auth + initTmaFetch + Context
+├── page.tsx                         ← Menu principal mosaïque
+├── progress/page.tsx                ← Écran situations/avancement
+├── operations/page.tsx              ← Écran opérations
+├── expenses/page.tsx                ← Écran dépenses
+├── attendance/page.tsx              ← Écran pointage équipe
+├── reunions/page.tsx                ← Écran réunions (lecture)
+└── components/
+    ├── MediaInput.tsx               ← Input unifié texte/voice/photo/PDF
+    ├── CameraCapture.tsx            ← Caméra preview + snapshot + multi-photos
+    ├── VoiceRecorder.tsx            ← Enregistrement vocal (MediaRecorder)
+    ├── ModalConfirm.tsx             ← Modal validation extraction IA
+    ├── tmaFetch.ts                  ← Helper fetch avec auth TMA
+    ├── BottomTabs.tsx               ← Barre navigation inférieure
+    ├── ChantierHeader.tsx           ← Header chantier
+    ├── MainMenu.tsx                 ← Mosaïque actions rapides
+    ├── TelegramBackend.tsx          ← Fallback navigateur
+    ├── ActionCard.tsx               ← Carte action rapide
+    ├── FeedItem.tsx                 ← Item feed récent cliquable
+    ├── ProgressSlider.tsx           ← Slider tactile 0-100%
+    ├── SituationCard.tsx            ← Carte situation ouverte
+    ├── ProgressBar.tsx              ← Barre progression facturation
+    └── ChantierHeader.tsx           ← Header chantier
+
+surenSaasBack/app/api/tma.py         ← Endpoints TMA (auth, context, process, extract-file, transcribe)
+surenSaasBack/app/api/tma_extract.py ← Logique extraction structurée par workflow
+surenSaasBack/app/services/tma_auth_service.py  ← Validation HMAC + JWT
+surenSaasBack/app/services/transcribe_service.py ← Transcription audio (Vertex AI)
+surenSaasBack/app/services/logs_agent_service.py ← Audit trail agent (logs_agents)
+surenSaasBack/app/services/ai/validators.py     ← Guardrails Pydantic
+```
