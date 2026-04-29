@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { TelegramBackend } from './components/TelegramBackend';
+import { initTmaFetch } from './components/tmaFetch';
 
 // Types
 export interface TmaUser {
@@ -174,6 +175,8 @@ export function TelegramWebAppProvider({ children }: { children: React.ReactNode
       }
 
       const ctx = await ctxResponse.json();
+
+      initTmaFetch(token, ctx.org?.id || '', correlationId);
 
       setContext({
         user: ctx.user || null,
