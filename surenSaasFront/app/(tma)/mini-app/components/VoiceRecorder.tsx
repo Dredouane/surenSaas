@@ -108,24 +108,6 @@ export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
         const data = await res.json();
         if (data.is_valid && data.text) {
           onTranscript(data.text);
-
-          // Appel optionnel au pipeline Whisper + Gemini pour la structuration
-          if (onStructured) {
-            try {
-              const structRes = await tmaFetch('/api/v1/tma/transcribe-and-structure', {
-                method: 'POST',
-                body: formData,
-              });
-              if (structRes.ok) {
-                const structData = await structRes.json();
-                if (structData.is_valid && structData.structured) {
-                  onStructured(structData.structured);
-                }
-              }
-            } catch {
-              // Échec structuration non bloquant
-            }
-          }
         } else {
           onError?.(data.error || 'Échec transcription');
         }
