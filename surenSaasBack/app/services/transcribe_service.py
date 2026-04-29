@@ -1,10 +1,11 @@
 """
 TranscribeService — Transcription audio via Gemini pour la TMA.
 
-Utilise Google genai avec Vertex AI (comme GeminiClient) pour transcrire
-un flux audio brut (Blob) en texte français.
+Utilise le modèle gemini-2.0-flash via AI Studio (API Key) car Vertex AI
+ne supporte pas l'audio inline avec les modèles disponibles sur ce projet.
 
-Modèle : gemini-2.0-flash (support audio natif)
+Si GEMINI_API_KEY n'est pas dispo, fallback vers Vertex AI avec le modèle
+gemini-2.5-flash (sans garantie de support audio).
 """
 
 import os
@@ -22,51 +23,57 @@ logger = get_logger(__name__)
 
 def transcribe_with_gemini(audio_data: bytes, mime_type: str = "audio/webm") -> Optional[str]:
     """
-    Transcrit un fichier audio via Gemini (modèle avec support audio).
-    Retourne le texte transcrit ou None en cas d'erreur.
+    Transcrit un fichier audio via Gemini.
+    Priorité : AI Studio (gemini-2.0-flash) > Vertex AI (gemini-2.5-flash).
     """
     try:
         import google.genai as genai
         from google.genai import types
 
-        credentials_b64 = (
-            settings.gemini_api_key
-            or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
-            or os.getenv("GOOGLE_GEMINI_CREDENTIALS_B64")
-        )
-        api_key = os.getenv("GEMINI_API_KEY")
-
         client = None
+        model_name = "gemini-2.0-flash"
 
-        # Mode Vertex AI (Service Account)
-        if credentials_b64 and not api_key:
+        # 1. Essayer AI Studio avec API Key (supporte audio)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
             try:
-                credentials_json = base64.b64decode(credentials_b64).decode("utf-8")
-                credentials_info = json.loads(credentials_json)
-                project_id = credentials_info.get("project_id") or os.getenv("GCP_PROJECT_ID")
-
-                fd, cred_file = tempfile.mkstemp(suffix=".json")
-                with os.fdopen(fd, "w") as f:
-                    json.dump(credentials_info, f)
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
-
-                client = genai.Client(
-                    vertexai=True,
-                    project=project_id,
-                    location=settings.gemini_location or "europe-west1",
-                )
+                client = genai.Client(api_key=api_key)
+                logger.info("Transcription: mode AI Studio")
             except Exception as e:
-                logger.error(f"Erreur init Vertex AI pour transcription: {e}")
+                logger.warning(f"AI Studio failed: {e}")
 
-        # Mode AI Studio (API Key)
-        if not client and api_key:
-            client = genai.Client(api_key=api_key)
+        # 2. Fallback Vertex AI (peut ne pas supporter l'audio)
+        if not client:
+            credentials_b64 = (
+                settings.gemini_api_key
+                or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
+                or os.getenv("GOOGLE_GEMINI_CREDENTIALS_B64")
+            )
+            if credentials_b64:
+                try:
+                    credentials_json = base64.b64decode(credentials_b64).decode("utf-8")
+                    credentials_info = json.loads(credentials_json)
+                    project_id = credentials_info.get("project_id") or os.getenv("GCP_PROJECT_ID")
+
+                    fd, cred_file = tempfile.mkstemp(suffix=".json")
+                    with os.fdopen(fd, "w") as f:
+                        json.dump(credentials_info, f)
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
+
+                    client = genai.Client(
+                        vertexai=True,
+                        project=project_id,
+                        location=settings.gemini_location or "europe-west1",
+                    )
+                    model_name = settings.gemini_model or "gemini-2.5-flash"
+                    logger.info("Transcription: mode Vertex AI")
+                except Exception as e:
+                    logger.error(f"Vertex AI init failed: {e}")
 
         if not client:
-            logger.error("Aucune méthode d'authentification Gemini configurée pour la transcription")
+            logger.error("Aucune méthode d'authentification Gemini configurée")
             return None
 
-        model_name = settings.gemini_model or "gemini-2.5-flash"
         response = client.models.generate_content(
             model=model_name,
             contents=[
