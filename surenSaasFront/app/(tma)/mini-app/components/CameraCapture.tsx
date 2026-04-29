@@ -14,7 +14,7 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
-  const capturing = useRef(false);
+  const doneRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,8 +40,7 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
 
   const shoot = useCallback(() => {
     const video = videoRef.current;
-    if (!video || capturing.current) return;
-    capturing.current = true;
+    if (!video || doneRef.current || preview) return;
     video.pause();
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -51,23 +50,26 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     setPreview(canvas.toDataURL('image/jpeg', 0.92));
-  }, []);
+  }, [preview]);
 
   const retake = useCallback(() => {
     setPreview(null);
-    capturing.current = false;
     videoRef.current?.play();
   }, []);
 
   const confirm = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) { doneRef.current = false; return; }
     canvas.toBlob((blob) => {
       if (blob) {
         const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         onCapture(file);
+      } else {
+        doneRef.current = false;
       }
     }, 'image/jpeg', 0.92);
   }, [onCapture]);

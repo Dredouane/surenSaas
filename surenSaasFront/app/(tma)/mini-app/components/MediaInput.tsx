@@ -101,7 +101,10 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
       {showCamera && (
         <CameraCapture
-          onCapture={async (file) => { setShowCamera(false); await handleFileProcess(file); }}
+          onCapture={async (file) => {
+            await handleFileProcess(file);
+            setShowCamera(false);
+          }}
           onClose={() => setShowCamera(false)}
         />
       )}
