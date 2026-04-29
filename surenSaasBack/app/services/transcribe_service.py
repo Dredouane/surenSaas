@@ -66,8 +66,9 @@ def transcribe_with_gemini(audio_data: bytes, mime_type: str = "audio/webm") -> 
             logger.error("Aucune méthode d'authentification Gemini configurée pour la transcription")
             return None
 
+        model_name = settings.gemini_model or "gemini-2.5-flash"
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=model_name,
             contents=[
                 types.Content(
                     role="user",
