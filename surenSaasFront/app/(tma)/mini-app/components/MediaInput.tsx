@@ -72,24 +72,51 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
   }, []);
 
   const handlePhotoClick = useCallback(async () => {
-    const hasCam = await tryCameraPermission();
-    if (hasCam) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/jpeg,image/png';
-      input.setAttribute('capture', 'environment');
-      document.body.appendChild(input);
-      input.onchange = async (e: any) => {
-        const f = e.target?.files?.[0];
-        if (f) await handleFileProcess(f);
-        document.body.removeChild(input);
-      };
-      // click immédiat, même thread que l'interaction utilisateur
-      input.click();
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        setCameraBlocked(true);
+      }
+      photoInputRef.current?.click();
       return;
     }
-    photoInputRef.current?.click();
-  }, [tryCameraPermission, handleFileProcess]);
+
+    // Permission accordée : créer une video invisible, capturer une frame
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.setAttribute('playsinline', '');
+    video.style.position = 'fixed';
+    video.style.top = '-9999px';
+    video.style.left = '-9999px';
+    video.style.width = '1px';
+    video.style.height = '1px';
+    document.body.appendChild(video);
+
+    await video.play();
+
+    // Attendre un frame pour que la caméra s'initialise
+    await new Promise((resolve) => { video.onloadeddata = resolve; setTimeout(resolve, 300); });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1920;
+    canvas.height = video.videoHeight || 1080;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+          await handleFileProcess(file);
+        }
+      }, 'image/jpeg', 0.9);
+    }
+
+    // Nettoyage
+    stream.getTracks().forEach((t) => t.stop());
+    document.body.removeChild(video);
+  }, [handleFileProcess]);
 
   return (
     <div>
@@ -140,7 +167,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
       )}
       {!cameraBlocked && (
         <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-          Appareil photo activé. Si la galerie s&apos;ouvre, cliquez sur l&apos;icône « Appareil Photo » en haut du sélecteur.
+          Appareil photo prêt. La photo sera capturée automatiquement après autorisation.
         </div>
       )}
 
