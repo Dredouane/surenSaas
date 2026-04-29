@@ -7,7 +7,6 @@ type RecorderState = 'idle' | 'recording' | 'confirm' | 'loading';
 
 interface VoiceRecorderProps {
   onTranscript: (text: string) => void;
-  onStructured?: (data: { task_id: string; percentage: number; status: string; observation: string }) => void;
   onError?: (error: string) => void;
 }
 
