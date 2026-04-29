@@ -137,7 +137,7 @@ export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
     } finally {
       setState('idle');
     }
-  }, [onTranscript, onStructured, onError]);
+  }, [onTranscript, onError]);
 
   const cancelRecording = useCallback(() => {
     chunksRef.current = [];
