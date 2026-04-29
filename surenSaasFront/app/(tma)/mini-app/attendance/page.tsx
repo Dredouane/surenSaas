@@ -7,12 +7,13 @@ import { useTma } from '../providers';
 import { tmaFetch } from '../components/tmaFetch';
 
 type RessourceType = 'homme' | 'machine';
+type PresenceStatut = 'present' | 'absent' | null;
 
 interface Ressource {
   id: string;
   nom: string;
   type: RessourceType;
-  present: boolean;
+  statut: PresenceStatut;
   specialite?: string;
 }
 
@@ -49,7 +50,7 @@ export default function AttendancePage() {
           id: r.id,
           nom: r.nom,
           type: r.type || 'homme',
-          present: true,
+          statut: null,
           specialite: r.specialite,
         }));
         setRessources(items);
@@ -63,9 +64,14 @@ export default function AttendancePage() {
 
   useEffect(() => { fetchRessources(); }, [fetchRessources]);
 
-  const togglePresence = (id: string) => {
+  const cyclePresence = (id: string) => {
     setRessources((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, present: !r.present } : r))
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        if (r.statut === null) return { ...r, statut: 'present' as const };
+        if (r.statut === 'present') return { ...r, statut: 'absent' as const };
+        return { ...r, statut: null };
+      })
     );
   };
 
@@ -74,8 +80,8 @@ export default function AttendancePage() {
     setSaving(true);
     try {
       const dateStr = formatDate(currentDate);
-      const presentes = displayed.filter((r) => r.present);
-      const absentes = displayed.filter((r) => !r.present);
+      const presentes = displayed.filter((r) => r.statut === 'present');
+      const absentes = displayed.filter((r) => r.statut === 'absent');
 
       await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
         method: 'POST',
@@ -105,8 +111,8 @@ export default function AttendancePage() {
   const hommes = ressources.filter((r) => r.type === 'homme');
   const machines = ressources.filter((r) => r.type === 'machine');
   const displayed = selectedType === 'homme' ? hommes : machines;
-  const presentCount = displayed.filter((r) => r.present).length;
-  const absentCount = displayed.filter((r) => !r.present).length;
+  const presentCount = displayed.filter((r) => r.statut === 'present').length;
+  const absentCount = displayed.filter((r) => r.statut === 'absent').length;
 
   if (!isReady || !chantier) {
     return <div style={{ padding: 24, color: '#94A3B8' }}>Chargement...</div>;
@@ -207,51 +213,55 @@ export default function AttendancePage() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {displayed.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => togglePresence(r.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 16px',
-                  backgroundColor: '#1E293B',
-                  border: '1px solid',
-                  borderColor: r.present ? '#22C55E' : '#334155',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  WebkitTapHighlightColor: 'transparent',
-                  transition: 'border-color 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 20 }}>{selectedType === 'homme' ? '👷' : '🚜'}</span>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontSize: 14, fontWeight: 500, color: '#F8FAFC' }}>{r.nom}</div>
-                    {r.specialite && (
-                      <div style={{ fontSize: 11, color: '#64748B' }}>{r.specialite}</div>
-                    )}
-                  </div>
-                </div>
-                <div
+              {displayed.map((r) => {
+                const borderColor = r.statut === 'present' ? '#22C55E' : r.statut === 'absent' ? '#EF4444' : '#334155';
+                const badgeBg = r.statut === 'present' ? '#22C55E' : r.statut === 'absent' ? '#EF4444' : '#334155';
+                const badgeLabel = r.statut === 'present' ? '✓' : r.statut === 'absent' ? '✗' : '—';
+                return (
+                <button
+                  key={r.id}
+                  onClick={() => cyclePresence(r.id)}
                   style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    backgroundColor: r.present ? '#22C55E' : '#334155',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 14,
-                    color: '#FFFFFF',
-                    transition: 'background-color 0.15s',
+                    justifyContent: 'space-between',
+                    padding: '12px 16px',
+                    backgroundColor: '#1E293B',
+                    border: '1px solid',
+                    borderColor,
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                    transition: 'border-color 0.15s',
                   }}
                 >
-                  {r.present ? '✓' : '✗'}
-                </div>
-              </button>
-            ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>{selectedType === 'homme' ? '👷' : '🚜'}</span>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: '#F8FAFC' }}>{r.nom}</div>
+                      {r.specialite && (
+                        <div style={{ fontSize: 11, color: '#64748B' }}>{r.specialite}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      backgroundColor: badgeBg,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 14,
+                      color: '#FFFFFF',
+                      transition: 'background-color 0.15s',
+                    }}
+                  >
+                    {badgeLabel}
+                  </div>
+                </button>
+              );})}
           </div>
         )}
       </div>
