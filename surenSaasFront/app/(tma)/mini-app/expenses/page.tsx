@@ -32,7 +32,13 @@ export default function ExpensesPage() {
     setSaving(true);
     setExtracted(null);
     const result = await tmaExtract(textInput, 'depense');
-    if (result?.data) setExtracted(result.data);
+    console.log('🔍 extract result:', result);
+    if (result?.data) {
+      console.log('✅ extracted data:', result.data);
+      setExtracted(result.data);
+    } else {
+      console.warn('⚠️ no data in extract result');
+    }
     setSaving(false);
   };
 
