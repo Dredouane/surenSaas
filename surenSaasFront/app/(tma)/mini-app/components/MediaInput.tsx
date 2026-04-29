@@ -1,77 +1,83 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState } from 'react';
 import { VoiceRecorder } from './VoiceRecorder';
 import { tmaFetch } from './tmaFetch';
 
 interface MediaInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  onExtract: () => void;
-  onFileExtracted?: (text: string) => void;
+  workflow: string;
+  onResult: (data: any, inputText?: string) => void;
+  onError?: (error: string) => void;
   placeholder?: string;
-  saving?: boolean;
 }
 
-export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeholder, saving }: MediaInputProps) {
+export function MediaInput({ workflow, onResult, onError, placeholder }: MediaInputProps) {
+  const [textInput, setTextInput] = useState('');
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const uploadAndExtract = useCallback(async (file: File) => {
+  const processInput = useCallback(async (formData: FormData) => {
+    setSaving(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('workflow', 'ocr');
-      const res = await tmaFetch('/api/v1/tma/extract-file', {
+      const res = await tmaFetch('/api/v1/tma/process', {
         method: 'POST',
         body: formData,
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.text) {
-          onChange(data.text);
-          if (onFileExtracted) {
-            onFileExtracted(data.text);
-          } else {
-            setTimeout(() => onExtract(), 400);
-          }
-          return;
+        if (data.is_valid && data.data) {
+          onResult(data.data, textInput);
+        } else {
+          onError?.(data.error || 'Échec extraction');
         }
+      } else {
+        onError?.('Erreur serveur');
       }
-      const label = file.type.startsWith('image/') ? 'Photo' : 'Fichier';
-      onChange(`[${label}: ${file.name}]`);
     } catch {
-      onChange(`[Erreur: ${file.name}]`);
+      onError?.('Erreur réseau');
+    } finally {
+      setSaving(false);
     }
-  }, [onChange, onExtract, onFileExtracted]);
+  }, [textInput, onResult, onError]);
 
-  const handleVoiceResult = useCallback((text: string) => {
-    onChange(text);
-    setTimeout(() => onExtract(), 400);
-  }, [onChange, onExtract]);
+  const handleTextExtract = useCallback(async () => {
+    if (!textInput.trim()) return;
+    const fd = new FormData();
+    fd.append('text', textInput);
+    fd.append('workflow', workflow);
+    await processInput(fd);
+  }, [textInput, workflow, processInput]);
+
+  const handleFileProcess = useCallback(async (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('workflow', workflow);
+    await processInput(fd);
+  }, [workflow, processInput]);
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <div style={{ flex: 1, display: 'flex', gap: 4 }}>
-          <input value={value} onChange={(e) => onChange(e.target.value)}
+          <input value={textInput} onChange={(e) => setTextInput(e.target.value)}
             placeholder={placeholder || 'Décris...'}
-            onKeyDown={(e) => e.key === 'Enter' && onExtract()}
+            onKeyDown={(e) => e.key === 'Enter' && handleTextExtract()}
             style={{
               flex: 1, padding: '12px 14px', backgroundColor: '#0F172A',
               border: '1px solid #334155', borderRadius: 10, color: '#F8FAFC', fontSize: 14,
             }}
           />
-          <VoiceRecorder onTranscript={handleVoiceResult} />
+          <VoiceRecorder workflow={workflow} onResult={onResult} onError={onError} />
         </div>
-        <button onClick={onExtract} disabled={saving || !value.trim()}
+        <button onClick={handleTextExtract} disabled={saving || !textInput.trim()}
           style={{
             padding: '12px 18px', backgroundColor: '#FF6B35',
             border: 'none', borderRadius: 10, color: '#FFF',
             fontSize: 14, fontWeight: 600, minWidth: 60,
-            cursor: saving || !value.trim() ? 'not-allowed' : 'pointer',
-            opacity: saving || !value.trim() ? 0.7 : 1,
+            cursor: saving || !textInput.trim() ? 'not-allowed' : 'pointer',
+            opacity: saving || !textInput.trim() ? 0.7 : 1,
             animation: saving ? 'pulse 0.8s ease-in-out infinite' : 'none',
           }}
         >{saving ? '⏳' : '📎 IA'}
@@ -81,37 +87,25 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => photoInputRef.current?.click()}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', backgroundColor: '#1E293B',
-            border: '1px solid #334155', borderRadius: 8,
-            color: '#94A3B8', fontSize: 13, cursor: 'pointer',
-          }}
-        >📸 Galerie</button>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
+          📸 Galerie
+        </button>
         <button onClick={() => cameraInputRef.current?.click()}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', backgroundColor: '#1E293B',
-            border: '1px solid #334155', borderRadius: 8,
-            color: '#94A3B8', fontSize: 13, cursor: 'pointer',
-          }}
-        >📷 Appareil photo</button>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
+          📷 Appareil photo
+        </button>
         <button onClick={() => fileInputRef.current?.click()}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', backgroundColor: '#1E293B',
-            border: '1px solid #334155', borderRadius: 8,
-            color: '#94A3B8', fontSize: 13, cursor: 'pointer',
-          }}
-        >📄 PDF</button>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
+          📄 PDF
+        </button>
       </div>
 
       <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: 'none' }}
-        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
     </div>
   );
 }

@@ -6,7 +6,8 @@ import { tmaFetch } from './tmaFetch';
 type RecorderState = 'idle' | 'recording' | 'confirm' | 'loading';
 
 interface VoiceRecorderProps {
-  onTranscript: (text: string) => void;
+  workflow: string;
+  onResult: (data: any) => void;
   onError?: (error: string) => void;
 }
 
@@ -16,7 +17,7 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
+export function VoiceRecorder({ workflow, onResult, onError }: VoiceRecorderProps) {
   const [state, setState] = useState<RecorderState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [blocked, setBlocked] = useState(false);
@@ -97,28 +98,29 @@ export function VoiceRecorder({ onTranscript, onError }: VoiceRecorderProps) {
     try {
       const formData = new FormData();
       formData.append('audio', blob, 'voice.webm');
+      formData.append('workflow', workflow);
 
-      const res = await tmaFetch('/api/v1/tma/transcribe', {
+      const res = await tmaFetch('/api/v1/tma/process', {
         method: 'POST',
         body: formData,
       });
 
       if (res.ok) {
         const data = await res.json();
-        if (data.is_valid && data.text) {
-          onTranscript(data.text);
+        if (data.is_valid && data.data) {
+          onResult(data.data);
         } else {
-          onError?.(data.error || 'Échec transcription');
+          onError?.(data.error || 'Échec extraction vocale');
         }
       } else {
-        onError?.('Erreur serveur transcription');
+        onError?.('Erreur serveur');
       }
     } catch {
-      onError?.('Erreur réseau transcription');
+      onError?.('Erreur réseau');
     } finally {
       setState('idle');
     }
-  }, [onTranscript, onError]);
+  }, [workflow, onResult, onError]);
 
   const cancelRecording = useCallback(() => {
     chunksRef.current = [];

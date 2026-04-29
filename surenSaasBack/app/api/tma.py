@@ -17,7 +17,7 @@ from app.core.logging import get_logger
 from app.services.tma_auth_service import TmaAuthService, decode_start_param
 from app.services.database import supabase_client
 from app.api.tma_extract import extract_workflow
-from app.services.transcribe_service import transcribe_with_gemini, transcribe_pipeline
+from app.services.transcribe_service import transcribe_with_gemini
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/tma", tags=["tma"])
@@ -189,6 +189,77 @@ async def tma_extract_file(
     except Exception as e:
         logger.error(f"Erreur extract-file: {e}")
         return {"text": ""}
+
+
+# ---------------------------------------------------------------------------
+# Process — endpoint unique pour la TMA : prend tout type d'input
+# (texte, audio, image, PDF) et retourne les données structurées + validées
+# ---------------------------------------------------------------------------
+
+class ProcessResponse(BaseModel):
+    is_valid: bool
+    data: dict = {}
+    guardrail_issues: list = []
+    error: Optional[str] = None
+
+
+@router.post("/process", response_model=ProcessResponse)
+async def tma_process(
+    request: Request,
+    text: Optional[str] = Form(None),
+    workflow: str = Form(...),
+    audio: Optional[UploadFile] = File(None),
+    file: Optional[UploadFile] = File(None),
+):
+    """
+    Endpoint unique pour la TMA.
+    - text: saisie manuelle
+    - audio: enregistrement vocal
+    - file: photo/PDF
+    Retourne les données structurées selon le workflow.
+    """
+    input_text = text or ""
+
+    # 1. Si audio → transcrire d'abord
+    if audio:
+        content = await audio.read()
+        if content and len(content) > 200:
+            from app.services.transcribe_service import transcribe_with_gemini
+            transcript = transcribe_with_gemini(content, audio.content_type or "audio/webm")
+            if transcript:
+                input_text = transcript
+
+    # 2. Si fichier (photo/PDF) → OCR
+    file_path = None
+    if file:
+        content = await file.read()
+        if content and len(content) > 200:
+            import tempfile
+            suffix = Path(file.filename or "file").suffix or ".tmp"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(content)
+            tmp.close()
+            file_path = tmp.name
+
+    # 3. Extraction structurée
+    if not input_text and not file_path:
+        return ProcessResponse(is_valid=False, error="Aucun input fourni", data={})
+
+    result = await extract_workflow(workflow, input_text, file_path)
+
+    # Nettoyage fichier temporaire
+    if file_path:
+        try:
+            os.unlink(file_path)
+        except Exception:
+            pass
+
+    return ProcessResponse(
+        is_valid=result.get("is_valid", False),
+        data=result.get("data", {}),
+        guardrail_issues=result.get("guardrail_issues", []),
+        error=result.get("error"),
+    )
 
 
 # ---------------------------------------------------------------------------
