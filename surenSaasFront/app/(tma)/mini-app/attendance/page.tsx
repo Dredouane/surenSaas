@@ -88,21 +88,38 @@ export default function AttendancePage() {
       const presentes = displayed.filter((r) => r.statut === 'present');
       const absentes = displayed.filter((r) => r.statut === 'absent');
 
-      const payload = {
-        date: dateStr,
-        commentaires: `${presentes.length} présent(s), ${absentes.length} absent(s)`,
-      };
+      const commentaires = `${presentes.length} présent(s), ${absentes.length} absent(s)`;
 
+      // 1. Créer le pointage
       const res = await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ date: dateStr, commentaires }),
       });
 
       if (!res.ok) {
         const errText = await res.text();
         console.warn('Erreur POST pointage:', res.status, errText);
         return;
+      }
+
+      const pointageRes = await res.json();
+      const pointageId = pointageRes.id || pointageRes.data?.id || pointageRes?.[0]?.id;
+
+      // 2. Lier les ressources au pointage
+      if (pointageId) {
+        const toutes = [...presentes, ...absentes];
+        for (const r of toutes) {
+          await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages/${pointageId}/ressources`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ressource_id: r.id,
+              presence: r.statut === 'present',
+              periode: 'journee',
+            }),
+          });
+        }
       }
 
       setSaved(true);
