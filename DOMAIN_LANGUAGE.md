@@ -99,6 +99,31 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | **WebView Fallback** | Si `window.Telegram.WebApp` est absent, affichage d'un message "Ouvrir dans Telegram" + QR code | TMA > Frontend | Pas de redirection vers le SaaS Desktop (isolation stricte des contextes) |
 | **Bottom Tab Bar** | Barre de navigation inférieure fixe (Sticky Bottom) avec 4 onglets : 📊 Chantier, 📈 Progression, 💰 Dépenses, 👷 Équipe | TMA > Navigation | Design one-handed thumb operation ; padding-bottom `pb-16` sur le contenu |
 
+---
+
+## Termes du Domaine — Extension Pipeline Audio (Whisper + Gemini)
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **Pipeline Audio** | Chaîne de traitement en deux étapes : transcription Whisper puis structuration Gemini | Architecture > Services | Toujours logger chaque étape séparément dans `logs_agents` |
+| **Whisper** | Modèle `whisper-large-v3` via OpenRouter pour la transcription audio en texte brut | Appelé depuis `whisper_service.py` | Input : blob audio (webm/ogg/wav). Output : chaîne texte. API compatible OpenAI |
+| **OpenRouter** | Proxy API unifié pour modèles LLM. Utilisé pour Whisper (audio → texte) | Config > `SUREN_OPEN_ROUTER_API_KEY` | URL : `https://openrouter.ai/api/v1/audio/transcriptions`. Clé secrète déploy |
+| **Structuration Gemini** | Deuxième étape du pipeline : transforme le texte transcrit en JSON structuré pour Supabase | Appelé depuis `transcribe_service.py` | System Prompt : parseur JSON strict. Schéma : `{task_id, percentage, status, observation}` |
+| **StructuredAudio** | Résultat complet du pipeline : `{transcript, structured, whisper_log_id, gemini_log_id}` | TMA > Endpoint API | Permet au frontend d'afficher à la fois le texte brut et le JSON interprété |
+| **Étape (Step)** | Une des deux phases du pipeline : `whisper` ou `gemini_structuration` | Architecture > Audit | Permet de monitorer précisément quelle étape échoue. `logs_agents.agent_type` = `whisper_transcription` ou `gemini_structuration` |
+
+## Mapping Pipeline Audio ↔ Fichiers
+
+| Terme | Backend | Frontend |
+|-------|---------|----------|
+| Whisper | `app/services/whisper_service.py` | — |
+| Pipeline Audio | `app/services/transcribe_service.py` (fonction `transcribe_pipeline`) | — |
+| Endpoint | `app/api/tma.py` (POST `/transcribe-and-structure`) | `VoiceRecorder.tsx` (appel optionnel après transcription) |
+| Config | `app/core/config.py` (SUREN_OPEN_ROUTER_API_KEY) | — |
+| Tests Whisper | `tests/test_whisper_service.py` | — |
+| Tests Pipeline | `tests/test_transcribe_pipeline.py` | — |
+| Tests API | `tests/test_tma_transcribe_and_structure_api.py` | — |
+
 ## Mapping Termes TMA ↔ Fichiers
 
 | Terme | Backend | Frontend | Bot | DB |

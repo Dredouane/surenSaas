@@ -7,11 +7,12 @@ interface MediaInputProps {
   value: string;
   onChange: (value: string) => void;
   onExtract: () => void;
+  onStructured?: (data: { task_id: string; percentage: number; status: string; observation: string }) => void;
   placeholder?: string;
   saving?: boolean;
 }
 
-export function MediaInput({ value, onChange, onExtract, placeholder, saving }: MediaInputProps) {
+export function MediaInput({ value, onChange, onExtract, onStructured, placeholder, saving }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const extractGuardRef = useRef(false);
@@ -55,7 +56,7 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
             }}
             onKeyDown={(e) => e.key === 'Enter' && onExtract()}
           />
-          <VoiceRecorder onTranscript={handleVoiceResult} />
+          <VoiceRecorder onTranscript={handleVoiceResult} onStructured={onStructured} />
         </div>
         <button
           onClick={onExtract}

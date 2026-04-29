@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     tma_host: str = ""
     tma_extraction_model: str = "gemini-2.5-flash-lite"  # Modèle rapide pour les extractions TMA
 
+    # OpenRouter (Whisper transcription)
+    open_router_api_key: str = ""
+    whisper_model: str = "whisper-large-v3"
+
     # Cloudflare R2 Configuration (S3-Compatible)
     # Mêmes credentials pour test et prod (isolation par folder)
     r2_endpoint_url: str = ""       # SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT
@@ -158,6 +162,15 @@ class Settings(BaseSettings):
             ("r2_bucket_name", [
                 "SUREN_GED_CLOUDFLARE_BUCKET_NAME",
                 "R2_BUCKET_NAME",
+            ]),
+            # OpenRouter / Whisper
+            ("open_router_api_key", [
+                "SUREN_OPEN_ROUTER_API_KEY",
+                "open_router_api_key",
+            ]),
+            ("whisper_model", [
+                "WHISPER_MODEL",
+                "whisper_model",
             ]),
         ]
         

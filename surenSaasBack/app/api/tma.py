@@ -15,7 +15,7 @@ from app.core.logging import get_logger
 from app.services.tma_auth_service import TmaAuthService, decode_start_param
 from app.services.database import supabase_client
 from app.api.tma_extract import extract_workflow
-from app.services.transcribe_service import transcribe_with_gemini
+from app.services.transcribe_service import transcribe_with_gemini, transcribe_pipeline
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/tma", tags=["tma"])
@@ -176,6 +176,52 @@ async def tma_transcribe(
 
     mime_type = audio.content_type or "audio/webm"
     return await transcribe_audio(content, mime_type)
+
+
+# ---------------------------------------------------------------------------
+# Transcribe + Structure — Pipeline Whisper + Gemini
+# ---------------------------------------------------------------------------
+
+@router.post("/transcribe-and-structure")
+async def tma_transcribe_and_structure(
+    request: Request,
+    audio: UploadFile = File(...),
+):
+    """
+    Pipeline audio complet :
+      1. Whisper (OpenRouter) → texte brut
+      2. Gemini (Vertex AI)   → JSON structuré
+
+    Nécessite un JWT valide. Le résultat inclut transcript et structured.
+    Chaque étape est loggée dans logs_agents.
+    """
+    # Vérifier l'authentification
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return {"is_valid": False, "error": "Token manquant"}
+
+    token = auth_header.replace("Bearer ", "")
+    try:
+        payload = auth_service.verify_jwt(token)
+        org_id = payload.get("org_id", "")
+    except Exception:
+        return {"is_valid": False, "error": "Token invalide"}
+
+    content = await audio.read()
+    if not content or len(content) < 100:
+        return {"is_valid": False, "error": "Fichier audio vide ou trop court"}
+
+    mime_type = audio.content_type or "audio/webm"
+    correlation_id = getattr(request.state, "correlation_id", None)
+
+    result = await transcribe_pipeline(
+        audio_data=content,
+        mime_type=mime_type,
+        org_id=org_id,
+        correlation_id=correlation_id or "",
+    )
+
+    return result
 
 
 # ---------------------------------------------------------------------------
