@@ -14,14 +14,19 @@ interface MediaInputProps {
 export function MediaInput({ value, onChange, onExtract, placeholder, saving }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [pendingVoice, setPendingVoice] = useState('');
+  const extractGuardRef = useRef(false);
 
   useEffect(() => {
-    if (pendingVoice && pendingVoice === value) {
-      const t = setTimeout(() => onExtract(), 300);
-      return () => clearTimeout(t);
-    }
-  }, [value, pendingVoice, onExtract]);
+    if (!extractGuardRef.current) return;
+    extractGuardRef.current = false;
+    const t = setTimeout(() => onExtract(), 300);
+    return () => clearTimeout(t);
+  }, [value, onExtract]);
+
+  const handleVoiceResult = useCallback((text: string) => {
+    extractGuardRef.current = true;
+    onChange(text);
+  }, [onChange]);
 
   const handlePhoto = useCallback(() => {
     photoInputRef.current?.click();
@@ -50,9 +55,7 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
             }}
             onKeyDown={(e) => e.key === 'Enter' && onExtract()}
           />
-          <VoiceRecorder
-            onTranscript={(text) => { setPendingVoice(text); onChange(text); }}
-          />
+          <VoiceRecorder onTranscript={handleVoiceResult} />
         </div>
         <button
           onClick={onExtract}
@@ -70,64 +73,29 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
             minWidth: 60,
           }}
         >
-          {saving ? '...' : '📎 IA'}
+          {saving ? '⏳' : '📎 IA'}
         </button>
       </div>
       <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#64748B' }}>
         <span>🎤 Appui long pour dicter</span>
-        <button
-          onClick={handlePhoto}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#64748B',
-            fontSize: 12,
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
+        <button onClick={handlePhoto} style={{ background: 'none', border: 'none', color: '#64748B', fontSize: 12, cursor: 'pointer', padding: 0 }}>
           📸 Photo
         </button>
-        <button
-          onClick={handleFile}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#64748B',
-            fontSize: 12,
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
+        <button onClick={handleFile} style={{ background: 'none', border: 'none', color: '#64748B', fontSize: 12, cursor: 'pointer', padding: 0 }}>
           📄 PDF
         </button>
       </div>
-      <input
-        ref={photoInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        style={{ display: 'none' }}
+      <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
         onChange={(e) => {
           const file = e.target?.files?.[0];
-          if (file) {
-            onChange(`[Photo: ${file.name}] ${value}`);
-            setTimeout(() => onExtract(), 200);
-          }
+          if (file) { onChange(`[Photo: ${file.name}] ${value}`); extractGuardRef.current = true; }
           e.target.value = '';
         }}
       />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,image/*"
-        style={{ display: 'none' }}
+      <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: 'none' }}
         onChange={(e) => {
           const file = e.target?.files?.[0];
-          if (file) {
-            onChange(`[Fichier: ${file.name}] ${value}`);
-            setTimeout(() => onExtract(), 200);
-          }
+          if (file) { onChange(`[Fichier: ${file.name}] ${value}`); extractGuardRef.current = true; }
           e.target.value = '';
         }}
       />

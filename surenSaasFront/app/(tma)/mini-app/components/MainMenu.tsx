@@ -8,7 +8,7 @@ const MENU_ITEMS = [
   { emoji: '💰', label: 'Dépenses', href: '/mini-app/expenses', color: '#3B82F6' },
   { emoji: '📄', label: 'Situations', href: '/mini-app/progress', color: '#F59E0B' },
   { emoji: '📋', label: 'Tâches', href: '/mini-app/progress', color: '#8B5CF6' },
-  { emoji: '📅', label: 'Réunions', href: '/mini-app/progress', color: '#EC4899' },
+  { emoji: '📅', label: 'Réunions', href: '/mini-app/reunions', color: '#EC4899' },
 ];
 
 export function MainMenu() {
