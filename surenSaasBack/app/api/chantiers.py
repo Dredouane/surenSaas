@@ -5,12 +5,32 @@ from datetime import datetime
 
 from app.api.auth import get_current_user_from_cookie, get_supabase
 from app.core.logging import get_logger
+from app.services.tma_auth_service import TmaAuthService
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/chantiers", tags=["chantiers"])
 
+_tma_auth = TmaAuthService()
+
 
 def check_user_org_access(request: Request, org_id: str):
+    """Vérifie l'accès : cookie de session SaaS ou JWT TMA (Authorization Bearer)."""
+    # Essayer d'abord le JWT TMA
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            token = auth_header.replace("Bearer ", "")
+            payload = _tma_auth.verify_jwt(token)
+            jwt_org_id = payload.get("org_id", "")
+            if jwt_org_id != org_id:
+                raise HTTPException(status_code=403, detail="Acces non autorise a cette organisation")
+            return payload
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # Fallback : cookie de session SaaS Desktop
     user = get_current_user_from_cookie(request)
     if user["org_id"] != org_id:
         raise HTTPException(status_code=403, detail="Acces non autorise a cette organisation")

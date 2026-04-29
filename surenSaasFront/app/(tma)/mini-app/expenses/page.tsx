@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BottomTabs } from '../components/BottomTabs';
 import { ChantierHeader } from '../components/ChantierHeader';
+import { MediaInput } from '../components/MediaInput';
 import { useTma } from '../providers';
 import { tmaFetch, tmaExtract } from '../components/tmaFetch';
 
@@ -64,28 +65,13 @@ export default function ExpensesPage() {
       <ChantierHeader />
       <div style={{ padding: '16px 20px' }}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-            <input value={textInput} onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Décris la dépense (ou dicte-la)..."
-              style={{
-                flex: 1, padding: '12px 14px', backgroundColor: '#0F172A',
-                border: '1px solid #334155', borderRadius: 10, color: '#F8FAFC', fontSize: 14,
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-            />
-            <button onClick={handleExtract} disabled={saving || !textInput.trim()}
-              style={{
-                padding: '12px 18px', backgroundColor: saving ? '#475569' : '#FF6B35',
-                border: 'none', borderRadius: 10, color: '#FFF',
-                fontSize: 14, fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
-              }}
-            >{saving ? '...' : '📎 IA'}</button>
-          </div>
-          <div style={{ fontSize: 12, color: '#64748B', display: 'flex', gap: 12 }}>
-            <span>🎤 Dictée vocale</span>
-            <span>📸 Scanner facture</span>
-          </div>
+          <MediaInput
+            value={textInput}
+            onChange={setTextInput}
+            onExtract={handleExtract}
+            placeholder="Décris la dépense..."
+            saving={saving}
+          />
         </div>
 
         {extracted && (
