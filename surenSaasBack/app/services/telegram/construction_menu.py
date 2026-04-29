@@ -1,13 +1,17 @@
 """Construction Menu — logique des menus et mapping callbacks → handlers."""
+import os
 from typing import Dict, Any, Optional, List, Callable, Awaitable
 
 from app.core.config import settings
 
 CallbackHandler = Callable[..., Awaitable[Dict[str, Any]]]
 
+# URL du frontend pour la TMA (bouton WebApp Telegram)
+# Priorité : TMA_HOST > FRONTEND_URL > fallback localhost
+_FRONTEND_URL = os.getenv("FRONTEND_URL") or os.getenv("NEXT_PUBLIC_FRONTEND_URL") or ""
 TMA_BASE_URL = (
-    f"https://{settings.tma_host or 'suren-front-test-xxx.run.app'}/mini-app"
-    if settings.environment != "development"
+    f"https://{settings.tma_host}/mini-app" if settings.tma_host
+    else f"{_FRONTEND_URL}/mini-app" if _FRONTEND_URL
     else "http://localhost:3000/mini-app"
 )
 
