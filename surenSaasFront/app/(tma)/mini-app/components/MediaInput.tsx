@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { VoiceRecorder } from './VoiceRecorder';
+import { tmaFetch } from './tmaFetch';
 
 interface MediaInputProps {
   value: string;
@@ -24,6 +25,30 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving, me
     const t = setTimeout(() => onExtract(), 300);
     return () => clearTimeout(t);
   }, [value, onExtract]);
+
+  const uploadAndExtract = useCallback(async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('workflow', 'ocr');
+      const res = await tmaFetch('/api/v1/tma/extract-file', {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.text) {
+          onChange(data.text);
+          extractGuardRef.current = true;
+          return;
+        }
+      }
+      onChange(`[${file.type.startsWith('image/') ? 'Photo' : 'Fichier'}: ${file.name}]`);
+      extractGuardRef.current = true;
+    } catch {
+      onChange(`[Erreur: ${file.name}]`);
+    }
+  }, [onChange]);
 
   const handleVoiceResult = useCallback((text: string) => {
     extractGuardRef.current = true;
@@ -84,13 +109,13 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving, me
         >📄 PDF</button>
       </div>
 
-      {/* Inputs cachés */}
+      {/* Inputs cachés — upload + extraction automatique */}
       <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target?.files?.[0]; if (f) { onChange(`[Photo: ${f.name}] ${value}`); extractGuardRef.current = true; } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target?.files?.[0]; if (f) { onChange(`[Photo: ${f.name}] ${value}`); extractGuardRef.current = true; } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target?.files?.[0]; if (f) { onChange(`[Fichier: ${f.name}] ${value}`); extractGuardRef.current = true; } e.target.value = ''; }} />
+        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
     </div>
   );
 }

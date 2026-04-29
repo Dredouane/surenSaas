@@ -6,6 +6,8 @@ Endpoints :
   GET  /api/v1/tma/context → retourne chantier + user + org (nécessite JWT)
 """
 
+import os
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
@@ -143,6 +145,50 @@ async def tma_extract(body: ExtractRequest, request: Request):
     """
     result = await extract_workflow(body.workflow, body.text)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Extract-file — OCR/texte depuis un fichier (photo, PDF)
+# ---------------------------------------------------------------------------
+
+@router.post("/extract-file")
+async def tma_extract_file(
+    request: Request,
+    file: UploadFile = File(...),
+    workflow: str = Form("ocr"),
+):
+    """
+    Extrait le texte d'un fichier (image/PDF) via Gemini OCR.
+    Retourne le texte brut extrait.
+    """
+    content = await file.read()
+    if not content or len(content) < 100:
+        return {"text": ""}
+
+    try:
+        import tempfile
+        suffix = Path(file.filename or "file").suffix or ".tmp"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(content)
+        tmp.close()
+
+        from app.agents.workflow_extractor import WorkflowExtractor
+        extractor = WorkflowExtractor(model=settings.tma_extraction_model)
+        result = extractor.extract(f"Extrais le texte de ce fichier: {file.filename or 'document'}", "avancement", tmp.name)
+        if hasattr(result, '__await__'):
+            result = await result
+
+        os.unlink(tmp.name)
+
+        text = ""
+        if result and not result.get("_fallback"):
+            ed = result.get("extracted_data") or result
+            text = ed.get("description") or ed.get("text") or ""
+
+        return {"text": text}
+    except Exception as e:
+        logger.error(f"Erreur extract-file: {e}")
+        return {"text": ""}
 
 
 # ---------------------------------------------------------------------------

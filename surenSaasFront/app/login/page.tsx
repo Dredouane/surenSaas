@@ -123,6 +123,9 @@ function LoginForm() {
       console.log('✅ Login réussi, rechargement du profil...');
       await refetch();
       
+      // Attendre que le contexte soit à jour
+      await new Promise(r => setTimeout(r, 500));
+      
       router.push(redirectUrl);
       
     } catch (err: any) {
