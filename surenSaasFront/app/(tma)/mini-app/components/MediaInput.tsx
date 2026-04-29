@@ -76,12 +76,15 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
     if (hasCam) {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = 'image/*';
-      input.capture = 'environment' as any;
+      input.accept = 'image/jpeg,image/png';
+      input.setAttribute('capture', 'environment');
+      document.body.appendChild(input);
       input.onchange = async (e: any) => {
         const f = e.target?.files?.[0];
         if (f) await handleFileProcess(f);
+        document.body.removeChild(input);
       };
+      // click immédiat, même thread que l'interaction utilisateur
       input.click();
       return;
     }
@@ -137,7 +140,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
       )}
       {!cameraBlocked && (
         <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-          Choisissez « Appareil photo » ou « Galerie » dans le sélecteur
+          Appareil photo activé. Si la galerie s&apos;ouvre, cliquez sur l&apos;icône « Appareil Photo » en haut du sélecteur.
         </div>
       )}
 
