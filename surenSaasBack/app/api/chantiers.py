@@ -1146,7 +1146,7 @@ async def create_pointage(request: Request, org_id: str = Query(...), chantier_i
         data = pointage.dict(exclude_none=True)
         data["chantier_id"] = chantier_uuid
         data["org_id"] = org_id
-        data["valide_par"] = user["sub"]
+        data["valide_par"] = user.get("user_id") or user.get("sub", "")
         data["valide_le"] = datetime.utcnow().isoformat()
         data["created_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_pointages").insert(data).execute()
@@ -1166,7 +1166,7 @@ async def update_pointage(request: Request, org_id: str = Query(...), chantier_i
         user = check_user_org_access(request, org_id)
         chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
         update_data = pointage.dict(exclude_none=True)
-        update_data["valide_par"] = user["sub"]
+        update_data["valide_par"] = user.get("user_id") or user.get("sub", "")
         update_data["valide_le"] = datetime.utcnow().isoformat()
         update_data["updated_at"] = datetime.utcnow().isoformat()
         result = get_supabase().table("chantier_pointages").update(update_data).eq("id", pointage_id).execute()
