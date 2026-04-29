@@ -43,7 +43,6 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   const addSnapshot = useCallback((dataUrl: string) => {
     setPhotos((prev) => [...prev, dataUrl]);
     setPreview(null);
-    videoRef.current?.play();
   }, []);
 
   const shoot = useCallback(() => {
@@ -61,14 +60,22 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   }, [preview]);
 
   const confirmSnapshot = useCallback(() => {
+    const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // 1. Récupérer l'URL synchrone pour l'aperçu
+    const url = canvas.toDataURL('image/jpeg', 0.92);
+
+    // 2. Remettre la vidéo en play IMMÉDIATEMENT
+    if (video) video.play();
+    setPreview(null);
+    addSnapshot(url);
+
+    // 3. Créer le File en arrière-plan (toBlob async, non bloquant)
     canvas.toBlob((blob) => {
       if (blob) {
-        const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        filesRef.current.push(file);
-        const url = canvas.toDataURL('image/jpeg', 0.7);
-        addSnapshot(url);
+        filesRef.current.push(new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' }));
       }
     }, 'image/jpeg', 0.92);
   }, [addSnapshot]);
