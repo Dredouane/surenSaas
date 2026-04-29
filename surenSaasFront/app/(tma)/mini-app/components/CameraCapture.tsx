@@ -61,8 +61,7 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
 
   const confirm = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || capturing.current) return;
-    capturing.current = true;
+    if (!canvas) return;
     canvas.toBlob((blob) => {
       if (blob) {
         const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
