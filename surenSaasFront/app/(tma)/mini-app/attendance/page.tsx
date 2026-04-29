@@ -37,6 +37,7 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
   const [selectedType, setSelectedType] = useState<RessourceType>('homme');
 
   const fetchRessources = useCallback(async () => {
@@ -77,20 +78,32 @@ export default function AttendancePage() {
 
   const handleValidate = async () => {
     if (!chantier) return;
+    if (presentCount === 0 && absentCount === 0) {
+      setError('Marque au moins une ressource présente ou absente');
+      return;
+    }
     setSaving(true);
     try {
       const dateStr = formatDate(currentDate);
       const presentes = displayed.filter((r) => r.statut === 'present');
       const absentes = displayed.filter((r) => r.statut === 'absent');
 
-      await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
+      const payload = {
+        date: dateStr,
+        commentaires: `${presentes.length} présent(s), ${absentes.length} absent(s)`,
+      };
+
+      const res = await tmaFetch(`/api/v1/chantiers/${chantier.id}/pointages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: dateStr,
-          commentaires: `${presentes.length} présent(s), ${absentes.length} absent(s)`,
-        }),
+        body: JSON.stringify(payload),
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.warn('Erreur POST pointage:', res.status, errText);
+        return;
+      }
 
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -281,6 +294,13 @@ export default function AttendancePage() {
           <span style={{ color: '#94A3B8' }}>Total: {displayed.length}</span>
         </div>
       </div>
+
+      {/* Message d'erreur */}
+      {error && (
+        <div style={{ padding: '0 20px', marginBottom: 8 }}>
+          <div style={{ color: '#EF4444', fontSize: 13, textAlign: 'center' }}>{error}</div>
+        </div>
+      )}
 
       {/* Bouton valider */}
       <div style={{ padding: '0 20px' }}>

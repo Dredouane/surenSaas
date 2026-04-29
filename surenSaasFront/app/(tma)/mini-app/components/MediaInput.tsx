@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { VoiceRecorder } from './VoiceRecorder';
 
 interface MediaInputProps {
@@ -14,6 +14,14 @@ interface MediaInputProps {
 export function MediaInput({ value, onChange, onExtract, placeholder, saving }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [pendingVoice, setPendingVoice] = useState('');
+
+  useEffect(() => {
+    if (pendingVoice && pendingVoice === value) {
+      const t = setTimeout(() => onExtract(), 300);
+      return () => clearTimeout(t);
+    }
+  }, [value, pendingVoice, onExtract]);
 
   const handlePhoto = useCallback(() => {
     photoInputRef.current?.click();
@@ -43,7 +51,7 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
             onKeyDown={(e) => e.key === 'Enter' && onExtract()}
           />
           <VoiceRecorder
-            onTranscript={(text) => { onChange(text); setTimeout(() => onExtract(), 200); }}
+            onTranscript={(text) => { setPendingVoice(text); onChange(text); }}
           />
         </div>
         <button
