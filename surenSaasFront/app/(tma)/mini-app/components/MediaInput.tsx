@@ -77,13 +77,16 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
         </div>
         <button onClick={onExtract} disabled={saving || !value.trim()}
           style={{
-            padding: '12px 18px', backgroundColor: saving ? '#475569' : '#FF6B35',
+            padding: '12px 18px', backgroundColor: saving ? '#FF6B35' : '#FF6B35',
             border: 'none', borderRadius: 10, color: '#FFF',
             fontSize: 14, fontWeight: 600, minWidth: 60,
             cursor: saving || !value.trim() ? 'not-allowed' : 'pointer',
-            opacity: saving || !value.trim() ? 0.6 : 1,
+            opacity: saving || !value.trim() ? 0.7 : 1,
+            animation: saving ? 'pulse 0.8s ease-in-out infinite' : 'none',
           }}
-        >{saving ? '⏳' : '📎 IA'}</button>
+        >{saving ? '⏳' : '📎 IA'}
+        <style>{`@keyframes pulse { 0%,100% { opacity: 0.7; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.97); } }`}</style>
+        </button>
       </div>
 
       {/* Barre d'actions média — grands boutons visibles */}
