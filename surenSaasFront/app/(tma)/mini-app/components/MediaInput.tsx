@@ -49,6 +49,22 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
     await processInput(fd);
   }, [textInput, workflow, processInput]);
 
+  const handlePhotoClick = useCallback(() => {
+    // Forcer la permission caméra via un scan popup flash, puis ouvrir l'input
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg?.showScanQrPopup) {
+        tg.showScanQrPopup({ text: 'Chargement de l\'appareil photo...' });
+        setTimeout(() => {
+          try { tg.closeScanQrPopup?.(); } catch {}
+          photoInputRef.current?.click();
+        }, 100);
+        return;
+      }
+    } catch {}
+    photoInputRef.current?.click();
+  }, []);
+
   const handleFileProcess = useCallback(async (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -85,7 +101,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => photoInputRef.current?.click()}
+        <button onClick={handlePhotoClick}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
           📸 Prendre une photo
         </button>
@@ -96,7 +112,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
       </div>
       <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>Choisissez « Appareil photo » ou « Galerie »</div>
 
-      <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+      <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
