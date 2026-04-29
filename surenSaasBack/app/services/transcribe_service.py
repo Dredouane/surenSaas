@@ -1,18 +1,23 @@
 """
 TranscribeService — Transcription audio via Gemini pour la TMA.
 
-Utilise le modèle gemini-2.0-flash (support audio natif) pour transcrire
+Utilise Google genai avec Vertex AI (comme GeminiClient) pour transcrire
 un flux audio brut (Blob) en texte français.
+
+Modèle : gemini-2.0-flash (support audio natif)
 """
 
 import os
 import base64
+import json
+import tempfile
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from app.core.config import settings
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def transcribe_with_gemini(audio_data: bytes, mime_type: str = "audio/webm") -> Optional[str]:
@@ -24,18 +29,42 @@ def transcribe_with_gemini(audio_data: bytes, mime_type: str = "audio/webm") -> 
         import google.genai as genai
         from google.genai import types
 
-        api_key = (
+        credentials_b64 = (
             settings.gemini_api_key
-            or os.getenv("GEMINI_API_KEY")
+            or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
+            or os.getenv("GOOGLE_GEMINI_CREDENTIALS_B64")
         )
-        if not api_key:
-            logger.error("Aucune clé API Gemini configurée pour la transcription")
+        api_key = os.getenv("GEMINI_API_KEY")
+
+        client = None
+
+        # Mode Vertex AI (Service Account)
+        if credentials_b64 and not api_key:
+            try:
+                credentials_json = base64.b64decode(credentials_b64).decode("utf-8")
+                credentials_info = json.loads(credentials_json)
+                project_id = credentials_info.get("project_id") or os.getenv("GCP_PROJECT_ID")
+
+                fd, cred_file = tempfile.mkstemp(suffix=".json")
+                with os.fdopen(fd, "w") as f:
+                    json.dump(credentials_info, f)
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
+
+                client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location=settings.gemini_location or "europe-west1",
+                )
+            except Exception as e:
+                logger.error(f"Erreur init Vertex AI pour transcription: {e}")
+
+        # Mode AI Studio (API Key)
+        if not client and api_key:
+            client = genai.Client(api_key=api_key)
+
+        if not client:
+            logger.error("Aucune méthode d'authentification Gemini configurée pour la transcription")
             return None
-
-        client = genai.Client(api_key=api_key)
-
-        # Encoder l'audio en base64 et l'envoyer à Gemini
-        audio_b64 = base64.b64encode(audio_data).decode("utf-8")
 
         response = client.models.generate_content(
             model="gemini-2.0-flash",
