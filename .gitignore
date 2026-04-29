@@ -40,3 +40,4 @@ build/
 .DS_Store
 Thumbs.db
 .env.local
+.env.production
