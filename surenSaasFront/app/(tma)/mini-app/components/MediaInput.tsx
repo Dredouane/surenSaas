@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback } from 'react';
 import { VoiceRecorder } from './VoiceRecorder';
 import { tmaFetch } from './tmaFetch';
 
@@ -11,21 +11,12 @@ interface MediaInputProps {
   onFileExtracted?: (text: string) => void;
   placeholder?: string;
   saving?: boolean;
-  mediaLabel?: string;
 }
 
-export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeholder, saving, mediaLabel }: MediaInputProps) {
+export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeholder, saving }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const extractGuardRef = useRef(false);
-
-  useEffect(() => {
-    if (!extractGuardRef.current) return;
-    extractGuardRef.current = false;
-    const t = setTimeout(() => onExtract(), 300);
-    return () => clearTimeout(t);
-  }, [value, onExtract]);
 
   const uploadAndExtract = useCallback(async (file: File) => {
     try {
@@ -41,7 +32,7 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
         if (data.text) {
           onChange(data.text);
           if (onFileExtracted) {
-            setTimeout(() => onFileExtracted(data.text), 200);
+            onFileExtracted(data.text);
           } else {
             setTimeout(() => onExtract(), 400);
           }
@@ -53,16 +44,15 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
     } catch {
       onChange(`[Erreur: ${file.name}]`);
     }
-  }, [onChange, onExtract]);
+  }, [onChange, onExtract, onFileExtracted]);
 
   const handleVoiceResult = useCallback((text: string) => {
-    extractGuardRef.current = true;
     onChange(text);
-  }, [onChange]);
+    setTimeout(() => onExtract(), 400);
+  }, [onChange, onExtract]);
 
   return (
     <div>
-      {/* Ligne input + bouton IA */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <div style={{ flex: 1, display: 'flex', gap: 4 }}>
           <input value={value} onChange={(e) => onChange(e.target.value)}
@@ -77,7 +67,7 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
         </div>
         <button onClick={onExtract} disabled={saving || !value.trim()}
           style={{
-            padding: '12px 18px', backgroundColor: saving ? '#FF6B35' : '#FF6B35',
+            padding: '12px 18px', backgroundColor: '#FF6B35',
             border: 'none', borderRadius: 10, color: '#FFF',
             fontSize: 14, fontWeight: 600, minWidth: 60,
             cursor: saving || !value.trim() ? 'not-allowed' : 'pointer',
@@ -89,7 +79,6 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
         </button>
       </div>
 
-      {/* Barre d'actions média — grands boutons visibles */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => photoInputRef.current?.click()}
           style={{
@@ -117,7 +106,6 @@ export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeh
         >📄 PDF</button>
       </div>
 
-      {/* Inputs cachés — upload + extraction automatique */}
       <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { onChange('Analyse en cours...'); await uploadAndExtract(f); } e.target.value = ''; }} />
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
