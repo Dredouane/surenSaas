@@ -14,6 +14,7 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
+  const capturing = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,14 +30,18 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
         setError('Impossible d\'accéder à la caméra');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
   const handleVideoReady = useCallback(() => setReady(true), []);
 
   const shoot = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || capturing.current) return;
+    capturing.current = true;
     video.pause();
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -50,16 +55,17 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
 
   const retake = useCallback(() => {
     setPreview(null);
+    capturing.current = false;
     videoRef.current?.play();
   }, []);
 
   const confirm = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || capturing.current) return;
+    capturing.current = true;
     canvas.toBlob((blob) => {
       if (blob) {
         const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        // Stop stream avant d'envoyer
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         onCapture(file);
@@ -67,20 +73,14 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
     }, 'image/jpeg', 0.92);
   }, [onCapture]);
 
-  useEffect(() => {
-    return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); };
-  }, []);
-
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       zIndex: 200, backgroundColor: '#000', display: 'flex', flexDirection: 'column',
     }}>
-      {/* Preview ou snapshot */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {preview ? (
-          <img src={preview} alt="Snapshot"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          <img src={preview} alt="Snapshot" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         ) : (
           <video ref={videoRef} onCanPlay={handleVideoReady}
             onLoadedMetadata={() => videoRef.current?.play()}
@@ -88,7 +88,6 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
             style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         )}
         <canvas ref={canvasRef} style={{ display: 'none' }} />
-
         {!ready && !error && !preview && (
           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#FFF', fontSize: 16 }}>
             Activation de la caméra...
@@ -96,7 +95,6 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Barre d'actions */}
       {error ? (
         <div style={{ padding: 20, textAlign: 'center' }}>
           <div style={{ color: '#EF4444', marginBottom: 12 }}>{error}</div>
