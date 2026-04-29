@@ -66,6 +66,7 @@ class Settings(BaseSettings):
 
     # TMA (Telegram Mini App)
     tma_host: str = ""
+    tma_extraction_model: str = "gemini-2.5-flash-lite"  # Modèle rapide pour les extractions TMA
 
     # Cloudflare R2 Configuration (S3-Compatible)
     # Mêmes credentials pour test et prod (isolation par folder)
@@ -132,6 +133,10 @@ class Settings(BaseSettings):
             ("tma_host", [
                 "TMA_HOST",
                 "tma_host",
+            ]),
+            ("tma_extraction_model", [
+                "TMA_EXTRACTION_MODEL",
+                "tma_extraction_model",
             ]),
             # Cloudflare R2 (SUREN_GED_CLOUDFLARE_* pour local, R2_* pour GCP)
             ("r2_endpoint_url", [

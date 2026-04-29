@@ -1011,14 +1011,25 @@ async def list_ressources(request: Request, org_id: str = Query(...), chantier_i
         check_user_org_access(request, org_id)
         chantier_uuid = resolve_chantier_uuid(org_id, chantier_id)
         logger.info(f"list_ressources: chantier_uuid={chantier_uuid}, chantier_id_original={chantier_id}")
-        from app.api.auth import get_supabase as get_sb
         sb = get_supabase()
+        # 1. Essayer de récupérer les ressources liées au chantier
         query = sb.table("chantier_ressources").select("*").eq("org_id", org_id).eq("chantier_id", chantier_uuid).order("nom", desc=False)
         if type_ressource:
             query = query.eq("type", type_ressource)
         result = query.execute()
-        logger.info(f"list_ressources: {len(result.data or [])} ressources trouvees")
-        return result.data or []
+        ressources = result.data or []
+
+        # 2. Fallback org-wide si aucune ressource pour ce chantier (comportement bot Telegram)
+        if not ressources:
+            logger.info("list_ressources: fallback org-wide")
+            q2 = sb.table("chantier_ressources").select("*").eq("org_id", org_id).order("nom", desc=False)
+            if type_ressource:
+                q2 = q2.eq("type", type_ressource)
+            r2 = q2.execute()
+            ressources = r2.data or []
+
+        logger.info(f"list_ressources: {len(ressources)} ressources trouvees")
+        return ressources
     except HTTPException:
         raise
     except Exception as e:

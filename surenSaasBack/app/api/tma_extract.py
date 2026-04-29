@@ -22,15 +22,15 @@ logger = logging.getLogger(__name__)
 
 WORKFLOW_MAP = {
     "avancement": {
-        "extract_fn": "extract_and_refine_avancement",
+        "extract_fn": "tma_extract_and_refine_avancement",
         "validate": AvancementSchema.validate,
     },
     "operation": {
-        "extract_fn": "extract_operation",
+        "extract_fn": "tma_extract_operation",
         "validate": OperationSchema.validate,
     },
     "depense": {
-        "extract_fn": "extract_depense",
+        "extract_fn": "tma_extract_depense",
         "validate": DepenseSchema.validate,
     },
 }

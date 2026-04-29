@@ -31,12 +31,12 @@ class WorkflowExtractor:
     en un seul appel Gemini.
     """
 
-    def __init__(self, gemini_client: Optional[GeminiClient] = None):
-        self._client = gemini_client or self._create_client()
+    def __init__(self, gemini_client: Optional[GeminiClient] = None, model: Optional[str] = None):
+        self._client = gemini_client or self._create_client(model)
         self._system_prompt = self._load_system_prompt()
         self._instructions = self._load_instructions()
 
-    def _create_client(self) -> GeminiClient:
+    def _create_client(self, model: Optional[str] = None) -> GeminiClient:
         credentials = (
             settings.gemini_api_key
             or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
@@ -44,7 +44,7 @@ class WorkflowExtractor:
         )
         return GeminiClient(
             credentials_b64=credentials or os.getenv("GEMINI_API_KEY"),
-            model=settings.gemini_model or "gemini-1.5-flash-001",
+            model=model or settings.gemini_model or "gemini-1.5-flash-001",
             temperature=0.1,
         )
 

@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.services.tma_auth_service import TmaAuthService, decode_start_param
 from app.services.database import supabase_client
 from app.api.tma_extract import extract_workflow
+from app.services.transcribe_service import transcribe_with_gemini
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/tma", tags=["tma"])
@@ -142,6 +143,39 @@ async def tma_extract(body: ExtractRequest, request: Request):
     """
     result = await extract_workflow(body.workflow, body.text)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Transcribe — transcription audio via Gemini (MediaRecorder API)
+# ---------------------------------------------------------------------------
+
+async def transcribe_audio(audio_data: bytes, mime_type: str = "audio/webm") -> dict:
+    """Transcrit un flux audio via Gemini. Fonction exportée pour les tests."""
+    try:
+        text = transcribe_with_gemini(audio_data, mime_type)
+        if text:
+            return {"is_valid": True, "text": text}
+        return {"is_valid": False, "error": "Échec de la transcription audio"}
+    except Exception as e:
+        logger.error(f"Erreur transcription: {e}")
+        return {"is_valid": False, "error": str(e)}
+
+
+@router.post("/transcribe")
+async def tma_transcribe(
+    request: Request,
+    audio: UploadFile = File(...),
+):
+    """
+    Transcrit un fichier audio (webm/ogg/wav) en texte via Gemini.
+    Utilisé par le VoiceRecorder de la TMA.
+    """
+    content = await audio.read()
+    if not content or len(content) < 100:
+        return {"is_valid": False, "error": "Fichier audio vide ou trop court"}
+
+    mime_type = audio.content_type or "audio/webm"
+    return await transcribe_audio(content, mime_type)
 
 
 # ---------------------------------------------------------------------------

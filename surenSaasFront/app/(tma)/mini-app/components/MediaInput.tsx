@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
+import { VoiceRecorder } from './VoiceRecorder';
 
 interface MediaInputProps {
   value: string;
@@ -13,8 +14,6 @@ interface MediaInputProps {
 export function MediaInput({ value, onChange, onExtract, placeholder, saving }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [recording, setRecording] = useState(false);
-  const recognitionRef = useRef<any>(null);
 
   const handlePhoto = useCallback(() => {
     photoInputRef.current?.click();
@@ -23,52 +22,6 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
   const handleFile = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
-
-  const handleVoice = useCallback(() => {
-    if (recording && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setRecording(false);
-      return;
-    }
-
-    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-    if (!SpeechRecognition) {
-      onChange((value ? value + ' ' : '') + '(dictée non disponible)');
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'fr-FR';
-      recognition.interimResults = false;
-      recognition.continuous = false;
-      recognitionRef.current = recognition;
-
-      setRecording(true);
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        onChange(transcript);
-        setTimeout(() => onExtract(), 100);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Reconnaissance vocale erreur:', event.error);
-        setRecording(false);
-        recognitionRef.current = null;
-      };
-
-      recognition.onend = () => {
-        setRecording(false);
-        recognitionRef.current = null;
-      };
-
-      recognition.start();
-    } catch (e) {
-      console.error('Erreur démarrage reconnaissance:', e);
-      setRecording(false);
-    }
-  }, [recording, onChange, onExtract, value]);
 
   return (
     <div>
@@ -89,22 +42,9 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
             }}
             onKeyDown={(e) => e.key === 'Enter' && onExtract()}
           />
-          <button
-            onClick={handleVoice}
-            title={recording ? 'Arrêter' : 'Dicter'}
-            style={{
-              padding: '12px',
-              backgroundColor: recording ? '#22C55E' : '#1E293B',
-              border: '1px solid #334155',
-              borderRadius: 10,
-              color: recording ? '#FFF' : '#94A3B8',
-              fontSize: 18,
-              cursor: 'pointer',
-              minWidth: 44,
-            }}
-          >
-            {recording ? '🔴' : '🎤'}
-          </button>
+          <VoiceRecorder
+            onTranscript={(text) => { onChange(text); setTimeout(() => onExtract(), 200); }}
+          />
         </div>
         <button
           onClick={onExtract}
@@ -126,19 +66,7 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving }: 
         </button>
       </div>
       <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#64748B' }}>
-        <button
-          onClick={handleVoice}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: recording ? '#22C55E' : '#64748B',
-            fontSize: 12,
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          🎤 {recording ? 'Enregistrement...' : 'Dictée vocale'}
-        </button>
+        <span>🎤 Appui long pour dicter</span>
         <button
           onClick={handlePhoto}
           style={{
