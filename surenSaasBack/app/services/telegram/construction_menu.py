@@ -7,11 +7,13 @@ from app.core.config import settings
 CallbackHandler = Callable[..., Awaitable[Dict[str, Any]]]
 
 # URL du frontend pour la TMA (bouton WebApp Telegram)
-# Priorité : TMA_HOST > FRONTEND_URL > fallback localhost
+# Priorité : TMA_HOST > FRONTEND_URL (env GCP) > URL GCP test par défaut > fallback localhost
 _FRONTEND_URL = os.getenv("FRONTEND_URL") or os.getenv("NEXT_PUBLIC_FRONTEND_URL") or ""
+_GCP_FRONTEND_URL = "https://test-surensaas-front-982795023541.europe-west1.run.app"
 TMA_BASE_URL = (
     f"https://{settings.tma_host}/mini-app" if settings.tma_host
     else f"{_FRONTEND_URL}/mini-app" if _FRONTEND_URL
+    else f"{_GCP_FRONTEND_URL}/mini-app" if settings.environment == "test"
     else "http://localhost:3000/mini-app"
 )
 
