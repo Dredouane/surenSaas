@@ -69,6 +69,7 @@ export default function ExpensesPage() {
             value={textInput}
             onChange={setTextInput}
             onExtract={handleExtract}
+            onFileExtracted={async (t) => { setTextInput(t); setSaving(true); setExtracted(null); const r = await tmaExtract(t, 'depense'); if (r?.data) setExtracted(r.data); setSaving(false); }}
             placeholder="Décris la dépense..."
             saving={saving}
           />

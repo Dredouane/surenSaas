@@ -76,6 +76,7 @@ export default function OperationsPage() {
             value={textInput}
             onChange={setTextInput}
             onExtract={handleExtract}
+            onFileExtracted={async (t) => { setTextInput(t); setSaving(true); setExtracted(null); const r = await tmaExtract(t, 'operation'); if (r?.data) setExtracted(r.data); setSaving(false); }}
             placeholder="Décris l'opération..."
             saving={saving}
           />

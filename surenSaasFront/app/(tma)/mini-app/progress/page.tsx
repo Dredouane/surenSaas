@@ -75,6 +75,7 @@ export default function SituationsPage() {
             value={textInput}
             onChange={setTextInput}
             onExtract={handleExtract}
+            onFileExtracted={async (t) => { setTextInput(t); setSaving(true); setExtracted(null); const r = await tmaExtract(t, 'avancement'); if (r?.data) setExtracted(r.data); setSaving(false); }}
             placeholder="Décris l'avancement..."
             saving={saving}
           />

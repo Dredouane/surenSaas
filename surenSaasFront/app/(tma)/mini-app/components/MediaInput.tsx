@@ -8,12 +8,13 @@ interface MediaInputProps {
   value: string;
   onChange: (value: string) => void;
   onExtract: () => void;
+  onFileExtracted?: (text: string) => void;
   placeholder?: string;
   saving?: boolean;
   mediaLabel?: string;
 }
 
-export function MediaInput({ value, onChange, onExtract, placeholder, saving, mediaLabel }: MediaInputProps) {
+export function MediaInput({ value, onChange, onExtract, onFileExtracted, placeholder, saving, mediaLabel }: MediaInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -39,16 +40,20 @@ export function MediaInput({ value, onChange, onExtract, placeholder, saving, me
         const data = await res.json();
         if (data.text) {
           onChange(data.text);
-          extractGuardRef.current = true;
+          if (onFileExtracted) {
+            setTimeout(() => onFileExtracted(data.text), 200);
+          } else {
+            setTimeout(() => onExtract(), 400);
+          }
           return;
         }
       }
-      onChange(`[${file.type.startsWith('image/') ? 'Photo' : 'Fichier'}: ${file.name}]`);
-      extractGuardRef.current = true;
+      const label = file.type.startsWith('image/') ? 'Photo' : 'Fichier';
+      onChange(`[${label}: ${file.name}]`);
     } catch {
       onChange(`[Erreur: ${file.name}]`);
     }
-  }, [onChange]);
+  }, [onChange, onExtract]);
 
   const handleVoiceResult = useCallback((text: string) => {
     extractGuardRef.current = true;
