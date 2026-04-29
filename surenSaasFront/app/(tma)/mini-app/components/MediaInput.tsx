@@ -16,7 +16,6 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const processInput = useCallback(async (formData: FormData) => {
     setSaving(true);
@@ -88,11 +87,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={() => photoInputRef.current?.click()}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
-          📸 Galerie
-        </button>
-        <button onClick={() => cameraInputRef.current?.click()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
-          📷 Appareil photo
+          📸 Photo
         </button>
         <button onClick={() => fileInputRef.current?.click()}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#94A3B8', fontSize: 13, cursor: 'pointer' }}>
@@ -100,9 +95,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
         </button>
       </div>
 
-      <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-        onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+      <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
       <input ref={fileInputRef} type="file" accept=".pdf,image/*" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
