@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { VoiceRecorder } from './VoiceRecorder';
 import { tmaFetch } from './tmaFetch';
 
@@ -49,21 +49,7 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
     await processInput(fd);
   }, [textInput, workflow, processInput]);
 
-  const handlePhotoClick = useCallback(() => {
-    // Forcer la permission caméra via un scan popup flash, puis ouvrir l'input
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      if (tg?.showScanQrPopup) {
-        tg.showScanQrPopup({ text: 'Chargement de l\'appareil photo...' });
-        setTimeout(() => {
-          try { tg.closeScanQrPopup?.(); } catch {}
-          photoInputRef.current?.click();
-        }, 100);
-        return;
-      }
-    } catch {}
-    photoInputRef.current?.click();
-  }, []);
+  const [cameraBlocked, setCameraBlocked] = useState(false);
 
   const handleFileProcess = useCallback(async (file: File) => {
     const fd = new FormData();
@@ -71,6 +57,36 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
     fd.append('workflow', workflow);
     await processInput(fd);
   }, [workflow, processInput]);
+
+  const tryCameraPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      stream.getTracks().forEach((t) => t.stop());
+      return true;
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        setCameraBlocked(true);
+      }
+      return false;
+    }
+  }, []);
+
+  const handlePhotoClick = useCallback(async () => {
+    const hasCam = await tryCameraPermission();
+    if (hasCam) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.capture = 'environment' as any;
+      input.onchange = async (e: any) => {
+        const f = e.target?.files?.[0];
+        if (f) await handleFileProcess(f);
+      };
+      input.click();
+      return;
+    }
+    photoInputRef.current?.click();
+  }, [tryCameraPermission, handleFileProcess]);
 
   return (
     <div>
@@ -110,7 +126,20 @@ export function MediaInput({ workflow, onResult, onError, placeholder }: MediaIn
           📄 Joindre un PDF
         </button>
       </div>
-      <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>Choisissez « Appareil photo » ou « Galerie »</div>
+      {cameraBlocked && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <span style={{ fontSize: 11, color: '#EF4444' }}>Appareil photo bloqué</span>
+          <a href="https://t.me/settings" target="_blank" rel="noopener noreferrer"
+            style={{ fontSize: 11, color: '#FF6B35', textDecoration: 'underline' }}>
+            Ouvrir les réglages Telegram
+          </a>
+        </div>
+      )}
+      {!cameraBlocked && (
+        <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
+          Choisissez « Appareil photo » ou « Galerie » dans le sélecteur
+        </div>
+      )}
 
       <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
         onChange={async (e) => { const f = e.target?.files?.[0]; if (f) { await handleFileProcess(f); } e.target.value = ''; }} />
