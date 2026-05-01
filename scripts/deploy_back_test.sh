@@ -51,9 +51,11 @@ if [ ! -z "$SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN" ]; then
 fi
 
 # Gemini est optionnel (désactivé temporairement)
-# Utilise SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 depuis .bashrc (partagé test/prod)
+# Utilise SUREN_GEMINI_API_KEY ou SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 depuis .bashrc
 HAS_GEMINI=false
-if [ ! -z "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64" ]; then
+if [ ! -z "$SUREN_GEMINI_API_KEY" ]; then
+    HAS_GEMINI=true
+elif [ ! -z "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64" ]; then
     HAS_GEMINI=true
 fi
 
@@ -92,9 +94,9 @@ else
     echo -e "${YELLOW}⚠️  SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN non défini (Bot Telegram désactivé)${NC}"
 fi
 if [ "$HAS_GEMINI" = true ]; then
-    echo -e "${GREEN}✅ SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 trouvé (Gemini activé)${NC}"
+    echo -e "${GREEN}✅ Clé Gemini trouvée (Gemini activé)${NC}"
 else
-    echo -e "${YELLOW}⚠️  SUREN_GOOGLE_GEMINI_CREDENTIALS_B64 non défini (Gemini désactivé)${NC}"
+    echo -e "${YELLOW}⚠️  Clé Gemini non définie (Gemini désactivé)${NC}"
 fi
 if [ "$HAS_GMAIL" = true ]; then
     echo -e "${GREEN}✅ SUREN_GMAIL_OAUTH_* trouvé (Module Emails activé)${NC}"
@@ -171,7 +173,9 @@ fi
 
 # Gemini (optionnel)
 if [ "$HAS_GEMINI" = true ]; then
-    create_or_update_secret "test-google-gemini-credentials" "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64"
+    # Priorité à SUREN_GEMINI_API_KEY, fallback SUREN_GOOGLE_GEMINI_CREDENTIALS_B64
+    GEMINI_VALUE="${SUREN_GEMINI_API_KEY:-$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64}"
+    create_or_update_secret "test-google-gemini-api-key" "$GEMINI_VALUE"
 fi
 
 # Gmail OAuth2 (optionnel, mais recommandé)
@@ -238,7 +242,7 @@ if [ "$HAS_TELEGRAM" = true ]; then
     SECRETS="$SECRETS,SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN=test-telegram-bot-token:latest,SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME=test-telegram-bot-username:latest"
 fi
 if [ "$HAS_GEMINI" = true ]; then
-    SECRETS="$SECRETS,TEST_GOOGLE_GEMINI_CREDENTIALS_B64=test-google-gemini-credentials:latest"
+    SECRETS="$SECRETS,GOOGLE_API_KEY=test-google-gemini-api-key:latest"
 fi
 if [ "$HAS_GMAIL" = true ]; then
     SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"

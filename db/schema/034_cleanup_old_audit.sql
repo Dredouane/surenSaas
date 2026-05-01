@@ -13,3 +13,11 @@ DROP TYPE IF EXISTS telegram_interaction_status CASCADE;
 DROP FUNCTION IF EXISTS cleanup_old_telegram_audit(INTEGER) CASCADE;
 DROP FUNCTION IF EXISTS log_chantier_audit() CASCADE;
 DROP FUNCTION IF EXISTS log_invoice_status_change() CASCADE;
+
+
+
+DROP TRIGGER IF EXISTS audit_chantier_situations ON chantier_situations;
+DROP TRIGGER IF EXISTS audit_chantier_depenses ON chantier_depenses;
+DROP TRIGGER IF EXISTS audit_chantier_operations ON chantier_operations_htl;
+DROP TRIGGER IF EXISTS audit_chantiers ON chantiers;
+DROP FUNCTION IF EXISTS trigger_chantier_audit CASCADE;

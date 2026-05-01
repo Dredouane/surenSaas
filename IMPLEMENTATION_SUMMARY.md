@@ -355,6 +355,46 @@ Suite au feedback client, extension du système avec 3 nouvelles fonctionnalité
 
 ---
 
-**État extension**: ✅ **PHASE 1 COMPLÉTÉE** - Foundation prête pour développement frontend
+## 🤖 **NOUVELLE ÈRE : Architecture Agentique & Orchestration LangGraph**
 
-La Phase 1 (Foundation) est complète avec tous les types, données et documentation nécessaires. Le système est prêt pour le développement des composants frontend dans la Phase 2.
+### **📋 Objectif**
+Migration du backend vers un mode "Full Agentic" utilisant LangGraph pour gérer les cycles de décision et Supabase pour la persistance d'état.
+
+### **✅ Phase 1: Infrastructure & Persistance (COMPLÉTÉE)**
+- ✅ **Schéma `agents`**: Création du schéma dédié dans Supabase pour isoler les tables techniques de LangGraph.
+- ✅ **PostgresSaver**: Implémentation du checkpointer asynchrone utilisant le pool de connexion Supabase.
+- ✅ **Thread Persistence**: Support du `thread_id` (Telegram User ID) pour maintenir le contexte entre le Bot et la TMA.
+- ✅ **Audit Trail Agents**: Table `logs_agents` pour tracer chaque transition de nœud, prompt et latence.
+
+### **✅ Phase 2: Nœud Audio Expert (COMPLÉTÉE)**
+- ✅ **Transcription Whisper via OpenRouter**: Transcription ultra-rapide des messages vocaux Telegram.
+- ✅ **Normalisation métier**: Correction intelligente (Gemini Flash) du jargon BTP et des noms de chantiers.
+- ✅ **Détection d'urgence**: Flag `is_urgent` détecté dès l'entrée audio.
+
+### **✅ Phase 3: Nœud Vision Expert (COMPLÉTÉE)**
+- ✅ **Expert OCR (Gemini 2.0 Flash)**: Extraction de données structurées depuis des photos de tickets/factures (fournisseur, montant, date).
+- ✅ **Classification Multimodale**: Distinction entre documents financiers (workflow dépenses) et photos de chantier (workflow progrès).
+- ✅ **Normalisation de Date**: Forçage du format `YYYY-MM-DD` même pour les dates relatives ("hier").
+
+### **🔄 Phase 4: Cerveau Métier & Orchestration Finale (EN COURS)**
+- 🔄 **Tool Refactoring**: Enrobage de 100% des services CRUD (Pointages, Avancement, Tâches, Réunions) avec retours standardisés.
+- 🔄 **Double Réflexion**: Implémentation de `Pre-Reflector` (cohérence) et `Final Reflector` (réalité DB) pour zéro hallucination.
+- 🔄 **Système HITL Systématique**: Interruption du graphe pour confirmation utilisateur sur chaque action d'écriture.
+- 🔄 **Memory Management**: Fenêtre glissante de 10 messages + Résumé persistant dans le State.
+- 🔄 **Ton "Collègue de Chantier"**: Personnalisation du Bot pour un usage direct et efficace sur le terrain (emojis métier).
+
+### **📊 Architecture Technique Agents**
+
+- **Orchestrateur**: LangGraph
+- **Mémoire**: Fenêtre glissante (10 messages) + Summarization
+- **LLM Principal**: Gemini 2.0 Flash Lite
+- **Audio**: Whisper Large V3 (OpenRouter)
+- **Vision**: Gemini 2.0 Flash (Multimodal)
+- **Persistance**: Supabase (PostgreSQL)
+
+---
+
+## 🚀 Prochaines étapes
+1. Finaliser le `VisionExpertService` et son test TDD.
+2. Intégrer le nœud vision dans le graphe LangGraph.
+3. Implémenter le Nœud de Réflexion final.

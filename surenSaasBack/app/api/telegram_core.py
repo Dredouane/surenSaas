@@ -57,6 +57,21 @@ async def handle_telegram_webhook(
         bot_slug = _extract_bot_slug_from_username(bot_username)
         logger.info(f"🤖 Bot identifié: {bot_username} → slug: '{bot_slug}'")
         
+        # --- NOUVEAU FLUX AGENTIQUE POUR LE BOT CONSTRUCTION ---
+        if bot_slug == 'construction':
+            logger.info(f"🚀 Entrée dans le flux agentique pour {bot_slug}")
+            from app.services.telegram.factory import get_webhook_handler
+            bot_token = get_bot_token(bot_config)
+            handler = get_webhook_handler(bot_token)
+            res = await handler.handle_update(bot_config.get('id'), body, bot_token=bot_token, org_id=org_id)
+            logger.info(f"✅ Résultat du flux agentique: {res}")
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                content={"status": "agentic_success", "result": res},
+                headers={"X-Agentic": "true"}
+            )
+        # -------------------------------------------------------
+
         callback_query = body.get('callback_query')
         if callback_query:
             return await _dispatch_callback(callback_query, bot_config, supabase, org_id, bot_slug)

@@ -22,12 +22,6 @@ echo ""
 
 echo "📋 Chargement de la configuration TEST..."
 
-# Charger le fichier .env.test
-if [ ! -f .env.test ]; then
-    echo "❌ Fichier .env.test non trouvé!"
-    exit 1
-fi
-
 # Fonction pour évaluer les variables
 eval_env() {
     local content
@@ -65,6 +59,22 @@ echo "✅ Variables chargées depuis .env.test et ~/.bashrc"
 
 cd surenSaasBack
 
+# Activer le venv et installer les dépendances si elles ne sont pas déjà présentes
+source venv/bin/activate
+
+# Use the pip from the activated venv to install necessary packages
+# Check if langgraph_checkpoint_postgres is installed, if not, install it
+if ! $VIRTUAL_ENV/bin/pip show langgraph-checkpoint-postgres > /dev/null 2>&1; then
+    echo "Installing langgraph-checkpoint-postgres..."
+    $VIRTUAL_ENV/bin/pip install langgraph-checkpoint-postgres>=3.0.5
+fi
+
+# Check if psycopg is installed, if not, install it
+if ! $VIRTUAL_ENV/bin/pip show psycopg > /dev/null 2>&1; then
+    echo "Installing psycopg..."
+    $VIRTUAL_ENV/bin/pip install psycopg[binary,pool]>=3.1.0
+fi
+
 # Exporter les variables d'environnement pour que config.py les lise
 export ENVIRONMENT=test
 export SUPABASE_URL=${SUPABASE_URL}
@@ -84,8 +94,15 @@ export VERTEX_AI_PROJECT_ID=${VERTEX_AI_PROJECT_ID:-${GCP_PROJECT_ID}}
 export VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-${GCP_REGION}}
 
 # Gemini API Key (nécessaire pour les nouveaux agents)
-export TEST_GOOGLE_GEMINI_CREDENTIALS_B64=${TEST_GOOGLE_GEMINI_CREDENTIALS_B64:-}
-export GOOGLE_GEMINI_CREDENTIALS_B64=${TEST_GOOGLE_GEMINI_CREDENTIALS_B64}
+# Utilise SUREN_GEMINI_API_KEY du .bashrc
+if [ -z "$SUREN_GEMINI_API_KEY" ]; then
+    SUREN_GEMINI_API_KEY=$(grep -oP 'export SUREN_GEMINI_API_KEY="\K[^"]+' ~/.bashrc 2>/dev/null)
+fi
+if [ -z "$SUREN_GEMINI_API_KEY" ]; then
+    echo "⚠️  SUREN_GEMINI_API_KEY non trouvée! Vérifie ton ~/.bashrc"
+fi
+export GOOGLE_API_KEY="${SUREN_GEMINI_API_KEY}"
+echo "  Gemini API Key: $([ -n "$GOOGLE_API_KEY" ] && echo '✅ définie' || echo '❌ MANQUANTE')"
 
 # Variables Telegram
 export TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN:-}
@@ -97,8 +114,6 @@ export TELEGRAM_CONSTRUCTION_BOT_USERNAME=${TEST_TELEGRAM_CONSTRUCTION_BOT_USERN
 
 echo "✅ Variables d'environnement exportées"
 
-# Activer le venv
-source venv/bin/activate
 
 echo ""
 echo "=========================================="
@@ -109,8 +124,9 @@ echo "Configuration:"
 echo "  Supabase URL: ${SUPABASE_URL:0:40}..."
 echo "  Service Key: $([ -n "$TEST_SUPABASE_SERVICE_KEY" ] && echo '✅ défini' || echo '❌ MANQUANT')"
 echo "  JWT Secret: $([ -n "$TEST_JWT_SECRET" ] && echo '✅ défini (depuis ~/.bashrc)' || echo '⚠️  Valeur par défaut (non sécurisé)')"
-echo "  Cloudflare R2: $([ -n "$SUREN_GED_CLOUDFLARE_TOKEN" ] && echo '✅ configuré' || echo '❌ MANQUANT - stockage fichiers désactivé')
-  R2 Bucket: ${SUREN_GED_CLOUDFLARE_BUCKET_NAME:-❌ NON DÉFINI}"
+echo "  Cloudflare R2: $([ -n "$SUREN_GED_CLOUDFLARE_TOKEN" ] && echo '✅ configuré' || echo '❌ NON DÉFINI - stockage fichiers désactivé')"
+R2_BUCKET_INFO="R2 Bucket: ${SUREN_GED_CLOUDFLARE_BUCKET_NAME:-'❌ NON DÉFINI'}"
+echo "  ${R2_BUCKET_INFO}"
 echo ""
 echo "URL: http://localhost:8080"
 echo ""

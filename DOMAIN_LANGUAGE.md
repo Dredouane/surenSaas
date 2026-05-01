@@ -124,6 +124,80 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | Tests Pipeline | `tests/test_transcribe_pipeline.py` | — |
 | Tests API | `tests/test_tma_transcribe_and_structure_api.py` | — |
 
+## Termes du Domaine — Extension Agents LangGraph
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **Graphe Orchestrateur** | Instance LangGraph pilotant le cycle : Classification -> Décision -> Tool -> Réflexion -> Output | Architecture > Agents | Centralise toute la logique de décision du bot et de la TMA |
+| **Thread ID** | ID unique (Telegram User ID) partagé Bot/TMA, clé de persistance dans le schéma `agents` | Architecture > Agents | Assure la continuité du contexte entre le Bot et la TMA |
+| **Busy State** | État de verrouillage d'un thread pendant qu'un agent traite une demande | Architecture > Agents | Empêche les collisions de state |
+| **Audio Expert** | Nœud spécialisé dans la transcription Whisper (OpenRouter) et la normalisation métier (Vertex AI Gemini) | Architecture > Agents | Transforme le binaire `.ogg` en texte structuré |
+| **Vision Expert** | Nœud spécialisé dans l'OCR de documents financiers et la classification de photos de chantier | Architecture > Agents | Distingue ticket/facture (workflow dépense) de photo métier (workflow progrès) |
+| **Pre-Reflector** | Nœud de contrôle avant l'appel d'un outil pour vérifier la cohérence des arguments | Architecture > Agents | Valide que le `chantier_id` existe et que les montants sont réalistes |
+| **Final Reflector** | Nœud de contrôle après l'appel d'un outil pour analyser le résultat réel de la base de données | Architecture > Agents | Gère les erreurs métier et les transforme en explications polies |
+| **Output Formatter** | Nœud final préparant le message Telegram avec le ton "Collègue de chantier" et les boutons d'action | Architecture > Agents |
+| **Memory Trim** | Stratégie de fenêtre glissante conservant les 10 derniers messages | Architecture > Agents | Évite la saturation du contexte |
+| **State Summary** | Résumé persistant de la conversation stocké dans le State du graphe | Architecture > Agents | Mémoire long terme |
+
+## Mapping Workflows Métier ↔ Tools
+
+| Workflow | Tool | Service | Table DB |
+|----------|------|---------|----------|
+| **Dépenses** | `create_depense` | `tools.py:101` | `chantier_depenses` |
+| **Opérations HITL** | `create_operation` | `tools.py:129` | `chantier_operations_htl` |
+| **Pointages** | `manage_attendance` | `tools.py:159` | `chantier_pointages`, `chantier_pointage_ressources` |
+| **Avancements** | `report_progress` | `tools.py:192` | `chantier_situation_lignes` |
+| **Tâches** | `manage_tasks` | `tools.py:222` | `chantier_taches` |
+| **Liste chantiers** | `get_user_chantiers` | `tools.py:75` | `chantiers` |
+| **Détail chantier** | `get_chantier_details` | `tools.py:89` | `chantiers` |
+
+## Termes du Domaine — Extension Interface Intelligente
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **ActionType** | Énumération des actions d'interface : `DISPLAY_TEXT`, `DISPLAY_MENU`, `INIT_FORM`, `CONFIRM_ACTION` | Architecture > Interface > ActionRegistry | Toujours utiliser l'enum, pas de string libre |
+| **format_response** | Tool LLM qui structure la réponse en texte + action + payload JSON | Architecture > Interface > Output Parser | Schéma validé par Pydantic `FormatResponseSchema` |
+| **ParsedResponse** | Structure de sortie : texte + action + payload prêts pour Telegram | Architecture > Interface > ActionRegistry | Produit par `ActionRegistry.parse_response()` |
+| **PendingForm** | État d'un formulaire multi-étapes en cours, stocké dans `AgentState.pending_form` | Architecture > Interface > FormEngine | Survit au redémarrage via LangGraph Checkpointer |
+| **FormStep** | Une étape d'un formulaire : nom, label, type (text/number/select/date), options | Architecture > Interface > FormEngine | Le type `select` nécessite une liste d'options |
+| **FormEngine** | Moteur qui avance étape par étape dans un formulaire et collecte les données | Architecture > Interface > FormEngine | Utilise `advance(step_name, value)` pour progresser |
+| **MenuContext** | Contexte pour la génération de menu : chantier_id, user_role, pending_form | Architecture > Interface > MenuManager | Le rôle `gerant` voit plus d'actions que `conducteur` |
+| **MenuManager** | Générateur de menus contextuels dynamiques adaptés au rôle et au chantier | Architecture > Interface > MenuManager | Produit des claviers inline Telegram |
+| **Callback Router** | Routage des callbacks Telegram vers les handlers du graphe LangGraph | Architecture > Interface > Stateful Router | Format : `act:<action_name>:<step>` (limité à 64 octets) |
+| **Output Formatter** | Nœud LangGraph qui parse la réponse LLM et met à jour `pending_form` et `last_action_status` | Architecture > Interface > Graph | S'exécute après `agent` et avant l'envoi à Telegram |
+
+## Nouveaux Fichiers — Interface Intelligente
+
+| Fichier | Rôle |
+|---------|------|
+| `app/services/agents/actions.py` | ActionRegistry, FormatResponseSchema, ActionType enum, tool `format_response` |
+| `app/services/agents/form_engine.py` | PendingForm, FormStep, FormEngine (gestion multi-étapes) |
+| `app/services/agents/menu_manager.py` | MenuContext, MenuManager (menus dynamiques par rôle/chantier) |
+| `tests/test_action_parser.py` | Tests Output Parser (3 tests) |
+| `tests/test_form_engine.py` | Tests Form Engine (7 tests) |
+| `tests/test_callback_router.py` | Tests Callback Router (2 tests) |
+| `tests/test_menu_manager.py` | Tests Menu Manager (4 tests) |
+| `tests/test_system_prompt.py` | Tests system prompt format_response (2 tests) |
+
+## Termes du Domaine — Extension UI Telegram
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **InlineKeyboard** | Boutons attachés à un message Telegram, envoyés via `reply_markup` | Interface > Telegram | Généré par `ActionRegistry.build_keyboard()` ou `MenuManager.get_inline_keyboard()` |
+| **ForceReply** | Mécanisme Telegram qui force l'utilisateur à répondre à un message précis | Interface > FormEngine | Utilisé pour les champs texte/number dans un formulaire multi-étapes |
+| **ReplyKeyboard** | Menu persistant remplaçant le clavier utilisateur en bas de l'écran Telegram | Interface > MenuManager | Pas encore implémenté (P3) |
+| **answerCallbackQuery** | Notification flash en haut de l'écran Telegram accusant réception d'un clic | Interface > WebhookHandler | Évite le "spinner" infini sur les boutons inline |
+| **ForceReply Trigger** | Moment où le webhook_handler détecte un besoin de saisie et verrouille la réponse | Interface > WebhookHandler | Déclenché par `INIT_FORM` avec champ de type `text` ou `number` |
+| **Callback Ack** | Signal envoyé à Telegram pour dire "J'ai bien reçu ton clic" | Interface > WebhookHandler | Appelé dans `_process_graph_callback()` via `answer_callback_query` |
+
+## Règles Strictes — Interface LLM
+
+1. **Le LLM DOIT utiliser le tool `format_response`** pour toute action d'interface (menu, formulaire, confirmation). Pas de listes Markdown à la place.
+2. **`format_response` est bindé** au LLM dans `call_model_node` via `bind_tools([..., format_response])`.
+3. **`format_response` est dans le ToolNode** du graphe pour exécution.
+4. **Fallback automatique** : si le LLM ne produit pas de `format_response`, le système affiche un `DISPLAY_TEXT` par défaut.
+5. **`parsed.text`** ne doit jamais être `None` : utiliser `_extract_text(msg.content)` qui gère les contenus multimodaux (liste de dicts).
+
 ## Mapping Termes TMA ↔ Fichiers
 
 | Terme | Backend | Frontend | Bot | DB |
@@ -133,3 +207,17 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | Guardrails IA | `app/services/ai/validators.py` (Zod schemas) | — | `extractor.py` (intégré avant affichage) | `logs_agents.guardrail_issues` |
 | Audit Agent | `app/services/logs_agent_service.py` | — | — | `logs_agents` (enrichi : origin_context, target_entity, device_info) |
 | CorrelationID | `main.py` (middleware log_requests renforcé) | `providers.tsx` (génération + header) | — | `logs_agents.correlation_id` |
+| **Graphe Orchestrateur** | Instance LangGraph pilotant le cycle : Classification -> Décision -> Tool -> Réflexion -> Output | Architecture > Agents | Centralise toute la logique de décision du bot et de la TMA |
+| **Thread ID** | ID unique (Telegram User ID) partagé Bot/TMA, clé de persistance dans le schéma `agents` | Architecture > Agents | Assure la continuité du contexte entre le Bot et la TMA |
+| **Busy State** | État de verrouillage d'un thread pendant qu'un agent traite une demande | Architecture > Agents | Empêche les collisions de state ; renvoie un message "un instant... ⏳" à l'utilisateur |
+| **Audio Expert** | Nœud spécialisé dans la transcription Whisper (OpenRouter) et la normalisation métier (Gemini Flash) | Architecture > Agents | Transforme le binaire `.ogg` en texte corrigé avec détection d'urgence |
+| **Vision Expert** | Nœud spécialisé dans l'OCR de documents financiers et la classification de photos de chantier | Architecture > Agents | Distingue un ticket/facture (workflow compta) d'une photo métier (workflow progrès) |
+| **ExtractedExpense** | Structure de données normalisée pour les dépenses extraites par l'Expert Vision | Architecture > Agents | Schéma : `{fournisseur, montant_ttc, tva, date, is_document, description}` |
+| **Normalisation métier** | Processus utilisant Gemini Flash pour corriger les homophones et termes techniques selon le contexte des chantiers | Architecture > Agents | "Thenar" -> "Thénard". Injecte la liste des chantiers réels dans le prompt |
+| **Nœud de Réflexion** | Garde-fou post-outil validant le résultat (anti-hallucination, gestion de liste vide) | Architecture > Agents | Si un Tool renvoie `[]`, l'agent propose les options réelles au lieu d'inventer |
+| **HITL (Human-In-The-Loop)** | Point d'interruption du graphe attendant une confirmation utilisateur via InlineButton | Architecture > Agents | Permet de valider des actions critiques (paiement, suppression) avant exécution |
+| **Pre-Reflector** | Nœud de contrôle avant l'appel d'un outil pour vérifier la cohérence des arguments et éviter les hallucinations | Architecture > Agents | Valide que le `chantier_id` existe et que les montants sont réalistes |
+| **Final Reflector** | Nœud de contrôle après l'appel d'un outil pour analyser le résultat réel de la base de données | Architecture > Agents | Gère les erreurs métier (ex: chantier clôturé) et les transforme en explications polies |
+| **Output Formatter** | Nœud final préparant le message Telegram avec le ton "Collègue de chantier" et les boutons d'action | Architecture > Agents | Utilise des emojis métier et structure les boutons de confirmation HITL |
+| **Memory Trim** | Stratégie de fenêtre glissante conservant les 10 derniers messages pour optimiser le contexte LLM | Architecture > Agents | Évite la saturation du contexte tout en préservant le fil de la conversation |
+| **State Summary** | Résumé persistant de la conversation stocké dans le State du graphe pour la mémoire long terme | Architecture > Agents | Permet à l'agent de se souvenir du contexte global (ex: chantier actif) au-delà de 10 messages |

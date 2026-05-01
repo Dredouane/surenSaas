@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         ]
         # (J'ajoute juste le champ au settings et je le mappe)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"  # Modèle recommandé pour nouveaux projets
+    gemini_model: str = "gemini-2.5-flash"  # Modèle recommandé pour Vertex AI
     gemini_location: str = "europe-west1"  # Région Vertex AI
     gcp_project_id: str = ""  # Projet GCP pour Vertex AI
     
@@ -120,6 +120,7 @@ class Settings(BaseSettings):
             ("gemini_api_key", [
                 f"{env}_google_gemini_credentials_b64",
                 "google_gemini_credentials_b64",
+                "GOOGLE_API_KEY",
             ]),
             ("gcp_project_id", [
                 f"{env}_gcp_project_id",
@@ -181,7 +182,7 @@ class Settings(BaseSettings):
             # Chercher dans l'ordre des priorités
             for env_var_name in env_var_names:
                 env_value = os.getenv(env_var_name.upper())
-                if env_value:
+                if env_value and env_value.strip():
                     value = env_value
                     used_var = env_var_name.upper()
                     break
