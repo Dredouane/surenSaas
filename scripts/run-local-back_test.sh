@@ -4,7 +4,8 @@
 
 set -e
 
-cd /home/redouane/dev/AI-ERA/surenSaas
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+cd "$SCRIPT_DIR"
 
 echo "=========================================="
 echo "🧹 Nettoyage des processus existants..."
@@ -13,9 +14,17 @@ echo "=========================================="
 # Tuer uvicorn sur le port 8080
 if lsof -ti:8080 > /dev/null 2>&1; then
     echo "  → Arrêt du backend sur port 8080..."
-    lsof -ti:8080 | xargs kill -9 2>/dev/null || true
-    sleep 1
+    lsof -ti:8080 | xargs kill 2>/dev/null || true
+    sleep 2
 fi
+
+# Nettoyage des processus uvicorn orphelins (reload workers)
+for pid in $(pgrep -f "uvicorn app.main:app" 2>/dev/null); do
+    kill "$pid" 2>/dev/null || true
+done
+sleep 1
+
+echo "✅ Port 8080 libre — backend prêt à démarrer"
 
 echo "✅ Ports nettoyés"
 echo ""
@@ -111,6 +120,9 @@ export TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN="REDACTED_BOT_TOKEN"
 # Ajout explicite du mapping pour le username
 export TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_USERNAME:-}
 export TELEGRAM_CONSTRUCTION_BOT_USERNAME=${TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME}
+
+# Point vers tg-mock en local
+export TELEGRAM_API_URL="http://localhost:8081"
 
 echo "✅ Variables d'environnement exportées"
 

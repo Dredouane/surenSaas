@@ -2,7 +2,8 @@
 # Lancer le frontend TEST en local avec backend LOCAL (localhost:8080)
 # Tue les processus existants et crée .env.local dynamiquement
 
-cd /home/redouane/dev/AI-ERA/surenSaas
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+cd "$SCRIPT_DIR"
 
 echo "=========================================="
 echo "🧹 Nettoyage des processus existants..."

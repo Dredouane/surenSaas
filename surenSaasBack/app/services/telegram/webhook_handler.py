@@ -205,7 +205,10 @@ class WebhookHandlerService:
                              f"last_action_status={final_state_values.get('last_action_status')}, "
                              f"pending_form={final_state_values.get('pending_form') is not None}")
             await self.tg_interface.send_message(user_id, text_to_send, reply_markup=reply_markup)
-        return {"status": "ok"}
+        # Inclure le texte de la réponse dans le return pour les tests E2E
+        reply_text = text_to_send if all_messages else None
+        reply_action = str(parsed.action) if all_messages and parsed else None
+        return {"status": "ok", "reply_text": reply_text, "reply_action": reply_action}
 
     async def _process_graph_callback(self, graph, config, callback_query, correlation_id):
         user_id = callback_query['from']['id']

@@ -15,11 +15,8 @@ services:
   tg-mock:
     image: ghcr.io/watzon/tg-mock:latest
     container_name: tg-mock
-    ports:
-      - "8081:8081"
+    network_mode: "host"
     environment:
       - TG_MOCK_PORT=8081
     command: ["-port", "8081", "-verbose"]
-    # Note: Pas de healthcheck Docker car l'image tg-mock est un binaire Go statique
-    # sans curl/sh. La santé est vérifiable via curl externe sur /health.
     restart: unless-stopped

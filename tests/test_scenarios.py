@@ -15,6 +15,7 @@ the backend is not reachable.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
-BACKEND_HEALTH_URL = "http://localhost:8000/health"
+BACKEND_HEALTH_URL = os.getenv("BACKEND_HEALTH_URL", "http://localhost:8080/health")
 HEALTH_CHECK_TIMEOUT = 5.0
 
 
@@ -169,22 +170,24 @@ def test_scenario(scenario: Scenario, tg_mock_client) -> None:
     caption = extra.get("caption")
 
     if media_type == "text":
-        tg_mock_client.send_text(content)
+        result = tg_mock_client.send_text(content)
     elif media_type == "voice":
-        tg_mock_client.send_voice(content)
+        result = tg_mock_client.send_voice(content)
     elif media_type == "photo":
-        tg_mock_client.send_photo(content, caption=caption)
+        result = tg_mock_client.send_photo(content, caption=caption)
     elif media_type == "document":
-        tg_mock_client.send_document(content, caption=caption)
+        result = tg_mock_client.send_document(content, caption=caption)
     else:
         raise ValueError(f"Unsupported media type: {media_type}")
 
-    # ── Wait for bot reply ────────────────────────────────────────────
-    replies = tg_mock_client.get_replies(expected_count=1, timeout=30.0)
+    # ── Get bot reply from webhook response ───────────────────────────
+    bot_reply_text = result.get("reply_text") if isinstance(result, dict) else None
 
-    assert replies, "No replies received from bot"
+    if not bot_reply_text:
+        raise AssertionError(
+            f"No reply received from bot. Webhook returned: {result}"
+        )
 
-    bot_reply_text = _get_bot_reply_text(replies)
     logger.info("🤖 Bot reply: %s", bot_reply_text[:200])
 
     # ── Judge the reply ───────────────────────────────────────────────

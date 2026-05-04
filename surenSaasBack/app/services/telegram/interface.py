@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 class TelegramInterface:
     """Helper pour les interactions sortantes vers Telegram."""
     
-    def __init__(self, bot_token: str):
+    def __init__(self, bot_token: str, api_url: str = None):
         self.bot_token = bot_token
-        self.base_url = f"https://api.telegram.org/bot{bot_token}"
+        base = (api_url or settings.telegram_api_url or "https://api.telegram.org").rstrip("/")
+        self.base_url = f"{base}/bot{bot_token}"
 
     async def send_message(self, chat_id: int, text: str, reply_markup: Optional[Dict] = None):
         url = f"{self.base_url}/sendMessage"

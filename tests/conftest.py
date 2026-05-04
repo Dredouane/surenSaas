@@ -26,7 +26,9 @@ BACKEND_WEBHOOK_URL = os.getenv(
     "BACKEND_WEBHOOK_URL",
     "http://localhost:8000/api/v1/{org_id}/telegram/webhook/{webhook_token}",
 )
-FAKE_BOT_TOKEN = os.getenv("FAKE_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+# Le bot_token pour poller getUpdates doit être le vrai token du bot
+# (tg-mock segmente les messages par token — le backend envoie avec le vrai)
+BOT_TOKEN = os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 ORG_ID = os.getenv("TEST_ORG_ID", "test-org-id")
 WEBHOOK_TOKEN = os.getenv("TEST_WEBHOOK_TOKEN", "test-webhook-token")
 
@@ -45,17 +47,35 @@ class TgMockClient:
     def __init__(
         self,
         tg_mock_url: str,
-        bot_token: str,
+        bot_token: str,  # fake token for getUpdates polling
         backend_webhook_url: str,
         org_id: str,
         webhook_token: str,
+        real_bot_token: str = None,  # real bot token to register chat in tg-mock
     ):
         self.tg_mock_url = tg_mock_url.rstrip("/")
         self.bot_token = bot_token
+        self.real_bot_token = real_bot_token or bot_token
         self.backend_webhook_url = backend_webhook_url
         self.org_id = org_id
         self.webhook_token = webhook_token
         self._client = httpx.Client(base_url=self.tg_mock_url, timeout=30.0)
+        self._ensure_chat_exists()
+
+    def _ensure_chat_exists(self) -> None:
+        """Ensure the test chat exists in tg-mock's state by sending an init message.
+
+        tg-mock returns \"chat not found\" if the chat_id hasn't been seen before.
+        We pre-seed it by sending a dummy message with the real bot token.
+        """
+        try:
+            token = self.real_bot_token
+            self._client.post(
+                f"/bot{token}/sendMessage",
+                json={"chat_id": TEST_CHAT_ID, "text": "/start"},
+            )
+        except Exception as exc:
+            logger.warning("tg-mock chat init skipped: %s", exc)
 
     # ── Injection helpers ──────────────────────────────────────────────
 
@@ -99,7 +119,15 @@ class TgMockClient:
         resp = self._client.post(self._webhook_endpoint(), json=update)
         resp.raise_for_status()
         logger.info("📤 Injected text message: %s", text[:80])
-        return resp.json()
+        data = resp.json()
+        return self._parse_result(data)
+
+    def _parse_result(self, data: dict) -> dict:
+        """Extract reply_text + status from a webhook response."""
+        reply = None
+        if "result" in data and isinstance(data["result"], dict):
+            reply = data["result"].get("reply_text")
+        return {"backend_status": 200, "reply_text": reply}
 
     def send_photo(self, file_path: str, caption: Optional[str] = None) -> dict:
         """Inject a photo message with an optional caption."""
@@ -122,7 +150,8 @@ class TgMockClient:
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected photo: %s", file_path)
-        return resp.json()
+        data = resp.json()
+        return self._parse_result(data)
 
     def send_document(self, file_path: str, caption: Optional[str] = None) -> dict:
         """Inject a document message with an optional caption."""
@@ -143,7 +172,8 @@ class TgMockClient:
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected document: %s", file_path)
-        return resp.json()
+        data = resp.json()
+        return self._parse_result(data)
 
     def send_voice(self, file_path: str) -> dict:
         """Inject a voice message."""
@@ -161,7 +191,8 @@ class TgMockClient:
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected voice: %s", file_path)
-        return resp.json()
+        data = resp.json()
+        return self._parse_result(data)
 
     # ── Reading bot replies ────────────────────────────────────────────
 
@@ -226,10 +257,11 @@ def tg_mock_client() -> TgMockClient:
     """Session-scoped fixture providing a TgMockClient instance."""
     client = TgMockClient(
         tg_mock_url=TG_MOCK_URL,
-        bot_token=FAKE_BOT_TOKEN,
+        bot_token=BOT_TOKEN,
         backend_webhook_url=BACKEND_WEBHOOK_URL,
         org_id=ORG_ID,
         webhook_token=WEBHOOK_TOKEN,
+        real_bot_token=os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN"),
     )
     yield client
     client.close()
