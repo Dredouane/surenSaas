@@ -1,0 +1,27 @@
+test_case: "Pointage de ressources humaines et machine"
+description: >
+  L'utilisateur pointe la présence d'un homme (Jean Dupont) et d'une
+  machine (pelleteuse) sur le chantier CH-016. Le bot doit reconnaître
+  les deux types de ressources et confirmer le pointage.
+tags: [pointage, ressource-humaine, ressource-machine, chantier]
+input:
+  chat_id: 999999
+  from_user:
+    id: 999999
+    first_name: "Test"
+    is_bot: false
+  media:
+    type: text
+    content: "Je pointe Jean Dupont et la pelleteuse sur CH-016"
+judge:
+  model: gemini-2.0-flash
+  prompt: |
+    Vérifie que la réponse du bot :
+    1. Confirme la création du pointage
+    2. Mentionne la ressource humaine "Jean Dupont"
+    3. Mentionne la ressource machine "pelleteuse"
+    4. Mentionne le chantier CH-016
+    5. Indique la date du pointage (aujourd'hui ou une date précise)
+
+    Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+  expected_verdict: pass

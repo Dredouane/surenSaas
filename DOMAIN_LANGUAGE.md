@@ -220,4 +220,18 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 | **Final Reflector** | Nœud de contrôle après l'appel d'un outil pour analyser le résultat réel de la base de données | Architecture > Agents | Gère les erreurs métier (ex: chantier clôturé) et les transforme en explications polies |
 | **Output Formatter** | Nœud final préparant le message Telegram avec le ton "Collègue de chantier" et les boutons d'action | Architecture > Agents | Utilise des emojis métier et structure les boutons de confirmation HITL |
 | **Memory Trim** | Stratégie de fenêtre glissante conservant les 10 derniers messages pour optimiser le contexte LLM | Architecture > Agents | Évite la saturation du contexte tout en préservant le fil de la conversation |
-| **State Summary** | Résumé persistant de la conversation stocké dans le State du graphe pour la mémoire long terme | Architecture > Agents | Permet à l'agent de se souvenir du contexte global (ex: chantier actif) au-delà de 10 messages |
+|| **State Summary** | Résumé persistant de la conversation stocké dans le State du graphe pour la mémoire long terme | Architecture > Agents | Permet à l'agent de se souvenir du contexte global (ex: chantier actif) au-delà de 10 messages |
+
+---
+
+## Termes du Domaine — Extension Harnais de Validation (E2E Blackbox)
+
+| Terme | Définition | Contexte | Contrainte |
+|-------|-----------|----------|------------|
+| **Harnais de Validation** | Dispositif de test blackbox qui simule Telegram pour injecter des Updates et capturer les réponses du bot | Tests > E2E | Tourne sur localhost VPS ; ne touche pas au code interne du bot |
+| **tg-mock** | Serveur Go (Docker) qui remplace `api.telegram.org` localement : mocke `sendMessage`, `sendPhoto`, `sendDocument` et expose un endpoint `/updates` pour injecter des Updates | Tests > Simulateur | Port 8081. Le bot backend pointe vers `http://localhost:8081/bot<TOKEN>/...` via `TELEGRAM_BASE_URL` |
+| **Runner (pytest)** | Script Python pytest qui orchestre le test : lit un YAML → POST à tg-mock → capture la réponse → appelle le Juge | Tests > Runner | Utilise une fixture `tg_mock_client` ; timeout/polling configurable pour la latence LLM |
+| **Scénario YAML** | Fichier `.yaml` décrivant un test : input Telegram (text/voice/photo/pdf) + critère de jugement LLM | Tests > Scénarios | Validé par Pydantic dans le runner. Contient sections `input`, `judge`, `expected_verdict` |
+| **LLM Judge (Gemini Flash)** | Appel à Gemini Flash qui compare la réponse du bot au critère attendu et rend un verdict `{score: 1/0, reason: "..."}` | Tests > Judge | Prompt machine-readable structuré : SCENARIO + REPONSE → JSON verdict |
+| **Reset d'état inter-scénario** | Nettoyage de la mémoire LangGraph et des enregistrements DB entre deux scénarios YAML pour éviter la pollution | Tests > Runner | Exécuté après chaque test via fixture pytest `autouse` avec scope `function` |
+| **Polling Timeout** | Délai d'attente configurable (ex: 15s) entre l'injection de l'Update et la récupération de la réponse bot | Tests > Runner | Nécessaire car le backend utilise LangGraph + LLM (latence variable) |

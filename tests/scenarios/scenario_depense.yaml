@@ -1,0 +1,26 @@
+test_case: "Saisie de dépense avec date relative et montant"
+description: >
+  L'utilisateur envoie un message texte pour enregistrer une dépense de
+  150€ pour du béton sur le chantier CH-016. Le bot doit extraire le
+  montant, le chantier et la date du jour, puis confirmer la création.
+tags: [dépense, date-parsing, montant, chantier]
+input:
+  chat_id: 999999
+  from_user:
+    id: 999999
+    first_name: "Test"
+    is_bot: false
+  media:
+    type: text
+    content: "Aujourd'hui, j'ai dépensé 150€ pour le béton sur CH-016"
+judge:
+  model: gemini-2.0-flash
+  prompt: |
+    Vérifie que la réponse du bot :
+    1. Confirme la création de la dépense
+    2. Mentionne le montant 150€
+    3. Mentionne le chantier CH-016
+    4. Mentionne la date d'aujourd'hui (la date courante)
+
+    Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+  expected_verdict: pass
