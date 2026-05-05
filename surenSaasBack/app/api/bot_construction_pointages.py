@@ -21,9 +21,10 @@ async def handle_pointage_date_select(telegram_id: int, selected_date: str, bot_
 
 
 def _format_date_display(date_str: str) -> str:
-    """Formate une date ISO pour l'affichage."""
-    d = date.fromisoformat(date_str)
-    return d.strftime("%d/%m/%Y")
+    """Formate une date ISO ou européenne pour l'affichage."""
+    from app.services.telegram.construction_menu import parse_pointage_date
+    iso_date = parse_pointage_date(date_str)
+    return date.fromisoformat(iso_date).strftime("%d/%m/%Y")
 
 
 async def _get_pointage_for_date(supabase, chantier_id, org_id, pointage_date):

@@ -23,12 +23,12 @@ from app.services.agents.form_engine import PendingForm
 from app.services.agents.tools import (
     get_user_chantiers, 
     get_chantier_details, 
-    create_depense, 
     create_operation,
     manage_attendance,
     report_progress,
     manage_tasks
 )
+from app.agents.tools.depense_tools import create_depense
 
 # --- UTILS ---
 
