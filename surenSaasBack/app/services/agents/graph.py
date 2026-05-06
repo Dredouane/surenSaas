@@ -29,6 +29,7 @@ from app.services.agents.tools import (
     manage_tasks
 )
 from app.agents.tools.depense_tools import create_depense
+from app.agents.tools.attendance_tools import match_resources, upsert_attendance
 
 # --- UTILS ---
 
@@ -208,7 +209,7 @@ def call_model_node(state: AgentState):
     )
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
-    tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response]
+    tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance]
     llm_with_tools = llm.bind_tools(tools)
     
     response = llm_with_tools.invoke(msgs)
@@ -378,7 +379,7 @@ def create_agent_graph(checkpointer):
     workflow.add_node("agent", call_model_node)
     workflow.add_node("pre_reflector", pre_reflector_node)
     workflow.add_node("formatter", hitl_formatter_node)
-    workflow.add_node("tools", ToolNode([get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response]))
+    workflow.add_node("tools", ToolNode([get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance]))
     workflow.add_node("tool_result_formatter", tool_result_formatter_node)
     
     # --- Edges ---

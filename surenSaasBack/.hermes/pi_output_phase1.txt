@@ -1,0 +1,7 @@
+`/opt/projects/suren/saas/surenSaas/surenSaasBack/app/agents/tools/depense_tools.py` créé avec la fonction `create_depense()`.
+
+- ✅ Logique DB pure, ni Telegram, ni state, ni notifications
+- ✅ Utilise `statut` (pas `status`)
+- ✅ Retourne `{"ok": bool, "id": str|None, "error": str|None}`
+- ✅ Logger avec préfixe `[DEPENSE_TOOL]`
+- ✅ Self-contained, appelable depuis LangGraph/test/script

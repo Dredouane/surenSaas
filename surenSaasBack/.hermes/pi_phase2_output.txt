@@ -1,0 +1,11 @@
+Tâche terminée. Fichier créé avec succès :
+
+**`/opt/projects/suren/saas/surenSaas/surenSaasBack/app/agents/tools/attendance_tools.py`**
+
+Contient les 2 tools LangGraph :
+
+1. **`match_resources(org_id, chantier_id, query)`** — Fuzzy matching sur les ressources (`chantier_ressources`) avec scoring (exact: 1.0, contenu: 0.8, token match: 0.7, partial: 0.5). Retourne max 5 résultats triés par confiance.
+
+2. **`upsert_attendance(org_id, chantier_id, date_pointage, ressources[])`** — Persistance des présences : crée le pointage parent (`chantier_pointages`) si inexistant (statut `brouillon`), refuse si déjà `en_attente_validation`/`valide`, upsert les lignes dans `chantier_pointage_ressources`.
+
+Les deux tools sont décorés `@tool` avec Pydantic schemas → compatibles LangGraph ToolNode. Import et syntaxe validés.

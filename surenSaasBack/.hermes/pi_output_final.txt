@@ -1,0 +1,6 @@
+Les deux modifications demandées sont **déjà en place** :
+
+1. **`construction_menu.py`** — La fonction `parse_pointage_date()` est déjà présente avec le code exact spécifié.
+2. **`bot_construction_pointages.py:24-27`** — Le body de `_format_date_display` utilise déjà `parse_pointage_date` comme demandé.
+
+**Rien à modifier. La tâche est déjà terminée.**
