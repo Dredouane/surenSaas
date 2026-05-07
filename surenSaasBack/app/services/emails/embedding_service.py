@@ -6,14 +6,11 @@ Génère les embeddings avec text-embedding-004 et stratégie Matryoshka.
 
 import os
 import asyncio
-import json
-import base64
-import tempfile
 from typing import List, Dict, Any, Optional
 import numpy as np
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core import vertex as vertex_service
 from app.services.email_database_service import email_db
 
 logger = get_logger(__name__)
@@ -44,46 +41,20 @@ class EmbeddingService:
         """Initialise Vertex AI (appelé une seule fois)."""
         if self._initialized or not VERTEX_AI_AVAILABLE:
             return
-        
+
         from app.core.config import settings
-        
+
         project_id = os.getenv("VERTEX_AI_PROJECT_ID") or settings.gcp_project_id
         location = os.getenv("VERTEX_AI_LOCATION", "europe-west1")
-        credentials_info = None
-        
-        # Essayer d'extraire depuis les credentials Gemini si toujours pas de project_id
-        if settings.gemini_api_key:
-            try:
-                creds_json = base64.b64decode(settings.gemini_api_key)
-                credentials_info = json.loads(creds_json)
-                if not project_id:
-                    project_id = credentials_info.get("project_id")
-            except Exception as e:
-                logger.warning(f"Could not decode Gemini credentials: {e}")
-        
+
         if not project_id:
             raise ValueError("VERTEX_AI_PROJECT_ID or GCP_PROJECT_ID not set")
-        
-        # Créer fichier temporaire pour les credentials si on a des credentials_info
-        if credentials_info:
-            fd, creds_file = tempfile.mkstemp(suffix='.json')
-            with os.fdopen(fd, 'w') as f:
-                json.dump(credentials_info, f)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_file
-            logger.debug(f"Credentials temp file created")
-        
+
+        vertex_service.startup()
         vertexai.init(project=project_id, location=location)
         self.model = TextEmbeddingModel.from_pretrained("text-embedding-004")
         self._initialized = True
-        self._creds_file = creds_file  # Stocker pour suppression plus tard
         logger.info(f"Vertex AI embedding model initialized - Project: {project_id}, Location: {location}")
-        
-        # Restreindre les permissions du fichier (chmod 600)
-        try:
-            os.chmod(creds_file, 0o600)
-            logger.debug("Credentials file permissions restricted to 600")
-        except Exception as e:
-            logger.warning(f"Could not restrict credentials file permissions: {e}")
     
     def chunk_text(self, text: str) -> List[str]:
         """
@@ -243,16 +214,11 @@ class EmbeddingService:
     
     def close(self):
         """Ferme le service et nettoie les ressources."""
-        if hasattr(self, '_creds_file') and self._creds_file and os.path.exists(self._creds_file):
-            try:
-                os.remove(self._creds_file)
-                logger.debug("Credentials temp file deleted")
-            except Exception as e:
-                logger.warning(f"Could not delete temp credentials file: {e}")
-    
+        pass
+
     def __del__(self):
-        """Destructeur - nettoie les ressources."""
-        self.close()
+        """Destructeur."""
+        pass
 
 
 # Instance singleton

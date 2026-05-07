@@ -17,13 +17,10 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/fake-credentials.json"
 async def test_full_vision_agent_workflow_document():
     """Test du flux agentique complet avec un document financier."""
     
-    # Mock Supabase and google.auth
+    # Mock Supabase
     with patch("app.services.agents.graph.get_supabase") as mock_supabase, \
-         patch("app.api.auth.get_supabase") as mock_supabase_auth, \
-         patch("google.auth.default") as mock_auth:
+         patch("app.api.auth.get_supabase") as mock_supabase_auth:
 
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
         mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
         mock_supabase_auth.return_value = mock_supabase.return_value
 
@@ -35,7 +32,7 @@ async def test_full_vision_agent_workflow_document():
     
         # 2. Mock VisionExpertService and Agent LLM
         with patch("app.services.agents.graph.VisionExpertService") as MockService, \
-             patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM:
+             patch("app.core.vertex.get_chat_model") as MockLLM:
             
             # Mock Service instance
             mock_service_instance = MockService.return_value
@@ -88,11 +85,8 @@ async def test_full_vision_agent_workflow_photo_chantier():
     """Test du flux agentique avec une photo de chantier."""
     
     with patch("app.services.agents.graph.get_supabase") as mock_supabase, \
-         patch("app.api.auth.get_supabase") as mock_supabase_auth, \
-         patch("google.auth.default") as mock_auth:
+         patch("app.api.auth.get_supabase") as mock_supabase_auth:
         
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
         mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
         mock_supabase_auth.return_value = mock_supabase.return_value
 
@@ -102,7 +96,7 @@ async def test_full_vision_agent_workflow_photo_chantier():
         fake_image = b"fake-jpg-content"
     
         with patch("app.services.agents.graph.VisionExpertService") as MockService, \
-             patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM:
+             patch("app.core.vertex.get_chat_model") as MockLLM:
             
             mock_service_instance = MockService.return_value
             mock_service_instance.process_photo = AsyncMock(return_value=ExtractedExpense(

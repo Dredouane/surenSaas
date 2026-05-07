@@ -33,11 +33,7 @@ async def test_full_audio_agent_workflow():
     
         # 2. Mock AudioExpertService and Agent LLM
         with patch("app.services.agents.graph.AudioExpertService") as MockService, \
-             patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-             patch("google.auth.default") as mock_auth:
-            
-            mock_creds = MagicMock()
-            mock_auth.return_value = (mock_creds, "test-project")
+             patch("app.core.vertex.get_chat_model") as MockLLM:
             
             # Mock Service instance
             mock_service_instance = MockService.return_value

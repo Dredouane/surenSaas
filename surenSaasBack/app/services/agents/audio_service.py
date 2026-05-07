@@ -1,43 +1,18 @@
 import json
-import os
-import tempfile
-import base64
 import httpx
 import time
 from typing import List, Dict, Any, Optional
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from app.core.config import settings
+from app.core import vertex as vertex_service
 
 
 class AudioExpertService:
     """Service expert pour le traitement audio (Whisper + Gemini Normalization)."""
 
-    @staticmethod
-    def _ensure_credentials():
-        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
-            return
-        credentials_b64 = settings.gemini_api_key
-        if credentials_b64 and not credentials_b64.startswith("AIza"):
-            try:
-                credentials_json = base64.b64decode(credentials_b64).decode('utf-8')
-                credentials_info = json.loads(credentials_json)
-                fd, cred_file = tempfile.mkstemp(suffix='.json')
-                with os.fdopen(fd, 'w') as f:
-                    json.dump(credentials_info, f)
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
-            except Exception:
-                pass
-
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.open_router_api_key
-        self._ensure_credentials()
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            vertexai=True,
-            project=settings.gcp_project_id,
-            location=settings.gemini_location or "europe-west1"
-        )
+        self.llm = vertex_service.get_chat_model()
         self.transcribe_url = "https://openrouter.ai/api/v1/audio/transcriptions"
 
     async def transcribe(self, audio_bytes: bytes) -> str:

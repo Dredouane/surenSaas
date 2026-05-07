@@ -65,7 +65,7 @@ async def test_telegram_webhook_integration_agentic():
         with patch("app.services.telegram.factory.get_supabase") as mock_factory_sb:
             mock_factory_sb.return_value = mock_sb
             
-            with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM:
+            with patch("app.core.vertex.get_chat_model") as MockLLM:
                 from langchain_core.messages import AIMessage
                 mock_llm_instance = MockLLM.return_value
                 mock_llm_instance.invoke.return_value = AIMessage(content="Le budget du chantier CRF est de 1,018,112€ HT.")

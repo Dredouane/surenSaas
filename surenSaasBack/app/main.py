@@ -6,8 +6,11 @@ import traceback
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_core")
 
+from contextlib import asynccontextmanager
+
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger, log_request
+from app.core.vertex import startup as vertex_startup, shutdown as vertex_shutdown
 from app.services.database import set_correlation_id
 from app.api.auth import router as auth_router, AuthenticationError
 from app.api.users import router as users_router
@@ -33,10 +36,22 @@ setup_logging(
 
 logger = get_logger(__name__)
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Cycle de vie de l'application FastAPI."""
+    logger.info("🚀 Vertex AI startup...")
+    vertex_startup()
+    logger.info("✅ Vertex AI prêt")
+    yield
+    logger.info("🛑 Vertex AI shutdown...")
+    vertex_shutdown()
+    logger.info("✅ Vertex AI nettoyé")
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     debug=settings.debug,
+    lifespan=lifespan,
 )
 
 # CORS

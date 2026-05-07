@@ -8,16 +8,13 @@ Pipeline complet :
 Chaque étape est loggée séparément dans logs_agents pour monitoring.
 """
 
-import os
-import base64
 import json
-import tempfile
 import time
-import logging
 from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core import vertex as vertex_service
 from app.services.whisper_service import transcribe_with_whisper
 from app.services.audit_service import AuditService
 from app.services.database import supabase_client
@@ -38,33 +35,9 @@ def transcribe_with_gemini(audio_data: bytes, mime_type: str = "audio/webm") -> 
     Préservé pour compatibilité avec l'endpoint /transcribe existant.
     """
     try:
-        import google.genai as genai
         from google.genai import types
 
-        credentials_b64 = (
-            settings.gemini_api_key
-            or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
-            or os.getenv("GOOGLE_GEMINI_CREDENTIALS_B64")
-        )
-        if not credentials_b64:
-            logger.error("Aucun credentials Vertex AI configuré")
-            return None
-
-        credentials_json = base64.b64decode(credentials_b64).decode("utf-8")
-        credentials_info = json.loads(credentials_json)
-        project_id = credentials_info.get("project_id") or os.getenv("GCP_PROJECT_ID")
-
-        fd, cred_file = tempfile.mkstemp(suffix=".json")
-        with os.fdopen(fd, "w") as f:
-            json.dump(credentials_info, f)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
-
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=settings.gemini_location or "europe-west1",
-        )
-
+        client = vertex_service.get_genai_client()
         model_name = settings.gemini_model or "gemini-2.5-flash"
 
         response = client.models.generate_content(
@@ -152,37 +125,11 @@ async def gemini_structured_extraction(transcript: str) -> Optional[dict]:
 
 
 def transcribe_with_gemini_for_text(prompt: str) -> Optional[str]:
-    """Appelle Gemini Vertex AI avec un prompt texte uniquement.
-
-    Réutilise le même mécanisme de credentials que transcribe_with_gemini."""
+    """Appelle Gemini Vertex AI avec un prompt texte uniquement."""
     try:
-        import google.genai as genai
         from google.genai import types
 
-        credentials_b64 = (
-            settings.gemini_api_key
-            or os.getenv("SUREN_GOOGLE_GEMINI_CREDENTIALS_B64")
-            or os.getenv("GOOGLE_GEMINI_CREDENTIALS_B64")
-        )
-        if not credentials_b64:
-            logger.error("Aucun credentials Vertex AI configuré")
-            return None
-
-        credentials_json = base64.b64decode(credentials_b64).decode("utf-8")
-        credentials_info = json.loads(credentials_json)
-        project_id = credentials_info.get("project_id") or os.getenv("GCP_PROJECT_ID")
-
-        fd, cred_file = tempfile.mkstemp(suffix=".json")
-        with os.fdopen(fd, "w") as f:
-            json.dump(credentials_info, f)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
-
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=settings.gemini_location or "europe-west1",
-        )
-
+        client = vertex_service.get_genai_client()
         model_name = settings.gemini_model or "gemini-2.5-flash"
 
         response = client.models.generate_content(

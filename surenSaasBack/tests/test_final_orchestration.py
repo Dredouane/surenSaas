@@ -20,10 +20,7 @@ async def test_anti_hallucination_pre_reflector():
     
     # 1. Simuler l'agent qui veut créer une dépense mais n'a pas de chantier
     # On mocke l'agent pour qu'il essaie d'appeler l'outil sans chantier_id
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         mock_instance = MockLLM.return_value
         
         # L'agent décide d'appeler l'outil avec un chantier_id null ou vide
@@ -72,10 +69,7 @@ async def test_hitl_interruption_cycle():
     graph = create_agent_graph(checkpointer)
     config = {"configurable": {"thread_id": "test_hitl"}}
     
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         mock_instance = MockLLM.return_value
         
         # L'agent appelle correctement l'outil

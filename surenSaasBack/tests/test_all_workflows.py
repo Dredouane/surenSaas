@@ -48,10 +48,7 @@ async def test_depense_workflow():
         "id": "call_dep", "type": "tool_call"
     }
 
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         MockLLM.return_value = _make_mock_llm("Je crée la dépense.", tool_call)
 
         events = []
@@ -75,10 +72,7 @@ async def test_operation_workflow():
         "id": "call_op", "type": "tool_call"
     }
 
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         MockLLM.return_value = _make_mock_llm("J'enregistre l'opération.", tool_call)
 
         events = []
@@ -102,10 +96,7 @@ async def test_pointage_workflow():
         "id": "call_ptg", "type": "tool_call"
     }
 
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         MockLLM.return_value = _make_mock_llm("Je pointe la présence.", tool_call)
 
         events = []
@@ -129,10 +120,7 @@ async def test_avancement_workflow():
         "id": "call_av", "type": "tool_call"
     }
 
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         MockLLM.return_value = _make_mock_llm("J'enregistre l'avancement.", tool_call)
 
         events = []
@@ -156,10 +144,7 @@ async def test_tache_workflow():
         "id": "call_tk", "type": "tool_call"
     }
 
-    with patch("app.services.agents.graph.ChatGoogleGenerativeAI") as MockLLM, \
-         patch("google.auth.default") as mock_auth:
-        mock_creds = MagicMock()
-        mock_auth.return_value = (mock_creds, "test-project")
+    with patch("app.core.vertex.get_chat_model") as MockLLM:
         MockLLM.return_value = _make_mock_llm("Je crée la tâche.", tool_call)
 
         events = []

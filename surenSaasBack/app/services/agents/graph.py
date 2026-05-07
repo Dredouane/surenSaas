@@ -3,17 +3,14 @@ import operator
 import time
 import uuid as _uuid
 import json
-import base64
-import tempfile
-import os
 from typing import Annotated, Sequence, TypedDict, Union, Optional, Dict, Any, List
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.core.config import settings as _settings
+from app.core import vertex as vertex_service
 
 from app.api.auth import get_supabase
 from app.services.agents.audio_service import AudioExpertService
@@ -31,26 +28,6 @@ from app.services.agents.tools import (
 )
 from app.agents.tools.depense_tools import create_depense
 from app.agents.tools.attendance_tools import match_resources, upsert_attendance
-
-# --- UTILS ---
-
-def ensure_vertex_credentials():
-    """S'assure que GOOGLE_APPLICATION_CREDENTIALS pointe vers un fichier JSON valide.
-    Utilise le même mécanisme que les autres services (decodage base64 des credentials GCP)."""
-    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
-        return  # Déjà OK
-    
-    credentials_b64 = _settings.gemini_api_key
-    if credentials_b64 and not credentials_b64.startswith("AIza"):
-        try:
-            credentials_json = base64.b64decode(credentials_b64).decode('utf-8')
-            credentials_info = json.loads(credentials_json)
-            fd, cred_file = tempfile.mkstemp(suffix='.json')
-            with os.fdopen(fd, 'w') as f:
-                json.dump(credentials_info, f)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_file
-        except (base64.binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
-            pass  # Ce n'est pas du base64, on laisse google.auth chercher par lui-même
 
 # --- STATE DEFINITION ---
 
@@ -218,13 +195,7 @@ def call_model_node(state: AgentState):
         'appelle create_depense avec toutes les infos.'
     )
     
-    ensure_vertex_credentials()
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        vertexai=True,
-        project=_settings.gcp_project_id,
-        location=_settings.gemini_location or "europe-west1"
-    )
+    llm = vertex_service.get_chat_model()
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
