@@ -1,17 +1,13 @@
 """
 Parametrized pytest that reads all YAML scenario files from ``tests/scenarios/``
-and runs each as an end-to-end blackbox test.
+and runs each as an end-to-end blackbox test using the multi-step SessionRunner.
 
 For each scenario:
-1. Parse the YAML into a ``Scenario`` model.
-2. Build a Telegram Update payload and inject it via ``tg_mock_client``.
-3. Poll for bot reply via ``tg_mock_client.get_replies()``.
-4. Call ``judge_response()`` with the scenario and the bot reply text.
-5. Assert that the judge returns ``score == 1``.
+1. Parse the YAML into a ``Scenario`` model via ``load_scenario()``.
+2. Execute all steps via ``SessionRunner.run_scenario()``.
+3. Assert that every step's verdict matches its ``expected_verdict``.
 
 Test IDs in pytest output are the YAML filenames (e.g. ``scenario_depense``).
-Backend health is checked before any tests run; scenarios are skipped if
-the backend is not reachable.
 """
 
 import logging
@@ -19,10 +15,9 @@ import os
 from pathlib import Path
 
 import pytest
-import yaml
 
-from tests.judge import judge_response
-from tests.models import Scenario
+from tests.engine import SessionRunner
+from tests.provider import load_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -33,85 +28,17 @@ HEALTH_CHECK_TIMEOUT = 5.0
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Helper: discover & load scenarios
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-def _discover_scenario_paths() -> list[Path]:
-    """Return sorted list of */*.yaml paths from the scenarios directory."""
-    paths = sorted(SCENARIOS_DIR.glob("*.yaml"))
-    if not paths:
-        logger.warning("No YAML scenario files found in %s", SCENARIOS_DIR)
-    return paths
-
-
-def _load_scenario(yaml_path: Path) -> Scenario:
-    """Load a YAML scenario file and return a validated ``Scenario`` model.
-
-    Handles both the ``content`` field (for text/voice) and the
-    ``file_path`` + ``caption`` fields (for document/photo media types).
-    """
-    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-
-    media_raw = raw["input"]["media"]
-    media_type = media_raw["type"]
-
-    # Normalise the media payload — the YAML may use file_path + caption
-    # for document/photo instead of a single ``content`` field.
-    if media_type in ("document", "photo"):
-        # Use file_path as content; preserve caption as extra field
-        media_raw["content"] = media_raw.pop("file_path", "")
-        caption = media_raw.pop("caption", None)
-        if caption:
-            media_raw["caption"] = caption
-    elif "content" not in media_raw:
-        media_raw["content"] = ""
-
-    return Scenario(**raw)
-
-
-def _build_health_check_url() -> str:
-    """Return the backend health check URL, respecting env overrides."""
-    return BACKEND_HEALTH_URL
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Session-scoped: discover scenarios once
+# Dynamic parametrization
 # ═════════════════════════════════════════════════════════════════════════════
 
 
 def pytest_generate_tests(metafunc):
-    """Dynamic parametrization: one test ID per scenario YAML file.
-
-    This lets scenarios be discovered *once* at collection time (instead
-    of re-discovering them inside a ``session_or_module`` fixture), which
-    gives nice parametrized IDs in the pytest output.
-    """
+    """Dynamic parametrization: one test ID per scenario YAML file."""
     if "scenario" in metafunc.fixturenames:
         scenario_paths = sorted(SCENARIOS_DIR.glob("*.yaml"))
-        scenarios = [_load_scenario(p) for p in scenario_paths]
+        scenarios = [load_scenario(str(p)) for p in scenario_paths]
         ids = [p.stem for p in scenario_paths]
         metafunc.parametrize("scenario", scenarios, ids=ids)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Helper: get bot reply text
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-def _get_bot_reply_text(replies: list[dict]) -> str:
-    """Extract bot reply text from the list of message dicts returned by
-    ``tg_mock_client.get_replies()``.
-
-    Concatenates all ``text`` fields from the replies. If a reply has a
-    ``caption`` instead of ``text`` (e.g. media messages), uses that.
-    """
-    parts = []
-    for msg in replies:
-        text = msg.get("text") or msg.get("caption") or ""
-        if text:
-            parts.append(text)
-    return "\n".join(parts)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -125,7 +52,7 @@ def _backend_is_reachable() -> bool:
         import httpx
 
         resp = httpx.get(
-            _build_health_check_url(),
+            BACKEND_HEALTH_URL,
             timeout=HEALTH_CHECK_TIMEOUT,
         )
         return resp.status_code == 200
@@ -140,15 +67,13 @@ def _backend_is_reachable() -> bool:
 
 
 @pytest.mark.e2e
-def test_scenario(scenario: Scenario, tg_mock_client) -> None:
-    """Run a single scenario end-to-end.
+def test_scenario(scenario, tg_mock_client, judge_client) -> None:
+    """Run a multi-step scenario end-to-end via SessionRunner.
 
     Steps:
     1. Skip if backend is unreachable.
-    2. Inject the input via tg_mock_client.
-    3. Wait for bot reply via get_replies().
-    4. Evaluate bot reply with the judge.
-    5. Assert score == 1.
+    2. Create a SessionRunner and run all steps.
+    3. Assert each step's verdict matches its expected_verdict.
     """
     # ── Skip check ────────────────────────────────────────────────────
     if not _backend_is_reachable():
@@ -160,54 +85,25 @@ def test_scenario(scenario: Scenario, tg_mock_client) -> None:
         scenario.description,
     )
 
-    # ── Inject the input ──────────────────────────────────────────────
-    media = scenario.input.media
-    media_type = media.type
-    content = media.content
+    # ── Run all steps via SessionRunner ───────────────────────────────
+    runner = SessionRunner(mock_client=tg_mock_client)
+    verdicts = runner.run_scenario(scenario)
 
-    # Extract optional caption from extra fields (set during YAML normalisation)
-    extra = getattr(media, "model_extra", None) or {}
-    caption = extra.get("caption")
+    # ── Assert each verdict ───────────────────────────────────────────
+    for v in verdicts:
+        step = scenario.steps[v.step_index]
+        expected_pass = step.expected_verdict == "pass"
 
-    if media_type == "text":
-        result = tg_mock_client.send_text(content)
-    elif media_type == "voice":
-        result = tg_mock_client.send_voice(content)
-    elif media_type == "photo":
-        result = tg_mock_client.send_photo(content, caption=caption)
-    elif media_type == "document":
-        result = tg_mock_client.send_document(content, caption=caption)
-    else:
-        raise ValueError(f"Unsupported media type: {media_type}")
+        if expected_pass:
+            assert v.passed, (
+                f"Step {v.step_index} [{step.type}]: expected PASS but got FAIL. "
+                f"Reason: {v.reason}"
+            )
+        else:
+            assert not v.passed, (
+                f"Step {v.step_index} [{step.type}]: expected FAIL but got PASS. "
+                f"Reason: {v.reason}"
+            )
 
-    # ── Get bot reply from webhook response ───────────────────────────
-    bot_reply_text = result.get("reply_text") if isinstance(result, dict) else None
-
-    if not bot_reply_text:
-        raise AssertionError(
-            f"No reply received from bot. Webhook returned: {result}"
-        )
-
-    logger.info("🤖 Bot reply: %s", bot_reply_text[:200])
-
-    # ── Judge the reply ───────────────────────────────────────────────
-    verdict = judge_response(scenario, bot_reply_text)
-
-    logger.info(
-        "⚖️  Verdict: score=%s — %s",
-        verdict.score,
-        verdict.reason[:150],
-    )
-
-    # Honore l'attendu du scénario
-    expected_pass = scenario.judge.expected_verdict == "pass"
-    if expected_pass:
-        assert verdict.score == 1, (
-            f"Scenario [{scenario.test_case}] FAILED — judge score={verdict.score}. "
-            f"Reason: {verdict.reason}"
-        )
-    else:
-        assert verdict.score == 0, (
-            f"Scenario [{scenario.test_case}] expected to FAIL but passed. "
-            f"Reason: {verdict.reason}"
-        )
+    logger.info("✅ Scenario [%s] — all %d step(s) passed expected verdicts",
+                 scenario.test_case, len(verdicts))

@@ -1,8 +1,23 @@
 #!/bin/bash
 # Lancer le backend TEST en local
 # Tue les processus existants et charge la config depuis .env.test
+#
+# Usage:
+#   ./scripts/run-local-back_test.sh              # Par défaut : vrai API Telegram (https://api.telegram.org)
+#   ./scripts/run-local-back_test.sh --tg-mock    # Utilise tg-mock (http://localhost:8081)
+#   ./scripts/run-local-back_test.sh --use-tg-mock
 
 set -e
+
+# === PARSE ARGS ===
+USE_TG_MOCK=false
+for arg in "$@"; do
+    case "$arg" in
+        --tg-mock|--use-tg-mock)
+            USE_TG_MOCK=true
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 cd "$SCRIPT_DIR"
@@ -121,8 +136,13 @@ export TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN="REDACTED_BOT_TOKEN"
 export TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_USERNAME:-}
 export TELEGRAM_CONSTRUCTION_BOT_USERNAME=${TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME}
 
-# Point vers tg-mock en local
-export TELEGRAM_API_URL="http://localhost:8081"
+# Point vers l'API Telegram (tg-mock si demandé, sinon vrai Telegram)
+if [ "$USE_TG_MOCK" = true ]; then
+    echo "  → Mode tg-mock : TELEGRAM_API_URL=http://localhost:8081"
+    export TELEGRAM_API_URL="http://localhost:8081"
+else
+    echo "  → Mode réel : TELEGRAM_API_URL=https://api.telegram.org (défaut)"
+fi
 
 echo "✅ Variables d'environnement exportées"
 

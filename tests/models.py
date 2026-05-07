@@ -1,73 +1,74 @@
-"""Pydantic models for Telegram E2E blackbox test scenarios."""
+"""Pydantic models for multi-step E2E test scenarios."""
+
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
-from typing import Literal
 
 
-class ScenarioMedia(BaseModel):
-    """Represents a piece of media sent by the test user.
-
-    Attributes:
-        type: Media type — text, voice, photo, or document.
-        content: Text content for 'text' type, file path for others.
-    """
-    type: Literal["text", "voice", "photo", "document"]
-    content: str
+# ── Backward-compat types used by judge.py and engine.py ──────────────
 
 
-class ScenarioInput(BaseModel):
-    """The Telegram update payload that triggers a bot interaction.
+class JudgeVerdict(BaseModel):
+    """Verdict returned by the LLM judge (judge.py).
 
     Attributes:
-        chat_id: Telegram chat identifier for the test user.
-        from_user: Telegram user dict (id, first_name, is_bot, …).
-        media: The media (text / voice / photo / document) being sent.
+        score: 1 = pass, 0 = fail.
+        reason: Explanation from the judge LLM.
     """
-    chat_id: int = 999999
-    from_user: dict = Field(default_factory=lambda: {
-        "id": 999999,
-        "first_name": "Test",
-        "is_bot": False,
-    })
-    media: ScenarioMedia
+    score: int = Field(ge=0, le=1)
+    reason: str = ""
 
 
 class ScenarioJudge(BaseModel):
-    """Configuration for the LLM-based judge that evaluates the bot reply.
+    """Judge configuration for old-style scenarios (engine.py compat)."""
+    prompt: str = ""
+    expected_verdict: str = "pass"
+
+
+class Step(BaseModel):
+    """A single interaction step in a multi-turn E2E scenario.
 
     Attributes:
-        model: Gemini model identifier (default: gemini-2.0-flash).
-        prompt: Scenario description the judge uses to evaluate correctness.
-        expected_verdict: Whether the bot is expected to pass or fail.
+        type: 'text' for a text message, 'callback' for clicking an inline button.
+        content: Text content to send, or button label text to click.
+        judge_prompt: Scenario description the judge uses to evaluate correctness.
+        expected_verdict: Whether the bot is expected to pass or fail this step.
     """
-    model: str = "gemini-2.0-flash"
-    prompt: str
+    type: Literal["text", "callback", "document", "photo"]
+    content: str
+    caption: str = ""
+    judge_prompt: str = ""
     expected_verdict: Literal["pass", "fail"] = "pass"
 
 
 class Scenario(BaseModel):
-    """A complete end-to-end test scenario.
+    """A complete multi-step end-to-end test scenario.
 
     Attributes:
         test_case: Unique identifier for the test case.
         description: Human-readable description of what is being tested.
         tags: List of tags for test categorization / filtering.
-        input: The Telegram input that triggers the scenario.
-        judge: Judge configuration to evaluate the bot's response.
+        steps: Ordered list of interaction steps (text or callback).
     """
     test_case: str
     description: str = ""
     tags: list[str] = []
-    input: ScenarioInput
-    judge: ScenarioJudge
+    steps: list[Step]
 
 
-class JudgeVerdict(BaseModel):
-    """Result of evaluating a bot reply against a scenario.
+class Verdict(BaseModel):
+    """Result of evaluating a bot reply against a step's judge prompt.
 
     Attributes:
         score: 1 = pass, 0 = fail.
         reason: Explanation from the judge LLM (or mock).
+        step_index: Index of the step this verdict corresponds to.
     """
-    score: Literal[0, 1]
-    reason: str
+    score: int = Field(ge=0, le=1)
+    reason: str = ""
+    step_index: int = 0
+
+    @property
+    def passed(self) -> bool:
+        """Return True if the verdict score is 1 (pass)."""
+        return self.score == 1

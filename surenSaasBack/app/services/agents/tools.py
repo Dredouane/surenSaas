@@ -101,34 +101,6 @@ def get_chantier_details(org_id: str, chantier_id: str) -> Dict[str, Any]:
     except Exception as e:
         return standard_response(False, error=str(e))
 
-@tool("create_depense", args_schema=CreateDepenseSchema)
-def create_depense(
-    org_id: str, 
-    chantier_id: str, 
-    fournisseur: str, 
-    montant: float, 
-    categorie: str = "autre",
-    description: Optional[str] = None,
-    date: Optional[str] = None
-) -> Dict[str, Any]:
-    """Crée une nouvelle dépense pour un chantier."""
-    try:
-        uuid = resolve_chantier_uuid(org_id, chantier_id)
-        data = {
-            "org_id": org_id,
-            "chantier_id": uuid,
-            "fournisseur": fournisseur,
-            "montant": montant,
-            "categorie": categorie,
-            "description": description,
-            "date": date or datetime.utcnow().date().isoformat(),
-            "created_at": datetime.utcnow().isoformat()
-        }
-        result = get_supabase().table("chantier_depenses").insert(data).execute()
-        return standard_response(True, result.data[0]) if result.data else standard_response(False, error="Échec insertion")
-    except Exception as e:
-        return standard_response(False, error=str(e))
-
 @tool("create_operation", args_schema=CreateOperationSchema)
 def create_operation(
     org_id: str,
@@ -261,5 +233,45 @@ def manage_tasks(
             res = sb.table("chantier_taches").update({"statut": "terminee"}).eq("id", tache_id).execute()
             return standard_response(True, res.data[0])
         return standard_response(False, error="Action inconnue")
+    except Exception as e:
+        return standard_response(False, error=str(e))
+
+
+# ─── SEARCH CHANTIER ─────────────────────────────────────────────
+
+class SearchChantierSchema(BaseModel):
+    org_id: str = Field(description="L'ID de l'organisation (UUID)")
+    query: str = Field(description="Recherche par référence (ref) ou nom du chantier")
+
+
+@tool("search_chantiers", args_schema=SearchChantierSchema)
+def search_chantiers(org_id: str, query: str) -> Dict[str, Any]:
+    """Cherche un chantier par référence (ref) ou nom avec ILIKE.
+    Usage : quand l'utilisateur donne un nom ou ref de chantier (ex: 'CRF', 'CH-016', 'Bureaux').
+    Retourne les chantiers correspondants, maximum 5 résultats.
+    """
+    try:
+        if not org_id:
+            return standard_response(False, error="org_id manquant")
+        q = (query or "").strip()
+        if len(q) < 2:
+            return standard_response(False, error="Requête trop courte (min 2 caractères)")
+        
+        result = (
+            get_supabase()
+            .table("chantiers")
+            .select("id, ref, nom, statut")
+            .eq("org_id", org_id)
+            .or_(f"ref.ilike.%{q}%,nom.ilike.%{q}%")
+            .limit(5)
+            .execute()
+        )
+        if not result.data:
+            return standard_response(True, [], message=f"Aucun chantier trouvé pour '{query}'.")
+        
+        return standard_response(
+            True, result.data,
+            message=f"{len(result.data)} chantier(s) trouvé(s) pour '{query}'."
+        )
     except Exception as e:
         return standard_response(False, error=str(e))

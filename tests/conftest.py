@@ -59,7 +59,8 @@ class TgMockClient:
         self.backend_webhook_url = backend_webhook_url
         self.org_id = org_id
         self.webhook_token = webhook_token
-        self._client = httpx.Client(base_url=self.tg_mock_url, timeout=30.0)
+        self._client = httpx.Client(base_url=self.tg_mock_url, timeout=90.0)
+        self._history: list[dict] = []  # buffer of all messages (user + bot)
         self._ensure_chat_exists()
 
     def _ensure_chat_exists(self) -> None:
@@ -107,7 +108,7 @@ class TgMockClient:
             "message": message,
         }
 
-    def send_text(self, text: str) -> dict:
+    def send_text(self, text: str, thread_id: Optional[str] = None) -> dict:
         """Inject a text message as the test user.
 
         Posts a Telegram Update payload to the backend webhook. The backend
@@ -116,10 +117,17 @@ class TgMockClient:
         """
         msg_id = int(time.time() * 1000) % 1000000
         update = self._make_update(message_id=msg_id, text=text)
+        if thread_id:
+            update["message"]["message_thread_id"] = thread_id
         resp = self._client.post(self._webhook_endpoint(), json=update)
         resp.raise_for_status()
         logger.info("📤 Injected text message: %s", text[:80])
         data = resp.json()
+        self._history.append({
+            "role": "user",
+            "type": "text",
+            "content": text,
+        })
         return self._parse_result(data)
 
     def _parse_result(self, data: dict) -> dict:
@@ -129,7 +137,7 @@ class TgMockClient:
             reply = data["result"].get("reply_text")
         return {"backend_status": 200, "reply_text": reply}
 
-    def send_photo(self, file_path: str, caption: Optional[str] = None) -> dict:
+    def send_photo(self, file_path: str, caption: Optional[str] = None, thread_id: Optional[str] = None) -> dict:
         """Inject a photo message with an optional caption."""
         msg_id = int(time.time() * 1000) % 1000000
         payload = self._make_update(
@@ -147,13 +155,21 @@ class TgMockClient:
         )
         if caption:
             payload["message"]["caption"] = caption
+        if thread_id:
+            payload["message"]["message_thread_id"] = thread_id
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected photo: %s", file_path)
         data = resp.json()
+        self._history.append({
+            "role": "user",
+            "type": "photo",
+            "content": file_path,
+            "caption": caption or "",
+        })
         return self._parse_result(data)
 
-    def send_document(self, file_path: str, caption: Optional[str] = None) -> dict:
+    def send_document(self, file_path: str, caption: Optional[str] = None, thread_id: Optional[str] = None) -> dict:
         """Inject a document message with an optional caption."""
         msg_id = int(time.time() * 1000) % 1000000
         payload = self._make_update(
@@ -169,13 +185,21 @@ class TgMockClient:
         )
         if caption:
             payload["message"]["caption"] = caption
+        if thread_id:
+            payload["message"]["message_thread_id"] = thread_id
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected document: %s", file_path)
         data = resp.json()
+        self._history.append({
+            "role": "user",
+            "type": "document",
+            "content": file_path,
+            "caption": caption or "",
+        })
         return self._parse_result(data)
 
-    def send_voice(self, file_path: str) -> dict:
+    def send_voice(self, file_path: str, thread_id: Optional[str] = None) -> dict:
         """Inject a voice message."""
         msg_id = int(time.time() * 1000) % 1000000
         payload = self._make_update(
@@ -188,10 +212,17 @@ class TgMockClient:
                 "file_size": Path(file_path).stat().st_size,
             },
         )
+        if thread_id:
+            payload["message"]["message_thread_id"] = thread_id
         resp = self._client.post(self._webhook_endpoint(), json=payload)
         resp.raise_for_status()
         logger.info("📤 Injected voice: %s", file_path)
         data = resp.json()
+        self._history.append({
+            "role": "user",
+            "type": "voice",
+            "content": file_path,
+        })
         return self._parse_result(data)
 
     # ── Reading bot replies ────────────────────────────────────────────
@@ -247,6 +278,113 @@ class TgMockClient:
             f"Timed out after {timeout}s waiting for {expected_count} reply(ies). "
             f"Got {len(all_messages)} so far."
         )
+
+    # ── Callback / inline button clicks ────────────────────────────
+
+    def _make_callback_query(
+        self,
+        callback_data: str,
+        message: dict,
+    ) -> dict:
+        """Build a Telegram callback_query Update payload."""
+        return {
+            "update_id": int(time.time() * 1000) % 1000000,
+            "callback_query": {
+                "id": f"cb_{int(time.time() * 1000)}",
+                "from": dict(TEST_FROM_USER),
+                "message": message,
+                "chat_instance": str(int(time.time())),
+                "data": callback_data,
+            },
+        }
+
+    def send_callback(
+        self,
+        click_button_text: str,
+        thread_id: Optional[str] = None,
+    ) -> dict:
+        """Click an inline keyboard button in the last bot reply.
+
+        Steps:
+        1. Fetches the latest messages from tg-mock via getUpdates.
+        2. Searches each message's ``reply_markup.inline_keyboard`` for a
+           button whose ``text`` *contains* ``click_button_text``.
+        3. Posts a ``callback_query`` update to the backend webhook with
+           the matched button's ``callback_data``.
+
+        Returns the backend webhook response (parsed).
+        """
+        # Fetch latest updates from tg-mock
+        replies = self.get_replies(expected_count=1, timeout=10.0)
+        if not replies:
+            raise RuntimeError(
+                f"No bot replies found — cannot click button '{click_button_text}'"
+            )
+
+        # Search for the button in each reply
+        matched_message = None
+        matched_callback_data = None
+
+        for msg in reversed(replies):
+            reply_markup = msg.get("reply_markup") or {}
+            inline_keyboard = reply_markup.get("inline_keyboard") or []
+            for row in inline_keyboard:
+                for btn in row:
+                    btn_text = btn.get("text", "")
+                    if click_button_text.lower() in btn_text.lower():
+                        matched_callback_data = btn.get("callback_data")
+                        matched_message = msg
+                        break
+                if matched_callback_data:
+                    break
+            if matched_callback_data:
+                break
+
+        if matched_callback_data is None:
+            # Log available buttons for debugging
+            available = []
+            for msg in replies:
+                rmk = msg.get("reply_markup") or {}
+                for row in rmk.get("inline_keyboard") or []:
+                    for btn in row:
+                        available.append(btn.get("text", ""))
+            raise RuntimeError(
+                f"Button '{click_button_text}' not found in any reply. "
+                f"Available buttons: {available}"
+            )
+
+        # Build and post callback_query update
+        callback_update = self._make_callback_query(
+            callback_data=matched_callback_data,
+            message=matched_message,
+        )
+
+        resp = self._client.post(self._webhook_endpoint(), json=callback_update)
+        resp.raise_for_status()
+        logger.info(
+            "🖱️ Clicked button '%s' (callback_data=%s)",
+            click_button_text,
+            matched_callback_data,
+        )
+        data = resp.json()
+        return self._parse_result(data)
+
+    # ── Warmup ──────────────────────────────────────────────────────
+
+    def warmup(self, thread_id: Optional[str] = None) -> dict:
+        """Send /start to warm up Vertex AI cold start.
+
+        This triggers the bot's startup flow. Returns the webhook
+        response from the backend.
+        """
+        logger.info("🔥 Warmup: sending /start to warm up Vertex AI")
+        return self.send_text("/start")
+
+    # ── History ─────────────────────────────────────────────────────
+
+    def clear_history(self) -> None:
+        """Clear the internal _history buffer."""
+        self._history.clear()
 
     def close(self) -> None:
         self._client.close()
@@ -439,7 +577,7 @@ class JudgeClient:
                 from google import genai
 
                 self._client = genai.Client(api_key=api_key)
-                self._model_name = os.getenv("GEMINI_JUDGE_MODEL", "gemini-2.0-flash")
+                self._model_name = os.getenv("GEMINI_JUDGE_MODEL", "gemini-2.5-flash")
                 # Validate the key with a lightweight call
                 logger.info(
                     "🤖 Judge: Gemini Flash initialized (model=%s)", self._model_name

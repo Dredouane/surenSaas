@@ -304,16 +304,34 @@ class WebhookHandlerService:
                 except Exception as e:
                     logger.warning(f"Impossible de résoudre l'UUID pour {chantier_ref}: {e}")
             
-            # Mise à jour du State ET de l'historique (Signal fort pour le LLM)
-            human_msg = f"Je sélectionne le chantier {chantier_ref} (UUID: {chantier_uuid})"
-            ai_msg = f"C'est noté chef ! On travaille maintenant sur le chantier : {chantier_ref} (ID: {chantier_uuid}) 🏗️"
-            await graph.aupdate_state(config, {
-                "chantier_id": chantier_uuid,
-                "messages": [
-                    HumanMessage(content=human_msg),
-                    AIMessage(content=ai_msg)
-                ]
-            })
+            # Récupérer le buffer_data existant (infos déjà collectées)
+            current_state = await graph.aget_state(config)
+            buf = (current_state.values or {}).get("buffer_data")
+            
+            # Construire le message de reprise avec ou sans buffer
+            if buf:
+                # Restaurer le contexte : on remet le buffer dans les messages
+                reprise_msg = (
+                    f"Le chantier {chantier_ref} est maintenant sélectionné. "
+                    f"Reprends l'action en cours avec ces infos : {buf}. "
+                    f"Termine l'opération."
+                )
+                await graph.aupdate_state(config, {
+                    "chantier_id": chantier_uuid,
+                    "buffer_data": None,  # Vider le buffer après utilisation
+                    "messages": [
+                        HumanMessage(content=f"Je sélectionne le chantier {chantier_ref} (UUID: {chantier_uuid})"),
+                        AIMessage(content=reprise_msg)
+                    ]
+                })
+            else:
+                await graph.aupdate_state(config, {
+                    "chantier_id": chantier_uuid,
+                    "messages": [
+                        HumanMessage(content=f"Je sélectionne le chantier {chantier_ref} (UUID: {chantier_uuid})"),
+                        AIMessage(content=f"C'est noté chef ! On travaille maintenant sur le chantier : {chantier_ref} 🏗️")
+                    ]
+                })
             
             # Feedback utilisateur Telegram
             await self.tg_interface.send_message(

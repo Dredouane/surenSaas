@@ -26,7 +26,8 @@ from app.services.agents.tools import (
     create_operation,
     manage_attendance,
     report_progress,
-    manage_tasks
+    manage_tasks,
+    search_chantiers,
 )
 from app.agents.tools.depense_tools import create_depense
 from app.agents.tools.attendance_tools import match_resources, upsert_attendance
@@ -77,6 +78,8 @@ class AgentState(TypedDict):
     hitl_choice: Optional[str]
     # --- Interface structurée ---
     pending_form: Optional[Dict[str, Any]]  # État du formulaire en cours (sérialisé)
+    # --- Buffer de contexte (Phase 2.6) ---
+    buffer_data: Optional[Dict[str, Any]]  # Données en attente de chantier
 
 # --- NODES ---
 
@@ -172,32 +175,47 @@ def call_model_node(state: AgentState):
     summary_context = f"\nRésumé précédent : {state.get('summary')}" if state.get("summary") else ""
     urgency = "\n🚨 PRIORITÉ HAUTE" if state.get("is_urgent") else ""
     
+    buffer_context = ""
+    buf = state.get("buffer_data")
+    if buf:
+        buffer_context = f"\n📋 CONTEXTE EN ATTENTE : Tu avais commencé à traiter une opération avant de demander le chantier. Infos collectées : {buf}. Complète maintenant l'action."
+    print(f"[BUFFER_STATE] buffer_data={json.dumps(buf if buf else {})} | chantier_id={state.get('chantier_id', 'None')}")
+    
     system_prompt = (
         f"Tu es l'assistant de chantier Suren, ton de 'collègue de terrain' (direct, pro, emojis 👷🏗️). "
         f"Contexte : {state.get('user_name', 'Chef')}, Org: {state.get('org_id', 'Non défini')}, Chantier: {state.get('chantier_id') or 'Non défini'}. "
-        f"{summary_context}{urgency}\n\n"
+        f"{summary_context}{urgency}"
+        f"{buffer_context}\n\n"
         "RÈGLES :\n"
         "1. Toute action d'écriture (créer, modifier) doit passer par un Tool.\n"
         "2. Si tu appelles un outil, explique brièvement ce que tu vas faire dans le texte du message.\n"
-        "3. Si l'utilisateur veut enregistrer une opération (dépense, pointage, avancement, tâche) "
-        "et qu'aucun chantier n'est sélectionné : TU DOIS appeler **get_user_chantiers** immédiatement. "
-        "Ne demande jamais 'sur quel chantier' en texte. Utilise format_response pour afficher les boutons.\n"
-        "4. NE JAMAIS halluciner de données.\n"
-        "5. IMPORTANT : Tu DOIS utiliser l'outil **format_response** pour structurer tes interactions :\n"
-        "   - Pour proposer des choix (menus, listes de chantiers) : action=DISPLAY_MENU, payload={\"options\": [...]}\n"
-        "   - Pour démarrer une saisie (dépense, pointage) : action=INIT_FORM, payload={form_id, steps}\n"
-        "   - Pour une validation critique (ex: confirmer une dépense) : action=CONFIRM_ACTION\n"
-        "   - Si aucune action spéciale n'est requise, réponds normalement en texte.\n"
-        "6. IMPORTANT : Quand tu reçois des données d'un outil (liste de chantiers, détails, etc.), "
-        "tu DOIS utiliser format_response(action=DISPLAY_MENU, payload={\"options\": [liste]}) "
-        "pour les afficher sous forme de boutons cliquables.\n"
-        "7. OBLIGATION : Quand l'utilisateur te donne une description d'opération (ex: 'travaux préparatoires'), "
-        "tu DOIS appeler **create_operation** avec cette description. Ne réponds jamais 'je vais enregistrer' "
-        "sans appeler l'outil. L'outil fera la sauvegarde réelle.\n"
-        "   - De même pour **create_depense**, **manage_attendance**, **report_progress**, **manage_tasks** : "
-        "si l'utilisateur décrit une action, appelle le tool correspondant immédiatement."
-        "EXEMPLE : Si l'outil te retourne des chantiers, appelle format_response avec les refs : "
+        '3. Si l\'utilisateur veut enregistrer une opération (dépense, pointage, avancement, tâche) '
+        'et qu\'aucun chantier n\'est sélectionné : cherche avec **search_chantiers(query=...)** d\'abord. '
+        'Si l\'utilisateur donne un nom (ex: \'CRF\', \'Bureaux Tech\'), appelle search_chantiers. '
+        'Si rien trouvé, appelle **get_user_chantiers**. '
+        'Ne demande jamais "sur quel chantier" en texte — utilise format_response DISPLAY_MENU.\n'
+        '4. NE JAMAIS halluciner de données.\n'
+        '5. IMPORTANT : Tu DOIS utiliser l\'outil **format_response** pour structurer tes interactions :\n'
+        '   - Pour proposer des choix (menus, listes de chantiers) : action=DISPLAY_MENU, payload={"options": [...]}\n'
+        '   - Pour démarrer une saisie (dépense, pointage) : action=INIT_FORM, payload={form_id, steps}\n'
+        '   - Pour une validation critique (ex: confirmer une dépense) : action=CONFIRM_ACTION\n'
+        '   - Si aucune action spéciale n\'est requise, réponds normalement en texte.\n'
+        '6. IMPORTANT : Quand tu reçois des données d\'un outil (liste de chantiers, détails, etc.), '
+        'tu DOIS utiliser format_response(action=DISPLAY_MENU, payload={"options": [liste]}) '
+        'pour les afficher sous forme de boutons cliquables.\n'
+        '7. OBLIGATION : Quand l\'utilisateur te donne une description d\'opération (ex: \'travaux préparatoires\'), '
+        'tu DOIS appeler **create_operation** avec cette description. Ne réponds jamais \'je vais enregistrer\' '
+        'sans appeler l\'outil. L\'outil fera la sauvegarde réelle.\n'
+        '   - De même pour **create_depense**, **manage_attendance**, **report_progress**, **manage_tasks** : '
+        'si l\'utilisateur décrit une action, appelle le tool correspondant immédiatement.'
+        'EXEMPLE : Si l\'outil te retourne des chantiers, appelle format_response avec les refs : '
         "format_response(action='DISPLAY_MENU', payload={'options': ['CH-001 - Villa', 'CH-002 - Bureaux']})"
+        '\n'
+        '8. BUFFER_CONTEXT : Si tu vois ci-dessus "📋 CONTEXTE EN ATTENTE" dans le contexte, '
+        "c'est que l'utilisateur avait donné des infos (montant, fournisseur, description...) "
+        'avant de choisir le chantier. Tu DOIS compléter l\'action avec les données du buffer. '
+        "Ex: si le buffer dit 'montant=120, fournisseur=Total' et que le chantier est maintenant connu, "
+        'appelle create_depense avec toutes les infos.'
     )
     
     ensure_vertex_credentials()
@@ -209,7 +227,7 @@ def call_model_node(state: AgentState):
     )
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
-    tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance]
+    tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
     llm_with_tools = llm.bind_tools(tools)
     
     response = llm_with_tools.invoke(msgs)
@@ -262,7 +280,7 @@ def hitl_formatter_node(state: AgentState):
     
     parsed = ActionRegistry.parse_response(last_msg)
     
-    updates = {"last_action_status": "idle", "pending_form": None, "pending_tool_call": None}
+    updates = {"last_action_status": "idle", "pending_form": None, "pending_tool_call": None, "buffer_data": None}
     
     # Vérifier si le tool_call est format_response (ne pas bloquer en HITL)
     is_format_response = False
@@ -272,6 +290,7 @@ def hitl_formatter_node(state: AgentState):
     # Cas 1 : Outil métier appelé → interruption HITL (sauf format_response)
     if last_msg.tool_calls and not is_format_response:
         updates["last_action_status"] = "pending_confirm"
+        updates["buffer_data"] = state.get("buffer_data")  # On garde buffer_data pendant HITL
         # Priorité au pending_tool_call déjà injecté par pre_reflector (qui contient org_id)
         updates["pending_tool_call"] = state.get("pending_tool_call", last_msg.tool_calls[0])
         return updates
@@ -312,6 +331,25 @@ def tool_result_formatter_node(state: AgentState):
     
     # Liste de données (chantiers) → format_response DISPLAY_MENU
     if data and isinstance(data, list) and len(data) > 0:
+        # Vérifier si le tool appelé est search_chantiers ou get_user_chantiers
+        # Dans ce cas, on a besoin de buffer_data pour le contexte ultérieur
+        # Chercher des infos de dépense/opération dans les derniers messages
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        
+        # Extraire le buffer_data potentiel depuis les messages récents du LLM
+        # Le LLM a déjà analysé l'intention avant d'appeler l'outil
+        buffer_info = {}
+        for msg in reversed(state.get("messages", [])[-5:]):
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                content = msg.content.lower()
+                # Détection simple: montant, fournisseur, description dans le message
+                import re
+                montant_match = re.search(r'(\d+[\.,]?\d*)\s*€', content)
+                if montant_match:
+                    buffer_info["montant_detected"] = montant_match.group(0)
+                    buffer_info["montant_raw"] = montant_match.group(1)
+        
         try:
             options = [f"{d.get('ref', 'N/A')} - {d.get('nom', d.get('description', ''))}" for d in data]
         except Exception:
@@ -331,6 +369,7 @@ def tool_result_formatter_node(state: AgentState):
                     "type": "tool_call"
                 }]
             )],
+            "buffer_data": buffer_info if buffer_info else None,  # Sauvegarde pour reprise
             "last_action_status": "idle"
         }
     
@@ -379,7 +418,7 @@ def create_agent_graph(checkpointer):
     workflow.add_node("agent", call_model_node)
     workflow.add_node("pre_reflector", pre_reflector_node)
     workflow.add_node("formatter", hitl_formatter_node)
-    workflow.add_node("tools", ToolNode([get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance]))
+    workflow.add_node("tools", ToolNode([get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]))
     workflow.add_node("tool_result_formatter", tool_result_formatter_node)
     
     # --- Edges ---
