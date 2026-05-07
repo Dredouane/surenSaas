@@ -187,49 +187,16 @@ class SessionRunner:
         conversation_text = self._format_conversation_for_judge()
 
         # Evaluate the bot reply with the judge
-        verdict_obj = self._judge_step(
-            system_prompt="Tu es un juge QA pour un bot Telegram de chantier BTP.",
+        from tests.judge import judge_step
+
+        verdict_obj = judge_step(
             scenario_prompt=step.judge_prompt,
-            conversation_history=conversation_text,
             bot_reply=bot_reply_text,
+            conversation_history=conversation_text,
             step_index=step_index,
         )
 
         return verdict_obj
-
-    def _judge_step(
-        self,
-        system_prompt: str,
-        scenario_prompt: str,
-        conversation_history: str,
-        bot_reply: str,
-        step_index: int = 0,
-    ) -> Verdict:
-        """Evaluate a bot reply using the LLM judge.
-
-        Wraps ``judge_response`` for backward compatibility with old-style
-        scenarios that carry their judge config via ``Scenario.judge``.
-        """
-        from tests.judge import judge_response as old_judge
-        from tests.models import ScenarioJudge
-        from types import SimpleNamespace
-
-        old_scenario = SimpleNamespace(
-            test_case="__engine_step__",
-            description="",
-            tags=[],
-            judge=ScenarioJudge(
-                prompt=scenario_prompt,
-                expected_verdict="pass",
-            ),
-        )
-
-        verdict_obj = old_judge(old_scenario, bot_reply)
-        return Verdict(
-            score=verdict_obj.score,
-            reason=verdict_obj.reason,
-            step_index=step_index,
-        )
 
     def _format_conversation_for_judge(self) -> str:
         """Format accumulated history as text for the judge prompt."""

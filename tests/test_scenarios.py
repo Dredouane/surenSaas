@@ -67,7 +67,7 @@ def _backend_is_reachable() -> bool:
 
 
 @pytest.mark.e2e
-def test_scenario(scenario, tg_mock_client, judge_client) -> None:
+def test_scenario(scenario, tg_mock_client) -> None:
     """Run a multi-step scenario end-to-end via SessionRunner.
 
     Steps:

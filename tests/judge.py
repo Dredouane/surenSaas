@@ -1,11 +1,11 @@
-"""LLM-based judge for evaluating Telegram bot replies against scenarios.
+"""
+LLM-based judge for evaluating Telegram bot replies against multi-step scenarios.
 
-Uses Gemini 2.0 Flash (google-genai SDK preferred, HTTP POST fallback).
+Uses Gemini 2.5 Flash via HTTP API (no Vertex AI / SDK dependency).
 Falls back to a mock judge (always score=1) if no GEMINI_API_KEY is set.
 
-Deep module principle:
-    - Public API is a single function: judge_response(scenario, bot_reply_text)
-    - Internals (API calls, retries, JSON parsing) are fully encapsulated.
+The judge is a "Session Auditor" — it receives the full conversation history
+and evaluates each step's compliance with the scenario prompt.
 """
 
 import json
@@ -13,43 +13,64 @@ import logging
 import os
 from typing import Optional
 
-from tests.models import JudgeVerdict, Scenario
+from tests.models import Verdict
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ───────────────────────────────────────────────────────────────
+# ── Constants ──────────────────────────────────────────────────────────
 _GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-2.5-flash:generateContent"
 )
-_GEMINI_MODEL = "gemini-2.5-flash"
-_TIMEOUT_S = 10
-_MAX_RETRIES = 2
+_GEMINI_TIMEOUT_S = 15
+_GEMINI_MAX_RETRIES = 2
+
+_DEFAULT_SYSTEM_PROMPT = (
+    "Tu es un Auditeur de Session. Tu reçois un historique de conversation "
+    "entre un utilisateur et un agent de gestion de chantier.\n\n"
+    "TA MISSION :\n"
+    "1. Validation de la Mémoire : L'agent doit démontrer qu'il conserve "
+    "les informations critiques (Chantier, Organisation) d'un tour à l'autre.\n"
+    "2. Zéro Hallucination : Si l'agent change de chantier ou oublie un montant "
+    "mentionné plus haut, le score est FAIL.\n"
+    "3. Véracité DB : L'agent doit utiliser les noms officiels (souvent en MAJUSCULES) "
+    "s'il les a extraits de la base de données.\n\n"
+    'FORMAT DE RÉPONSE UNIQUE : {"verdict": "PASS"} ou {"verdict": "FAIL", "reason": "..."}'
+)
 
 
-def _build_judge_prompt(scenario: Scenario, bot_reply_text: str) -> str:
-    """Build the system prompt sent to the judge LLM."""
-    return (
-        "Tu es un juge QA pour un bot Telegram de chantier BTP.\n\n"
-        f"SCENARIO:\n{scenario.judge.prompt}\n\n"
-        f"REPONSE DU BOT:\n{bot_reply_text}\n\n"
-        "Réponds UNIQUEMENT en JSON: "
-        '{"score": 1|0, "reason": "..."}'
+def _get_api_key() -> Optional[str]:
+    """Get the Gemini API key from environment."""
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+
+def _build_prompt(
+    system_prompt: str,
+    scenario_prompt: str,
+    conversation_history: str,
+) -> str:
+    """Build the full prompt for the judge LLM."""
+    parts = []
+    if system_prompt:
+        parts.append(system_prompt)
+    if conversation_history:
+        parts.append(f"\nHISTORIQUE DE LA CONVERSATION :\n{conversation_history}")
+    parts.append(f"\nCONSIGNE POUR CETTE ÉTAPE :\n{scenario_prompt}")
+    parts.append(
+        '\nRéponds UNIQUEMENT en JSON : '
+        '{"verdict": "PASS"} ou {"verdict": "FAIL", "reason": "..."}'
     )
+    return "\n".join(parts)
 
 
-def _parse_judge_response(text: str) -> Optional[dict]:
-    """Parse JSON from the LLM response, stripping markdown fences if needed.
-
-    Returns a parsed dict with 'score' and 'reason', or None on failure.
-    """
+def _parse_verdict(text: str) -> Optional[Verdict]:
+    """Parse the LLM response into a Verdict."""
     raw = text.strip()
-    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    # Strip markdown code fences
     if raw.startswith("```"):
-        # Find the first and last triple backtick
         first_nl = raw.find("\n")
         if first_nl != -1:
-            raw = raw[first_nl + 1 :]
+            raw = raw[first_nl + 1:]
         last_bt = raw.rfind("```")
         if last_bt != -1:
             raw = raw[:last_bt]
@@ -60,124 +81,100 @@ def _parse_judge_response(text: str) -> Optional[dict]:
     except json.JSONDecodeError:
         return None
 
-    if "score" not in data or "reason" not in data:
-        return None
-
-    return data
-
-
-def _judge_via_sdk(api_key: str, scenario: Scenario, bot_reply_text: str) -> Optional[JudgeVerdict]:
-    """Evaluate using the google-genai SDK."""
-    try:
-        from google import genai
-
-        client = genai.Client(api_key=api_key)
-        prompt = _build_judge_prompt(scenario, bot_reply_text)
-        response = client.models.generate_content(
-            model=_GEMINI_MODEL,
-            contents=prompt,
-        )
-        text = response.text.strip()
-        data = _parse_judge_response(text)
-        if data is None:
-            return None
-        return JudgeVerdict(
-            score=int(data["score"]),
-            reason=str(data["reason"]),
-        )
-    except Exception as exc:
-        logger.warning("google-genai SDK call failed: %s", exc)
-        return None
+    verdict_str = data.get("verdict", "")
+    if verdict_str == "PASS":
+        return Verdict(score=1, reason=data.get("reason", ""), step_index=0)
+    elif verdict_str == "FAIL":
+        return Verdict(score=0, reason=data.get("reason", ""), step_index=0)
+    return None
 
 
-def _judge_via_http(api_key: str, scenario: Scenario, bot_reply_text: str) -> Optional[JudgeVerdict]:
-    """Evaluate using raw HTTP POST to the Gemini API."""
-    try:
-        import httpx
+def _call_gemini(prompt: str, api_key: str) -> Optional[str]:
+    """Call Gemini 2.5 Flash via HTTP API. Returns response text or None."""
+    import httpx
 
-        url = f"{_GEMINI_API_URL}?key={api_key}"
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": _build_judge_prompt(scenario, bot_reply_text)}
-                    ]
-                }
-            ]
-        }
+    url = f"{_GEMINI_API_URL}?key={api_key}"
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-        with httpx.Client(timeout=_TIMEOUT_S) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-            result = resp.json()
+    for attempt in range(1 + _GEMINI_MAX_RETRIES):
+        try:
+            with httpx.Client(timeout=_GEMINI_TIMEOUT_S) as client:
+                resp = client.post(url, json=payload)
+                resp.raise_for_status()
+                result = resp.json()
 
-        # Extract text from Gemini response
-        candidates = result.get("candidates", [])
-        if not candidates:
-            return None
-        parts = candidates[0].get("content", {}).get("parts", [])
-        if not parts:
-            return None
-        text = parts[0].get("text", "").strip()
-        if not text:
-            return None
+            candidates = result.get("candidates", [])
+            if not candidates:
+                logger.warning("Gemini returned no candidates (attempt %d)", attempt + 1)
+                continue
 
-        data = _parse_judge_response(text)
-        if data is None:
-            return None
-        return JudgeVerdict(
-            score=int(data["score"]),
-            reason=str(data["reason"]),
-        )
-    except Exception as exc:
-        logger.warning("HTTP Gemini call failed: %s", exc)
-        return None
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if not parts:
+                logger.warning("Gemini returned no parts (attempt %d)", attempt + 1)
+                continue
 
+            return parts[0].get("text", "").strip()
 
-def judge_response(scenario: Scenario, bot_reply_text: str) -> JudgeVerdict:
-    """Evaluate a bot reply against a test scenario using Gemini Flash.
-
-    Uses the google-genai SDK when available, falling back to raw HTTP POST.
-    If no GEMINI_API_KEY is set (or all calls fail), returns a mock pass verdict
-    so that tests can run during development without an API key.
-
-    Args:
-        scenario: The test scenario with judge configuration.
-        bot_reply_text: The text produced by the bot in response to the input.
-
-    Returns:
-        JudgeVerdict with score (1=pass, 0=fail) and reason.
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.info("No GEMINI_API_KEY set — returning mock pass verdict")
-        return JudgeVerdict(
-            score=1,
-            reason="mock — no GEMINI_API_KEY",
-        )
-
-    # Try SDK first (preferred), then HTTP, with retries
-    for attempt in range(1 + _MAX_RETRIES):
-        # Strategy 1: google-genai SDK
-        verdict = _judge_via_sdk(api_key, scenario, bot_reply_text)
-        if verdict is not None:
-            return verdict
-
-        # Strategy 2: raw HTTP POST
-        verdict = _judge_via_http(api_key, scenario, bot_reply_text)
-        if verdict is not None:
-            return verdict
-
-        if attempt < _MAX_RETRIES:
-            logger.info(
-                "Judge JSON parse failed (attempt %d/%d), retrying...",
+        except Exception as exc:
+            logger.warning(
+                "Gemini API call failed (attempt %d/%d): %s",
                 attempt + 1,
-                _MAX_RETRIES + 1,
+                _GEMINI_MAX_RETRIES + 1,
+                exc,
             )
 
-    # All attempts exhausted
-    logger.error("Judge LLM failed after %d attempts — returning mock pass", _MAX_RETRIES + 1)
-    return JudgeVerdict(
-        score=1,
-        reason="mock — judge LLM failed after retries",
+    return None
+
+
+def judge_step(
+    scenario_prompt: str,
+    bot_reply: str,
+    conversation_history: str = "",
+    system_prompt: str = "",
+    step_index: int = 0,
+) -> Verdict:
+    """Evaluate a single step of a scenario using Gemini Flash.
+
+    Args:
+        scenario_prompt: The criteria for this specific step.
+        bot_reply: The bot's response text to evaluate.
+        conversation_history: Full conversation up to this point (for context).
+        system_prompt: Optional override of the default system prompt.
+        step_index: Index of this step (for reporting).
+
+    Returns:
+        A ``Verdict`` with score and reason.
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("No GEMINI_API_KEY set — returning mock pass verdict")
+        return Verdict(
+            score=1,
+            reason="mock — no GEMINI_API_KEY set",
+            step_index=step_index,
+        )
+
+    system = system_prompt or _DEFAULT_SYSTEM_PROMPT
+    prompt = _build_prompt(system, scenario_prompt, conversation_history)
+
+    text = _call_gemini(prompt, api_key)
+    if text is None:
+        logger.error("Gemini API failed after all retries — returning mock pass")
+        return Verdict(
+            score=1,
+            reason="mock — Gemini API failed after retries",
+            step_index=step_index,
+        )
+
+    verdict = _parse_verdict(text)
+    if verdict is not None:
+        verdict.step_index = step_index
+        logger.info("⚖️  Judge: score=%s — %s", verdict.score, verdict.reason[:120])
+        return verdict
+
+    logger.warning("Gemini returned unparseable response: %s", text[:200])
+    return Verdict(
+        score=0,
+        reason=f"Unparseable judge response: {text[:100]}",
+        step_index=step_index,
     )

@@ -395,7 +395,7 @@ def tg_mock_client() -> TgMockClient:
     """Session-scoped fixture providing a TgMockClient instance."""
     client = TgMockClient(
         tg_mock_url=TG_MOCK_URL,
-        bot_token=BOT_TOKEN,
+        bot_token=os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN") or BOT_TOKEN,
         backend_webhook_url=BACKEND_WEBHOOK_URL,
         org_id=ORG_ID,
         webhook_token=WEBHOOK_TOKEN,
@@ -569,25 +569,18 @@ class JudgeClient:
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
-        self._model = None
         self._mock = api_key is None
 
         if not self._mock:
-            try:
-                from google import genai
-
-                self._client = genai.Client(api_key=api_key)
-                self._model_name = os.getenv("GEMINI_JUDGE_MODEL", "gemini-2.5-flash")
-                # Validate the key with a lightweight call
-                logger.info(
-                    "🤖 Judge: Gemini Flash initialized (model=%s)", self._model_name
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to initialize Gemini client (%s). Falling back to mock judge.",
-                    exc,
-                )
-                self._mock = True
+            # Use HTTP API directly (no SDK dependency needed)
+            self._api_url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                "gemini-2.5-flash:generateContent"
+            )
+            self._model_name = os.getenv("GEMINI_JUDGE_MODEL", "gemini-2.5-flash")
+            logger.info(
+                "🤖 Judge: Gemini Flash initialized via HTTP (model=%s)", self._model_name
+            )
 
         if self._mock:
             logger.info("🤖 Judge: using MOCK judge (no API key or init failed)")
@@ -605,24 +598,41 @@ class JudgeClient:
         prompt = (
             f"SCENARIO: {scenario_prompt}\n"
             f"REPONSE: {bot_reply}\n\n"
-            "Réponds UNIQUEMENT en JSON: {\"score\": 1|0, \"reason\": \"...\"}"
+            'Réponds UNIQUEMENT en JSON: {"score": 1|0, "reason": "..."}'
         )
 
         try:
-            response = self._client.models.generate_content(
-                model=self._model_name,
-                contents=prompt,
-            )
-            text = response.text.strip()
+            import httpx
+
+            url = f"{self._api_url}?key={self.api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(url, json=payload)
+                resp.raise_for_status()
+                result = resp.json()
+
+            # Extract text from Gemini response
+            candidates = result.get("candidates", [])
+            if not candidates:
+                return {"score": 0, "reason": "No candidates from Gemini"}
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if not parts:
+                return {"score": 0, "reason": "No parts in Gemini response"}
+            text = parts[0].get("text", "").strip()
+            if not text:
+                return {"score": 0, "reason": "Empty text from Gemini"}
+
             # Strip markdown code fences if present
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("\n", 1)[0]
             import json
 
-            result = json.loads(text)
+            result_json = json.loads(text)
             return {
-                "score": int(result.get("score", 0)),
-                "reason": str(result.get("reason", "")),
+                "score": int(result_json.get("score", 0)),
+                "reason": str(result_json.get("reason", "")),
             }
         except Exception as exc:
             logger.error("Judge LLM call failed: %s", exc)
