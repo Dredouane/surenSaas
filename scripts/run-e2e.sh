@@ -12,7 +12,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 E2E_DIR="$PROJECT_DIR/e2e-harness"
-BACKEND_DIR="$PROJECT_DIR/surenSaasBack"
 
 USE_TG_MOCK=false
 VERBOSE=false
@@ -32,11 +31,13 @@ echo ""
 # ── 1. Extraire les variables du .bashrc sans le sourcer (contourne PS1 guard) ──
 if [ -f ~/.bashrc ]; then
   while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" =~ ^[[:space:]]*# || "$key" =~ ^\[ ]] && continue
+    [ -z "$key" ] && continue
+    [[ "$key" =~ ^[[:space:]]*# ]] && continue
+    [[ "$key" =~ ^\[ ]] && continue
     if [[ "$key" =~ ^export[[:space:]]+(SUPABASE|TELEGRAM|GOOGLE|VERTEX|OPENAI|SUREN|TEST|JWT|GCP|ALLOWED|ORG) ]]; then
-      local k="${key#export }"
-      local v="${value%\"}"; v="${v#\"}"
-      export "$k=$v"
+      clean_key="${key#export }"
+      clean_value="${value%\"}"; clean_value="${clean_value#\"}"
+      export "$clean_key=$clean_value"
     fi
   done < <(grep '^export ' ~/.bashrc)
 fi
@@ -47,6 +48,8 @@ export SUPABASE_URL="${SUPABASE_URL:-https://REDACTED.supabase.co}"
 export SUPABASE_SERVICE_KEY="${TEST_SUPABASE_SERVICE_KEY:-${SUPABASE_SERVICE_KEY:-}}"
 export JWT_SECRET="${TEST_JWT_SECRET:-${JWT_SECRET:-}}"
 export GEMINI_API_KEY="${SUREN_GEMINI_API_KEY:-${GEMINI_API_KEY:-}}"
+# Forcer le port du backend pour les tests (conftest.py lit BACKEND_BASE_URL)
+export BACKEND_BASE_URL="${BACKEND_BASE_URL:-http://localhost:8080}"
 
 # ── 3. Verify required env vars ──────────────────────────────────────────
 : "${SUPABASE_URL:?SUPABASE_URL is required}"
@@ -63,7 +66,6 @@ if [ "$USE_TG_MOCK" = true ]; then
     fi
     export TELEGRAM_TOKEN="${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN:-}"
     docker compose -f "$E2E_DIR/docker-compose.e2e.yml" up -d 2>&1
-
     echo "⏳ Waiting for tg-mock..."
     for i in $(seq 1 15); do
         if curl -sf "http://localhost:8081/" > /dev/null 2>&1; then
@@ -72,7 +74,6 @@ if [ "$USE_TG_MOCK" = true ]; then
         fi
         sleep 2
     done
-
     export TELEGRAM_API_URL="http://localhost:8081"
 else
     echo "📡 Using real Telegram API"
@@ -84,43 +85,26 @@ echo "🚀 Starting backend..."
 BACKEND_LOG="/tmp/backend_e2e_error.log"
 > "$BACKEND_LOG"
 
-# Lancer le script de démarrage backend en arrière-plan
-"$E2E_DIR/start-backend-e2e.sh" &
-BACKEND_PID=$!
+# Lancer le script de démarrage backend (il attend lui-même le health)
+"$E2E_DIR/start-backend-e2e.sh"
+echo "   ✅ start-backend-e2e.sh completed successfully"
+
+# Lire le PID du fichier créé par start-backend-e2e.sh
+BACKEND_PID=$(cat /tmp/backend_uvicorn_pid.txt 2>/dev/null || echo "")
+if [ -z "$BACKEND_PID" ]; then
+    echo "❌ Could not read backend PID"
+    exit 1
+fi
 echo "   Backend PID: $BACKEND_PID"
 
-echo "⏳ Waiting for backend /health..."
-BACKEND_READY=false
-for i in $(seq 1 30); do
-    if curl -sf "http://localhost:8080/health" > /dev/null 2>&1; then
-        echo "   ✅ Backend healthy (attempt $i)"
-
-        # Vérifier que le process est toujours vivant 3s après
-        sleep 3
-        if kill -0 "$BACKEND_PID" 2>/dev/null; then
-            echo "   ✅ Backend process still alive after 3s"
-            BACKEND_READY=true
-            break
-        else
-            echo "   ❌ Backend process died within 3s of health check!"
-            echo "   === Last 20 lines of $BACKEND_LOG ==="
-            tail -20 "$BACKEND_LOG" 2>/dev/null || echo "   (no log file)"
-            exit 1
-        fi
-    fi
-    if [ $i -eq 30 ]; then
-        echo "❌ Backend did not start within 60s"
-        echo "   === Last 30 lines of $BACKEND_LOG ==="
-        tail -30 "$BACKEND_LOG" 2>/dev/null || echo "   (no log file)"
-        kill $BACKEND_PID 2>/dev/null || true
-        exit 1
-    fi
-    sleep 2
-done
-
-if [ "$BACKEND_READY" != true ]; then
-    echo "❌ Backend did not become ready"
-    kill $BACKEND_PID 2>/dev/null || true
+# Vérifier que le process est toujours vivant
+sleep 2
+if kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "   ✅ Backend process still alive"
+else
+    echo "   ❌ Backend process died during startup!"
+    echo "   === Last 20 lines of $BACKEND_LOG ==="
+    tail -20 "$BACKEND_LOG" 2>/dev/null || echo "   (no log file)"
     exit 1
 fi
 

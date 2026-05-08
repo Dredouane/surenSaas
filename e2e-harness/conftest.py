@@ -8,6 +8,7 @@ webhook and reads bot responses via tg-mock getUpdates or directly
 from the webhook response.
 """
 
+import json
 import logging
 import os
 import time
@@ -173,8 +174,19 @@ class TgMockClient:
 
     def _parse_result(self, data: dict) -> dict:
         reply = None
+        # Format 1: {"status": "agentic_success", "result": {"reply_text": "..."}}
         if "result" in data and isinstance(data["result"], dict):
             reply = data["result"].get("reply_text")
+        # Format 2: le result est un dict avec reply_text directement
+        if reply is None and "reply_text" in data:
+            reply = data["reply_text"]
+        # Format 3: le result n'a pas de reply_text mais a une structure JSON — le sérialiser
+        if reply is None and "result" in data:
+            res = data["result"]
+            if isinstance(res, dict):
+                reply = res.get("reply_text") or res.get("message") or res.get("text") or json.dumps(res, ensure_ascii=False, default=str)
+            elif isinstance(res, str):
+                reply = res
         return {"backend_status": 200, "reply_text": reply}
 
     def send_text(self, text: str, thread_id: Optional[str] = None) -> dict:
