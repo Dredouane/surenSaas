@@ -87,6 +87,12 @@ def startup():
         project_id, location, CREDENTIALS_PATH if creds else "none (API key mode)",
     )
 
+    # Warm-up: initialiser le LLM maintenant plutôt qu'au premier appel
+    # Cela déplace le cold start (~30-40s) du premier webhook au démarrage.
+    logger.info("🔄 Warm-up Vertex AI LLM (cold start)...")
+    get_chat_model()
+    logger.info("✅ Vertex AI LLM warm-up terminé")
+
 
 def get_chat_model():
     global _llm_instance
