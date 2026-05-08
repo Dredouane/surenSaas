@@ -279,6 +279,12 @@ class TgMockClient:
 
         Returns the list of message dicts collected (never raises).
         """
+        updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
+        logger.info(
+            "wait_for_reply: polling %s (expected=%d, timeout=%.1fs, interval=%.1fs)",
+            updates_url, expected_count, timeout, poll_interval,
+        )
+
         # Snapshot: record max update_id BEFORE we start waiting
         before = self._snapshot_updates()
 
