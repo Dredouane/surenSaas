@@ -119,6 +119,7 @@ class TgMockClient:
         org_id: str,
         webhook_token: str,
         real_bot_token: Optional[str] = None,
+        _http_client: Optional[httpx.Client] = None,
     ):
         self.tg_mock_url = tg_mock_url.rstrip("/")
         self.bot_token = bot_token
@@ -126,8 +127,9 @@ class TgMockClient:
         self._org_id = org_id
         self._webhook_token = webhook_token
         self._backend_base = backend_webhook_url.rstrip("/")
-        self._client = httpx.Client(base_url=self.tg_mock_url, timeout=90.0)
+        self._client = _http_client or httpx.Client(base_url=self.tg_mock_url, timeout=90.0)
         self._history: list[dict] = []
+        self._last_update_id = 0
 
     # ── Webhook endpoint ──────────────────────────────────────────────
 
@@ -190,6 +192,7 @@ class TgMockClient:
         return {"backend_status": 200, "reply_text": reply}
 
     def send_text(self, text: str, thread_id: Optional[str] = None) -> dict:
+        self._snapshot_updates()
         msg_id = int(time.time() * 1000) % 1000000
         update = self._make_update(message_id=msg_id, text=text)
         if thread_id:
@@ -200,6 +203,7 @@ class TgMockClient:
         return self._parse_result(data)
 
     def send_photo(self, file_path: str, caption: Optional[str] = None, thread_id: Optional[str] = None) -> dict:
+        self._snapshot_updates()
         msg_id = int(time.time() * 1000) % 1000000
         payload = self._make_update(
             message_id=msg_id,
@@ -217,6 +221,7 @@ class TgMockClient:
         return self._parse_result(data)
 
     def send_document(self, file_path: str, caption: Optional[str] = None, thread_id: Optional[str] = None) -> dict:
+        self._snapshot_updates()
         msg_id = int(time.time() * 1000) % 1000000
         payload = self._make_update(
             message_id=msg_id,
@@ -234,44 +239,100 @@ class TgMockClient:
         logger.info("📤 Injected document: %s", file_path)
         return self._parse_result(data)
 
-    # ── getUpdates polling ────────────────────────────────────────────
+    # ── Snapshot + wait_for_reply (polling asynchrone sur getUpdates) ──
 
-    def get_replies(self, expected_count: int = 1, timeout: float = 15.0, poll_interval: float = 0.5) -> list[dict]:
+    def _snapshot_updates(self) -> int:
+        """Record the current max update_id from tg-mock.
+
+        Call this BEFORE injecting a user message, so ``wait_for_reply``
+        can later ignore messages that were already present.
+        """
+        updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
+        resp = self._client.get(
+            updates_url,
+            params={"offset": 0, "timeout": 1},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("ok"):
+                for upd in data.get("result", []):
+                    uid = upd.get("update_id", 0)
+                    if uid > self._last_update_id:
+                        self._last_update_id = uid
+        return self._last_update_id
+
+    def wait_for_reply(
+        self,
+        expected_count: int = 1,
+        timeout: float = 30.0,
+        poll_interval: float = 0.3,
+    ) -> list[dict]:
+        """Poll tg-mock's getUpdates until *expected_count* new messages arrive.
+
+        Uses ``self._last_update_id`` as the lower bound — only messages
+        with a strictly higher ``update_id`` are collected. This implements
+        the "sliding window" semantic of Telegram's getUpdates.
+
+        After the expected count is reached, keeps polling for a short
+        grace window (``poll_interval * 3``) to catch any trailing messages
+        (e.g. a menu button that arrives milliseconds after a text reply).
+
+        Returns the list of message dicts collected (never raises).
+        """
+        # Snapshot: record max update_id BEFORE we start waiting
+        before = self._snapshot_updates()
+
         deadline = time.monotonic() + timeout
-        last_update_id = 0
-        all_messages: list[dict] = []
+        collected: list[dict] = []
+        grace_remaining = 3  # number of extra polls after reaching expected_count
+
+        # Mark all messages seen so far as confirmed by advancing the offset
+        updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
+        self._client.get(
+            updates_url,
+            params={"offset": before + 1, "timeout": 1},
+        )
 
         while time.monotonic() < deadline:
+            updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
             resp = self._client.get(
-                f"/bot{self.bot_token}/getUpdates",
-                params={"offset": last_update_id + 1, "timeout": 1},
+                updates_url,
+                params={"offset": before + 1, "timeout": 1},
             )
-            if resp.status_code != 200:
-                time.sleep(poll_interval)
-                continue
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ok"):
+                    for upd in data.get("result", []):
+                        uid = upd.get("update_id", 0)
+                        if uid > before and "message" in upd:
+                            collected.append(upd["message"])
+                            if uid > self._last_update_id:
+                                self._last_update_id = uid
+                        # Avance l'offset pour confirmer la réception
+                        if uid > before:
+                            before = uid
 
-            data = resp.json()
-            if not data.get("ok"):
-                time.sleep(poll_interval)
-                continue
-
-            for upd in data.get("result", []):
-                last_update_id = max(last_update_id, upd.get("update_id", 0))
-                if "message" in upd:
-                    all_messages.append(upd["message"])
-
-            if len(all_messages) >= expected_count:
-                return all_messages
+            if len(collected) >= expected_count:
+                grace_remaining -= 1
+                if grace_remaining <= 0:
+                    logger.info(
+                        "wait_for_reply: got %d/%d messages after grace window",
+                        len(collected), expected_count,
+                    )
+                    return collected
 
             time.sleep(poll_interval)
 
-        logger.warning("getUpdates timeout after %ss — got %d/%d replies", timeout, len(all_messages), expected_count)
-        return all_messages  # return partial results instead of raising
+        logger.warning(
+            "wait_for_reply timeout after %ss — got %d/%d messages",
+            timeout, len(collected), expected_count,
+        )
+        return collected  # partial results instead of raising
 
     # ── Callback ──────────────────────────────────────────────────────
 
     def send_callback(self, click_button_text: str, thread_id: Optional[str] = None) -> dict:
-        replies = self.get_replies(expected_count=1, timeout=10.0)
+        replies = self.wait_for_reply(expected_count=1, timeout=15.0)
         if not replies:
             raise RuntimeError(f"No bot replies — cannot click '{click_button_text}'")
 
@@ -362,7 +423,7 @@ class JudgeClient:
         try:
             url = f"{self._api_url}?key={self.api_key}"
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            with httpx.Client(timeout=15.0) as client:
+            with httpx.Client(timeout=60.0) as client:
                 resp = client.post(url, json=payload)
                 resp.raise_for_status()
                 result = resp.json()

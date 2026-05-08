@@ -35,10 +35,6 @@ def test_send_callback_parsing_finds_button():
         }
     ]
 
-    client = MagicMock(spec=TgMockClient)
-    client.get_replies.return_value = mock_replies
-
-    # We need to test the actual implementation logic
     from engine import _find_button_in_replies
 
     result = _find_button_in_replies(mock_replies, "CRF")
@@ -46,7 +42,6 @@ def test_send_callback_parsing_finds_button():
     callback_data, message = result
     assert callback_data == "chantier:crf-001"
     assert message["message_id"] == 101
-
 
 def test_send_callback_parsing_case_insensitive():
     """send_callback should match button text case-insensitively."""
@@ -76,7 +71,6 @@ def test_send_callback_parsing_case_insensitive():
     callback_data, _ = result
     assert callback_data == "confirm"
 
-
 def test_send_callback_parsing_no_match_raises():
     """send_callback should raise RuntimeError when button not found."""
     mock_replies = [
@@ -96,7 +90,6 @@ def test_send_callback_parsing_no_match_raises():
     result = _find_button_in_replies(mock_replies, "Non")
     assert result is None, "Should return None when button not found"
 
-
 def test_send_callback_no_reply_markup():
     """send_callback should handle messages without reply_markup gracefully."""
     mock_replies = [
@@ -104,6 +97,23 @@ def test_send_callback_no_reply_markup():
             "message_id": 104,
             "text": "Hello!",
             # no reply_markup
+        }
+    ]
+
+    from engine import _find_button_in_replies
+
+    result = _find_button_in_replies(mock_replies, "anything")
+    assert result is None
+
+def test_send_callback_empty_inline_keyboard():
+    """send_callback should handle empty inline_keyboard gracefully."""
+    mock_replies = [
+        {
+            "message_id": 105,
+            "text": "Menu:",
+            "reply_markup": {
+                "inline_keyboard": []
+            },
         }
     ]
 
@@ -298,6 +308,136 @@ def test_load_scenario_raises_on_missing_file():
 
     with pytest.raises(FileNotFoundError):
         load_scenario("/nonexistent/path.yaml")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Tests for wait_for_reply polling (TgMockClient)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _make_tgmock_client(http_client) -> TgMockClient:
+    """Helper to build a TgMockClient with a custom httpx client (mocked)."""
+    return TgMockClient(
+        tg_mock_url="http://localhost:9999",
+        bot_token="test:fake",
+        backend_webhook_url="http://localhost:9999",
+        org_id="test-org",
+        webhook_token="test-token",
+        real_bot_token="test:fake",
+        _http_client=http_client,
+    )
+
+
+def test_wait_for_reply_returns_messages_after_offset():
+    """wait_for_reply doit retourner uniquement les messages postérieurs
+    à l'update_id_max enregistré avant l'appel (sliding window)."""
+    import httpx
+    from unittest.mock import MagicMock
+
+    # Simuler un getUpdates qui retourne d'abord des messages existants (déjà vus),
+    # puis après un délai, un nouveau message du bot.
+    call_count = [0]
+
+    def mock_send(request: httpx.Request) -> httpx.Response:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # Premier appel : snapshot de l'existant — 2 messages déjà vus
+            return httpx.Response(200, json={
+                "ok": True,
+                "result": [
+                    {"update_id": 100, "message": {"text": "ancien msg 1"}},
+                    {"update_id": 101, "message": {"text": "ancien msg 2"}},
+                ]
+            })
+        if call_count[0] == 2:
+            # Deuxième appel (juste après) : en cours de traitement, rien de nouveau
+            return httpx.Response(200, json={"ok": True, "result": []})
+        # Troisième appel et suivants : le bot a répondu
+        return httpx.Response(200, json={
+            "ok": True,
+            "result": [
+                {"update_id": 202, "message": {"message_id": 1, "text": "Nouvelle réponse du bot"}},
+            ]
+        })
+
+    transport = httpx.MockTransport(mock_send)
+    http_client = httpx.Client(transport=transport)
+    client = _make_tgmock_client(http_client)
+
+    # wait_for_reply doit ignorer les messages 100 et 101 (antérieurs)
+    messages = client.wait_for_reply(timeout=5.0, poll_interval=0.1)
+    assert len(messages) == 1
+    assert messages[0]["text"] == "Nouvelle réponse du bot"
+
+
+def test_wait_for_reply_collects_multiple_messages_in_window():
+    """wait_for_reply doit collecter TOUS les messages arrivés dans une
+    fenêtre courte (ex: 2 messages à 200ms d'intervalle)."""
+    import httpx
+    import time
+
+    snapshot_done = [False]
+    first_new_delivered = [False]
+
+    def mock_send(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        # Extraire l'offset depuis l'URL
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        offset = int(params.get("offset", [0])[0])
+
+        if offset == 0:
+            # Snapshot initial
+            return httpx.Response(200, json={
+                "ok": True,
+                "result": [{"update_id": 100, "message": {"message_id": 10, "text": "ancien"}}]
+            })
+
+        if not snapshot_done[0]:
+            snapshot_done[0] = True
+            return httpx.Response(200, json={"ok": True, "result": []})
+
+        if not first_new_delivered[0]:
+            # Premier message bot
+            first_new_delivered[0] = True
+            return httpx.Response(200, json={
+                "ok": True,
+                "result": [{"update_id": 200, "message": {"message_id": 20, "text": "première réponse"}}]
+            })
+
+        # Appels suivants : deuxième message bot (simule un délai de 200ms)
+        return httpx.Response(200, json={
+            "ok": True,
+            "result": [{"update_id": 201, "message": {"message_id": 21, "text": "menu boutons"}}]
+        })
+
+    transport = httpx.MockTransport(mock_send)
+    http_client = httpx.Client(transport=transport)
+    client = _make_tgmock_client(http_client)
+
+    # expected_count=2, doit attendre jusqu'à avoir les 2
+    messages = client.wait_for_reply(expected_count=2, timeout=5.0, poll_interval=0.05)
+    assert len(messages) == 2
+    texts = [m["text"] for m in messages]
+    assert "première réponse" in texts
+    assert "menu boutons" in texts
+
+
+def test_wait_for_reply_timeout_returns_partial():
+    """wait_for_reply doit retourner les messages partiels au timeout
+    plutôt que de raise, et logger un warning."""
+    import httpx
+
+    def mock_send(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    transport = httpx.MockTransport(mock_send)
+    http_client = httpx.Client(transport=transport)
+    client = _make_tgmock_client(http_client)
+
+    messages = client.wait_for_reply(expected_count=5, timeout=0.3, poll_interval=0.05)
+    assert len(messages) == 0  # Timeout mais pas d'exception
 
 
 # ═══════════════════════════════════════════════════════════════════════════

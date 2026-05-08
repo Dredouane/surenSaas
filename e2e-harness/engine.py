@@ -122,6 +122,10 @@ class SessionRunner:
     def run_step(self, step: Step, step_index: int = 0) -> Verdict:
         """Execute a single step and evaluate the bot's response.
 
+        After injecting the user message via send_*(), polls tg-mock's
+        getUpdates to capture the bot's reply asynchronously. All messages
+        collected in a short window are concatenated for the Judge.
+
         Args:
             step: The step definition (type, content, judge_prompt).
             step_index: Index of this step in the scenario (for reporting).
@@ -129,7 +133,7 @@ class SessionRunner:
         Returns:
             A ``Verdict`` with the judge's evaluation.
         """
-        # Execute the action
+        # Execute the action — the send_* method snapshots update_id first
         if step.type == "text":
             result = self.mock_client.send_text(
                 step.content,
@@ -155,12 +159,19 @@ class SessionRunner:
         else:
             raise ValueError(f"Unsupported step type: {step.type}")
 
-        # Get bot reply text
-        bot_reply_text = (
-            result.get("reply_text")
-            if isinstance(result, dict)
-            else None
-        ) or ""
+        # Poll tg-mock for the bot's reply (asynchronous)
+        bot_messages = self.mock_client.wait_for_reply(
+            expected_count=1,
+            timeout=30.0,
+            poll_interval=0.3,
+        )
+        # Concatenate all message texts for the judge
+        bot_reply_parts = []
+        for msg in bot_messages:
+            text = msg.get("text") or msg.get("caption") or ""
+            if text:
+                bot_reply_parts.append(text)
+        bot_reply_text = "\n".join(bot_reply_parts)
 
         # Accumulate user message to history
         self.history.append({
@@ -177,7 +188,7 @@ class SessionRunner:
             "content": bot_reply_text,
         })
 
-        logger.info("🤖 Bot reply: %s", bot_reply_text[:200])
+        logger.info("🤖 Bot reply (%d messages): %s", len(bot_messages), bot_reply_text[:200])
 
         # If no judge prompt, skip judgement (pass by default)
         if not step.judge_prompt:
