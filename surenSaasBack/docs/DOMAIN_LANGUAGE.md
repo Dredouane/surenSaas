@@ -51,6 +51,29 @@
 | **HITL:cancel** | Callback d'annulation LangGraph |
 | **Session:reset** | Annulation explicite de la session courante, retour à l'état idle |
 
+---
+
+## Tests E2E — Harnais Autonome
+
+> Terminologie du `e2e-harness/` : harnais de test E2E isolé du backend, avec son propre venv.
+
+| Terme | Définition | Contexte/Module |
+|---|---|---|
+| **e2e-harness** | Harnais de test E2E autonome, dans `surenSaas/e2e-harness/`, avec son propre venv (`venv-e2e/`). Découple les tests E2E du backend. | `e2e-harness/` |
+| **SessionRunner** | Moteur d'exécution de scénarios. Prend un `Scenario` YAML, l'exécute step par step en accumulant l'historique, et appelle le Judge à chaque step. | `engine.py` |
+| **Judge** | LLM (Gemini 2.5 Flash via API HTTP) qui évalue si la réponse du bot correspond au comportement attendu pour un step donné. Retourne `Verdict`. | `judge.py` |
+| **Verdict** | Résultat d'une évaluation du Judge : `{"score": 1\|0, "reason": "..."}`. Score 1 = pass, 0 = fail. | `models.py` |
+| **Step** | Une étape unitaire dans un scénario : `{type, content, judge_prompt, expected_verdict}`. Types : `text` (message), `callback` (clic bouton), `document` (fichier). | `models.py` |
+| **Scenario** | Séquence complète de steps décrivant une interaction utilisateur ↔ bot. Défini dans un fichier YAML dans `scenarios/`. | `models.py` / `scenarios/*.yaml` |
+| **tg-mock** | Serveur local qui émule l'API Telegram (Docker `aiogram/telegram-bot-api`). Écoute sur le port 8081. Stocke les messages du bot et les retourne via `getUpdates`. | `docker-compose.e2e.yml` |
+| **TgMockClient** | Client HTTP qui interagit avec tg-mock : envoie des messages sur le webhook backend, récupère les réponses du bot via `getUpdates`. | `conftest.py` |
+| **bot_seed** | Fixture pytest qui upsert un bot de test dans `telegram_bots` (Supabase) pour que le backend accepte les appels webhook. `webhook_token` fixe : `"test-e2e-token"`. | `conftest.py` |
+| **Verdict attendu** | `expected_verdict: pass\|fail` dans le YAML. Conception RED-GREEN : `fail` d'abord, puis `pass` quand la feature est implantée. | `scenarios/*.yaml` |
+| **Historique de conversation** | Tous les messages (utilisateur + bot) accumulés par le SessionRunner au fil des steps d'un scénario. Passé au Judge pour évaluation contextuelle. | `engine.py` |
+| **webhook_token** | Segment de l'URL du webhook backend identifiant le bot. Ex: `test-e2e-token` dans `POST /api/v1/{org_id}/telegram/webhook/test-e2e-token`. | `telegram_core.py` |
+| **RED-GREEN** | Convention de progression des scénarios : `expected_verdict: fail` → implémentation backend → `pass`. | `scenarios/*.yaml` |
+| **run-e2e.sh** | Script d'orchestration : source `.bashrc` → docker compose up (tg-mock) → `run-local-back_test.sh --tg-mock` → attend /health → pytest → cleanup Docker. | `scripts/run-e2e.sh` |
+
 ## Conventions de Code
 
 | Règle | Explication |

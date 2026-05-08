@@ -1,0 +1,13 @@
+test_case: "DEPENSE-001"
+description: "L'utilisateur envoie un message texte pour enregistrer une dépense de 150€ pour du béton sur le chantier CH-016. Le bot doit extraire le montant, le chantier et la date du jour, puis confirmer la création."
+steps:
+  - type: text
+    content: "Aujourd'hui, j'ai dépensé 150€ pour le béton sur CH-016"
+    judge_prompt: |
+      Vérifie que la réponse du bot :
+      1. Confirme la création de la dépense
+      2. Mentionne le montant 150€
+      3. Mentionne le chantier CH-016
+      4. Mentionne la date d'aujourd'hui
+      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+    expected_verdict: pass

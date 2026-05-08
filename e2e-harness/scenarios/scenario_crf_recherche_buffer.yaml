@@ -1,0 +1,23 @@
+test_case: "SESSION-001-CRF-BUFFER"
+description: "Dépense 150€ carburant Point P sur chantier CRF. Le bot doit trouver CRF via search_chantiers, proposer menu, puis restaurer buffer_data après clic callback."
+steps:
+  - type: text
+    content: "J'ai acheté pour 150€ de carburant chez Point P pour le chantier CRF"
+    judge_prompt: |
+      Vérifie que l'assistant :
+      1. Identifie le chantier CRF (ou son nom complet en DB : chantier-crf-001).
+      2. Extrait le montant 150€.
+      3. Extrait le fournisseur Point P.
+      4. Propose un choix (DISPLAY_MENU) avec les chantiers trouvés.
+      Ne pas accepter "je cherche" — exige un résultat concret.
+    expected_verdict: fail
+
+  - type: callback
+    content: "chantier-crf-001"
+    judge_prompt: |
+      Vérifie que l'assistant :
+      1. Maintient le contexte du Step 1 (150€, Point P, carburant).
+      2. Ne redemande PAS le montant.
+      3. Propose de créer la dépense (validation HITL).
+      4. Mentionne le fournisseur Point P.
+    expected_verdict: fail
