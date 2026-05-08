@@ -12,6 +12,7 @@ Test IDs in pytest output are the YAML filenames (e.g. ``scenario_depense``).
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,6 @@ logger = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
 BACKEND_HEALTH_URL = os.getenv("BACKEND_HEALTH_URL", "http://localhost:8080/health")
-HEALTH_CHECK_TIMEOUT = 5.0
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -46,19 +46,23 @@ def pytest_generate_tests(metafunc):
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def _backend_is_reachable() -> bool:
-    """Return True if the backend health endpoint responds 200."""
-    try:
-        import httpx
+def _wait_for_backend(timeout: float = 60.0) -> bool:
+    """Poll /health until the backend responds 200, or return False."""
+    import httpx
 
-        resp = httpx.get(
-            BACKEND_HEALTH_URL,
-            timeout=HEALTH_CHECK_TIMEOUT,
-        )
-        return resp.status_code == 200
-    except Exception as exc:
-        logger.info("Backend health check failed: %s", exc)
-        return False
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get(BACKEND_HEALTH_URL, timeout=5.0)
+            if resp.status_code == 200:
+                logger.info("Backend ready after %.1fs", timeout - (deadline - time.monotonic()))
+                return True
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(3)
+    logger.warning("Backend not reachable within %.0fs: %s", timeout, last_error)
+    return False
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -75,9 +79,9 @@ def test_scenario(scenario, tg_mock_client) -> None:
     2. Create a SessionRunner and run all steps.
     3. Assert each step's verdict matches its expected_verdict.
     """
-    # ── Skip check ────────────────────────────────────────────────────
-    if not _backend_is_reachable():
-        pytest.skip("Backend is not reachable — skipping E2E test")
+    # ── Wait for backend ─────────────────────────────────────────────
+    if not _wait_for_backend(timeout=60.0):
+        pytest.skip("Backend did not become reachable within 60s — skipping E2E test")
 
     logger.info(
         "🚀 Running scenario [%s]: %s",
