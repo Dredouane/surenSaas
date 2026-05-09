@@ -165,7 +165,8 @@ def call_model_node(state: AgentState):
         f"{buffer_context}\n\n"
         "RÈGLES :\n"
         "1. Toute action d'écriture (créer, modifier) doit passer par un Tool.\n"
-        "2. Si tu appelles un outil, explique brièvement ce que tu vas faire dans le texte du message.\n"
+        "2. Ne fais PAS de phrases de courtoisie ('je vais chercher', 'note bien ça', 'laisse-moi vérifier'). "
+        "Appelle l'outil immédiatement sans commentaire préalable.\n"
         '3. Si l\'utilisateur veut enregistrer une opération (dépense, pointage, avancement, tâche) '
         'et qu\'aucun chantier n\'est sélectionné : cherche avec **search_chantiers(query=...)** d\'abord. '
         'Si l\'utilisateur donne un nom (ex: \'CRF\', \'Bureaux Tech\'), appelle search_chantiers. '
@@ -192,14 +193,20 @@ def call_model_node(state: AgentState):
         "c'est que l'utilisateur avait donné des infos (montant, fournisseur, description...) "
         'avant de choisir le chantier. Tu DOIS compléter l\'action avec les données du buffer. '
         "Ex: si le buffer dit 'montant=120, fournisseur=Total' et que le chantier est maintenant connu, "
-        'appelle create_depense avec toutes les infos.'
+        'appelle create_depense avec toutes les infos.\n'
+        '9. INTERDICTION de répondre "Fait", "👍", "OK" ou tout message de confirmation '
+        "tant que search_chantiers ou get_user_chantiers n'a PAS ÉTÉ APPELÉ. "
+        "Si un chantier est mentionné (nom, référence ou partie de nom comme 'CRF', 'CH-016'), "
+        "tu DOIS appeler search_chantiers(query=...) avant toute autre action. "
+        "L'outil search_chantiers accepte les noms partiels — appelle-le toujours. "
+        "Ne réponds JAMAIS à l'utilisateur sans avoir appelé au moins un outil."
     )
     
     llm = vertex_service.get_chat_model()
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = llm.bind_tools(tools, tool_choice="required")
     
     response = llm_with_tools.invoke(msgs)
     return {"messages": [response]}
