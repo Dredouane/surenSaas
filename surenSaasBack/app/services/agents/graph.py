@@ -205,25 +205,23 @@ def call_model_node(state: AgentState):
         'comme une erreur. Ne réponds PAS en texte si un outil peut faire le travail.'
     )
     
-    llm = vertex_service.get_chat_model()
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
-    llm_with_tools = llm.bind_tools(tools)
     
-    response = llm_with_tools.invoke(msgs)
+    # Utiliser le SDK natif (google-genai) pour l'invocation,
+    # pas LangChain. Résout le problème de tool_calls ignorés
+    # par langchain_google_genai 4.2.2.
+    force_tool = any(
+        kw in str(state["messages"][-1].content).lower()
+        for kw in ["crf", "chantier", "recherche", "trouve"]
+    )
     
-    # Boucle de contrôle robuste : si l'appel initial n'a pas généré de tool_calls,
-    # on ré-invoke avec une consigne renforcée
-    retry_count = 0
-    while not response.tool_calls and retry_count < 2:
-        retry_count += 1
-        retry_prompt = SystemMessage(
-            content=f"ATTENTION (tentative {retry_count}) : Ta réponse précédente n'a pas utilisé d'outil. "
-                    "Tu DOIS absolument appeler search_chantiers(query=...) maintenant. "
-                    "C'est OBLIGATOIRE. Ne réponds pas en texte."
-        )
-        response = llm_with_tools.invoke(msgs + [retry_prompt])
+    response = vertex_service.invoke_gemini_native(
+        messages=msgs,
+        tools=tools,
+        force_tool=force_tool,
+    )
     
     return {"messages": [response]}
 
