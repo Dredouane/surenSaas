@@ -164,6 +164,18 @@ def call_model_node(state: AgentState):
         f"Contexte : {state.get('user_name', 'Chef')}, Org: {state.get('org_id', 'Non défini')}, Chantier: {state.get('chantier_id') or 'Non défini'}. "
         f"{summary_context}{urgency}"
         f"{buffer_context}\n\n"
+        "--- PROTOCOLE DE DÉCISION ---\n"
+        "1. IDENTIFICATION : Si aucun chantier n'est explicitement sélectionné "
+        "ou identifié dans la conversation, tu DOIS appeler search_chantiers "
+        "avant toute action d'écriture.\n"
+        "2. VALIDATION : Confirme toujours les données extraites (montant, "
+        "fournisseur) dans ton message texte avant de proposer un menu.\n"
+        "3. CONFORMITÉ : Pour les catégories et types, utilise la valeur "
+        "la plus proche dans les énumérations fournies. En cas de doute, "
+        "utilise 'divers' comme valeur par défaut.\n"
+        "4. SÉQUENÇAGE : Ne fais qu'une étape à la fois. "
+        "Cherche le chantier → attends le choix → puis crée la dépense.\n"
+        "---\n"
         "RÈGLES :\n"
         "1. Toute action d'écriture (créer, modifier) doit passer par un Tool.\n"
         "2. Ne fais PAS de phrases de courtoisie ('je vais chercher', 'note bien ça', 'laisse-moi vérifier'). "
@@ -173,6 +185,9 @@ def call_model_node(state: AgentState):
         'Si l\'utilisateur donne un nom (ex: \'CRF\', \'Bureaux Tech\'), appelle search_chantiers. '
         'Si rien trouvé, appelle **get_user_chantiers**. '
         'Ne demande jamais "sur quel chantier" en texte — utilise format_response DISPLAY_MENU.\n'
+        'INTERDICTION : N\'appelle PAS create_depense, create_operation ou tout outil '
+        "d'écriture sans avoir d'abord trouvé le chantier. "
+        'Le chantier_id doit être résolu avant toute création.\n'
         '4. NE JAMAIS halluciner de données.\n'
         '5. IMPORTANT : Tu DOIS utiliser l\'outil **format_response** pour structurer tes interactions :\n'
         '   - Pour proposer des choix (menus, listes de chantiers) : action=DISPLAY_MENU, payload={"options": [...]}\n'
