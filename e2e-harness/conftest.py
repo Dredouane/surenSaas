@@ -342,8 +342,8 @@ class TgMockClient:
 
     # ── Callback ──────────────────────────────────────────────────────
 
-    def send_callback(self, click_button_text: str, thread_id: Optional[str] = None) -> dict:
-        replies = self.wait_for_reply(expected_count=1, timeout=15.0)
+    def send_callback(self, click_button_text: str, thread_id: Optional[str] = None, _last_replies: list = None) -> dict:
+        replies = _last_replies if _last_replies else self.wait_for_reply(expected_count=1, timeout=15.0)
         if not replies:
             raise RuntimeError(f"No bot replies — cannot click '{click_button_text}'")
 

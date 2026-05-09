@@ -75,6 +75,7 @@ class SessionRunner:
         self.mock_client = mock_client
         self.thread_id = thread_id or f"test-thread-{uuid.uuid4().hex[:12]}"
         self.history: list[dict] = []
+        self._last_bot_messages: list[dict] = []
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -208,6 +209,7 @@ class SessionRunner:
             result = self.mock_client.send_callback(
                 step.content,
                 thread_id=self.thread_id,
+                _last_replies=self._last_bot_messages,
             )
         elif step.type == "document":
             result = self.mock_client.send_document(
@@ -230,6 +232,9 @@ class SessionRunner:
             timeout=30.0,
             poll_interval=0.3,
         )
+        # Stocker pour send_callback (step suivant)
+        self._last_bot_messages = bot_messages
+
         # Concatenate all message texts for the judge
         bot_reply_parts = []
         for msg in bot_messages:

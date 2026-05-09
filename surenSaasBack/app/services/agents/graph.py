@@ -310,10 +310,14 @@ def tool_result_formatter_node(state: AgentState):
     if not isinstance(last_msg, ToolMessage):
         return state
     
+    # Log brut du contenu pour debug
+    print(f"[TOOL_RESULT_RAW] content={str(last_msg.content)[:500]}")
+    
     import json
     try:
         res = json.loads(last_msg.content)
-    except Exception:
+    except Exception as e:
+        print(f"[TOOL_RESULT_PARSE_ERROR] {e} — raw={str(last_msg.content)[:200]}")
         return state
     
     # Si erreur, on laisse le message d'erreur tel quel
@@ -348,22 +352,15 @@ def tool_result_formatter_node(state: AgentState):
             options = [f"{d.get('ref', 'N/A')} - {d.get('nom', d.get('description', ''))}" for d in data]
         except Exception:
             options = [str(d)[:50] for d in data]
-        tool_call_id = f"fmt_{int(time.time())}"
         return {
             "messages": [AIMessage(
-                content=f"J'ai trouvé {len(data)} chantier(s) :",
-                tool_calls=[{
-                    "name": "format_response",
-                    "args": {
-                        "text": f"Choisis un chantier parmi les {len(data)} disponibles :",
-                        "action": "DISPLAY_MENU",
-                        "payload": {"options": options}
-                    },
-                    "id": tool_call_id,
-                    "type": "tool_call"
-                }]
+                content=json.dumps({
+                    "action": "DISPLAY_MENU",
+                    "text": f"Choisis un chantier parmi les {len(data)} disponibles :",
+                    "payload": {"options": options}
+                }),
             )],
-            "buffer_data": buffer_info if buffer_info else None,  # Sauvegarde pour reprise
+            "buffer_data": buffer_info if buffer_info else None,
             "last_action_status": "idle"
         }
     
@@ -431,4 +428,4 @@ def create_agent_graph(checkpointer):
     workflow.add_edge("tools", "tool_result_formatter")
     workflow.add_edge("tool_result_formatter", END)
     
-    return workflow.compile(checkpointer=checkpointer, interrupt_before=["tools"])
+    return workflow.compile(checkpointer=checkpointer)

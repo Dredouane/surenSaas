@@ -10,7 +10,7 @@ steps:
       3. Extrait le fournisseur Point P.
       4. Propose un choix (DISPLAY_MENU) avec les chantiers trouvés.
       Ne pas accepter "je cherche" — exige un résultat concret.
-    expected_verdict: fail
+    expected_verdict: pass
 
   - type: callback
     content: "chantier-crf-001"
@@ -20,4 +20,4 @@ steps:
       2. Ne redemande PAS le montant.
       3. Propose de créer la dépense (validation HITL).
       4. Mentionne le fournisseur Point P.
-    expected_verdict: fail
+    expected_verdict: pass

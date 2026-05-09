@@ -121,6 +121,20 @@ class ActionRegistry:
                             payload=args.get("payload", {})
                         )
         
+        # Cas 3.5 : AIMessage avec contenu JSON structuré (résultat de tool_result_formatter)
+        if isinstance(msg, AIMessage) and isinstance(getattr(msg, 'content', None), str):
+            import json as _json
+            try:
+                data = _json.loads(msg.content)
+                if isinstance(data, dict) and "action" in data:
+                    return ParsedResponse(
+                        text=data.get("text", ""),
+                        action=ActionType(data.get("action", "DISPLAY_TEXT")),
+                        payload=data.get("payload", {}),
+                    )
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
         # Cas 4 : Fallback vers texte simple
         text_content = ActionRegistry._extract_text(getattr(msg, 'content', '') or '')
         return ParsedResponse(
