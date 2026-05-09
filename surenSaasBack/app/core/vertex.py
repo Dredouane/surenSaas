@@ -249,6 +249,7 @@ def invoke_gemini_native(
             gen_config = _gtypes.GenerateContentConfig(
                 tools=[native_tool],
                 tool_config=tc,
+                temperature=0,
             )
         else:
             gen_config = _gtypes.GenerateContentConfig()

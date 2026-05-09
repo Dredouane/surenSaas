@@ -136,6 +136,11 @@ export TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN="${SUREN_TEST_TELEGRAM_CONSTRUCT
 export TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME=${SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_USERNAME:-}
 export TELEGRAM_CONSTRUCTION_BOT_USERNAME=${TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME}
 
+# LLM Provider (gemini ou deepseek — laisser l'env décider)
+export LLM_PROVIDER="${LLM_PROVIDER}"
+# DeepSeek API Key (nécessaire si LLM_PROVIDER=deepseek)
+export SUREN_DEEP_SEEK_API_KEY="${SUREN_DEEP_SEEK_API_KEY:-${NEMO_CLAW_DEEP_SEEK_API_KEY:-}}"
+
 # Point vers l'API Telegram (tg-mock si demandé, sinon vrai Telegram)
 if [ "$USE_TG_MOCK" = true ]; then
     echo "  → Mode tg-mock : TELEGRAM_API_URL=http://localhost:8081"

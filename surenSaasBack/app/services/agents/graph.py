@@ -11,6 +11,7 @@ from langgraph.prebuilt import ToolNode
 
 from app.core.config import settings as _settings
 from app.core import vertex as vertex_service
+from app.services import llm_provider
 
 from app.api.auth import get_supabase
 from app.services.agents.audio_service import AudioExpertService
@@ -145,7 +146,7 @@ async def vision_expert_node(state: AgentState):
         return {"messages": [HumanMessage(content="[Erreur Vision] Échec analyse.")], "image_bytes": None}
 
 def call_model_node(state: AgentState):
-    """Cerveau principal - Gemini 2.0 Flash Lite."""
+    """Cerveau principal."""
     log_transition(state, "agent")
     
     # 1. Résumé et mémoire
@@ -209,15 +210,12 @@ def call_model_node(state: AgentState):
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
     
-    # Utiliser le SDK natif (google-genai) pour l'invocation,
-    # pas LangChain. Résout le problème de tool_calls ignorés
-    # par langchain_google_genai 4.2.2.
     force_tool = any(
         kw in str(state["messages"][-1].content).lower()
-        for kw in ["crf", "chantier", "recherche", "trouve"]
+        for kw in ["chantier", "recherche", "trouve"]
     )
     
-    response = vertex_service.invoke_gemini_native(
+    response = llm_provider.invoke(
         messages=msgs,
         tools=tools,
         force_tool=force_tool,
@@ -274,13 +272,17 @@ def hitl_formatter_node(state: AgentState):
     
     updates = {"last_action_status": "idle", "pending_form": None, "pending_tool_call": None, "buffer_data": None}
     
-    # Vérifier si le tool_call est format_response (ne pas bloquer en HITL)
+    # Vérifier si le tool_call est format_response ou en lecture seule
+    # (ne pas bloquer en HITL pour ces outils)
     is_format_response = False
+    is_read_only = False
     if last_msg.tool_calls:
         is_format_response = any(tc.get("name") == "format_response" for tc in last_msg.tool_calls)
+        READ_ONLY_TOOLS = {"search_chantiers", "get_user_chantiers", "get_chantier_details", "match_resources"}
+        is_read_only = any(tc.get("name") in READ_ONLY_TOOLS for tc in last_msg.tool_calls)
     
-    # Cas 1 : Outil métier appelé → interruption HITL (sauf format_response)
-    if last_msg.tool_calls and not is_format_response:
+    # Cas 1 : Outil métier appelé → interruption HITL (sauf format_response et lecture seule)
+    if last_msg.tool_calls and not is_format_response and not is_read_only:
         updates["last_action_status"] = "pending_confirm"
         updates["buffer_data"] = state.get("buffer_data")  # On garde buffer_data pendant HITL
         # Priorité au pending_tool_call déjà injecté par pre_reflector (qui contient org_id)

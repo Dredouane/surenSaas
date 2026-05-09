@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     tma_host: str = ""
     tma_extraction_model: str = "gemini-2.5-flash-lite"  # Modèle rapide pour les extractions TMA
 
+    # LLM Provider (gemini ou deepseek)
+    llm_provider: str = "gemini"
+    deepseek_api_key: str = ""
+
     # OpenRouter (Whisper transcription)
     open_router_api_key: str = ""
     whisper_model: str = "whisper-large-v3"
@@ -173,6 +177,13 @@ class Settings(BaseSettings):
                 "WHISPER_MODEL",
                 "whisper_model",
             ]),
+            ("llm_provider", [
+                "LLM_PROVIDER",
+            ]),
+            ("deepseek_api_key", [
+                "DEEPSEEK_API_KEY",
+                "SUREN_DEEP_SEEK_API_KEY",
+            ]),
         ]
         
         for attr_name, env_var_names in var_mappings:
@@ -195,6 +206,10 @@ class Settings(BaseSettings):
             else:
                 print(f"   {attr_name}: [NON DÉFINI]")
     
+    def is_deepseek(self) -> bool:
+        """Retourne True si le provider LLM est DeepSeek."""
+        return self.llm_provider.lower() == "deepseek"
+
     def get_allowed_origins(self) -> List[str]:
         """Parse la liste des origines depuis la string."""
         if not self.allowed_origins:
