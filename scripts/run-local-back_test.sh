@@ -165,5 +165,12 @@ echo ""
 echo "Appuyez sur Ctrl+C pour arrêter"
 echo ""
 
-# Lancer uvicorn avec workers pour le parallélisme
-exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --workers 8
+# Lancer uvicorn — reload désactivé en mode tg-mock pour éviter
+# les interruptions de workers pendant les tests E2E
+if [ "$USE_TG_MOCK" = true ]; then
+    echo "  → Mode tests E2E : uvicorn sans reload (workers=2)"
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2
+else
+    echo "  → Mode dev : uvicorn avec reload (workers=8)"
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --workers 8
+fi
