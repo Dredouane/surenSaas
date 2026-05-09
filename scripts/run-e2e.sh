@@ -48,7 +48,7 @@ export SUPABASE_SERVICE_KEY="${TEST_SUPABASE_SERVICE_KEY:-${SUPABASE_SERVICE_KEY
 export JWT_SECRET="${TEST_JWT_SECRET:-${JWT_SECRET:-}}"
 export GEMINI_API_KEY="${SUREN_GEMINI_API_KEY:-${GEMINI_API_KEY:-}}"
 # Forcer le port du backend (conftest.py lit BACKEND_BASE_URL)
-export BACKEND_BASE_URL="${BACKEND_BASE_URL:-http://localhost:8080}"
+export BACKEND_BASE_URL="http://localhost:8080"
 
 # ── 3. Verify required env vars ──────────────────────────────────────────
 : "${SUPABASE_URL:?SUPABASE_URL is required}"

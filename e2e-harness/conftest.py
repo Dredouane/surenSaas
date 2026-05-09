@@ -25,13 +25,18 @@ logger = logging.getLogger(__name__)
 TEST_CHAT_ID = 999999
 TEST_FROM_USER = {"id": 999999, "first_name": "Test", "is_bot": False}
 TG_MOCK_URL = os.getenv("TG_MOCK_URL", "http://localhost:8081")
-BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
 # Webhook token used by the test bot in telegram_bots DB
 WEBHOOK_TOKEN = os.getenv("E2E_WEBHOOK_TOKEN", "test-e2e-token")
 # Telegram bot token for polling getUpdates from tg-mock
 BOT_TOKEN_FALLBACK = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 BOT_TOKEN = os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN", BOT_TOKEN_FALLBACK)
 TEST_ORG_SLUG = os.getenv("TEST_ORG_SLUG", "REDACTED_ORG_SLUG")
+
+
+def _backend_base_url() -> str:
+    """Retourne l'URL du backend (lue dynamiquement pour permettre
+    le changement via variable d'env sans recharger le module)."""
+    return os.getenv("BACKEND_BASE_URL", "http://localhost:8080")
 
 # ── Supabase client (direct, no backend imports) ──────────────────────────
 
@@ -65,7 +70,7 @@ def bot_seed(supabase, org_id) -> str:
     The backend looks up ``telegram_bots`` by ``org_id`` and a ``webhook_url``
     containing the ``webhook_token``. This fixture ensures such a row exists.
     """
-    webhook_url = f"{BACKEND_BASE_URL}/api/v1/{org_id}/telegram/webhook/{WEBHOOK_TOKEN}"
+    webhook_url = f"{_backend_base_url()}/api/v1/{org_id}/telegram/webhook/{WEBHOOK_TOKEN}"
 
     existing = (
         supabase.table("telegram_bots")
@@ -75,11 +80,13 @@ def bot_seed(supabase, org_id) -> str:
         .execute()
     )
 
-    if existing.data:
-        logger.info("Bot seed already exists for org_id=%s", org_id)
-        return existing.data[0]["id"]
+    bot_username = os.getenv("SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_USERNAME", "arev_travaux_test_e2e_bot")
 
-    bot_username = os.getenv("E2E_BOT_USERNAME", "e2e_test_bot")
+    if existing.data:
+        bot_id = existing.data[0]["id"]
+        supabase.table("telegram_bots").update({"bot_username": bot_username}).eq("id", bot_id).execute()
+        logger.info("Bot seed updated: id=%s username=%s", bot_id, bot_username)
+        return bot_id
     bot_token = os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN", "123456:fake-e2e-test-token")
     import hashlib
     bot_token_hash = hashlib.sha256(bot_token.encode()).hexdigest()
@@ -381,12 +388,11 @@ class TgMockClient:
 
 
 @pytest.fixture(scope="session")
-def tg_mock_client(bot_seed) -> TgMockClient:
-    org_id = os.getenv("TEST_ORG_ID", "test-org-id")
+def tg_mock_client(bot_seed, org_id) -> TgMockClient:
     client = TgMockClient(
         tg_mock_url=TG_MOCK_URL,
         bot_token=BOT_TOKEN,
-        backend_webhook_url=BACKEND_BASE_URL,
+        backend_webhook_url=_backend_base_url(),
         org_id=org_id,
         webhook_token=WEBHOOK_TOKEN,
         real_bot_token=os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN"),
