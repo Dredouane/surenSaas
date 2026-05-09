@@ -199,16 +199,32 @@ def call_model_node(state: AgentState):
         "Si un chantier est mentionné (nom, référence ou partie de nom comme 'CRF', 'CH-016'), "
         "tu DOIS appeler search_chantiers(query=...) avant toute autre action. "
         "L'outil search_chantiers accepte les noms partiels — appelle-le toujours. "
-        "Ne réponds JAMAIS à l'utilisateur sans avoir appelé au moins un outil."
+        "Ne réponds JAMAIS à l'utilisateur sans avoir appelé au moins un outil.\n"
+        '10. GARDE-FOU : Si tu as un outil disponible et une intention claire, '
+        'tu DOIS appeler cet outil. Une réponse texte sans outil est considérée '
+        'comme une erreur. Ne réponds PAS en texte si un outil peut faire le travail.'
     )
     
     llm = vertex_service.get_chat_model()
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
-    llm_with_tools = llm.bind_tools(tools, tool_choice="required")
+    llm_with_tools = llm.bind_tools(tools)
     
     response = llm_with_tools.invoke(msgs)
+    
+    # Boucle de contrôle robuste : si l'appel initial n'a pas généré de tool_calls,
+    # on ré-invoke avec une consigne renforcée
+    retry_count = 0
+    while not response.tool_calls and retry_count < 2:
+        retry_count += 1
+        retry_prompt = SystemMessage(
+            content=f"ATTENTION (tentative {retry_count}) : Ta réponse précédente n'a pas utilisé d'outil. "
+                    "Tu DOIS absolument appeler search_chantiers(query=...) maintenant. "
+                    "C'est OBLIGATOIRE. Ne réponds pas en texte."
+        )
+        response = llm_with_tools.invoke(msgs + [retry_prompt])
+    
     return {"messages": [response]}
 
 def pre_reflector_node(state: AgentState):
