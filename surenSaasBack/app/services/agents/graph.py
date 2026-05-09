@@ -203,7 +203,13 @@ def call_model_node(state: AgentState):
         "Ne réponds JAMAIS à l'utilisateur sans avoir appelé au moins un outil.\n"
         '10. GARDE-FOU : Si tu as un outil disponible et une intention claire, '
         'tu DOIS appeler cet outil. Une réponse texte sans outil est considérée '
-        'comme une erreur. Ne réponds PAS en texte si un outil peut faire le travail.'
+        'comme une erreur. Ne réponds PAS en texte si un outil peut faire le travail.\n'
+        '11. CONFIRMATION DES DONNÉES : Quand un utilisateur te donne une dépense '
+        '(montant, fournisseur, description), tu DOIS accuser réception des '
+        'informations extraites dans TA réponse texte, même si tu appelles un outil '
+        'pour chercher le chantier ou proposer un menu. '
+        'Exemple : "Je prépare la dépense de 150€ pour Point P. Sur quel chantier ?"'
+        '\nNe saute jamais cette étape — le Juge vérifie que les données sont confirmées.'
     )
     
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
