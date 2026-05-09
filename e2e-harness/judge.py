@@ -41,7 +41,11 @@ _DEFAULT_SYSTEM_PROMPT = (
 
 def _get_api_key() -> Optional[str]:
     """Get the Gemini API key from environment."""
-    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("SUREN_GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
 
 
 def _build_prompt(
