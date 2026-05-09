@@ -87,11 +87,15 @@ def startup():
         project_id, location, CREDENTIALS_PATH if creds else "none (API key mode)",
     )
 
-    # Warm-up: initialiser le LLM maintenant plutôt qu'au premier appel
-    # Cela déplace le cold start (~30-40s) du premier webhook au démarrage.
-    logger.info("🔄 Warm-up Vertex AI LLM (cold start)...")
-    get_chat_model()
-    logger.info("✅ Vertex AI LLM warm-up terminé")
+    # Warm-up: effectuer un vrai appel LLM pour préchauffer la connexion gRPC
+    logger.info("🔄 Warm-up Vertex AI LLM (cold start with real invoke)...")
+    try:
+        llm = get_chat_model()
+        from langchain_core.messages import HumanMessage
+        llm.invoke([HumanMessage(content="Hello")])
+        logger.info("✅ Vertex AI LLM warm-up terminé (invoke OK)")
+    except Exception as e:
+        logger.warning("⚠️ Vertex AI LLM warm-up échoué: %s", e)
 
 
 def get_chat_model():

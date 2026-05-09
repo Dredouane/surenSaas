@@ -28,8 +28,11 @@ TG_MOCK_URL = os.getenv("TG_MOCK_URL", "http://localhost:8081")
 # Webhook token used by the test bot in telegram_bots DB
 WEBHOOK_TOKEN = os.getenv("E2E_WEBHOOK_TOKEN", "test-e2e-token")
 # Telegram bot token for polling getUpdates from tg-mock
+# Doit correspondre au token avec lequel le backend envoie les messages
+# (SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN dans .bashrc)
 BOT_TOKEN_FALLBACK = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-BOT_TOKEN = os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN", BOT_TOKEN_FALLBACK)
+_raw_token = os.getenv("SUREN_TEST_TELEGRAM_CONSTRUCTION_E2E_BOT_TOKEN") or os.getenv("TELEGRAM_CONSTRUCTION_BOT_TOKEN") or BOT_TOKEN_FALLBACK
+BOT_TOKEN = _raw_token
 TEST_ORG_SLUG = os.getenv("TEST_ORG_SLUG", "REDACTED_ORG_SLUG")
 
 
@@ -292,25 +295,21 @@ class TgMockClient:
             updates_url, expected_count, timeout, poll_interval,
         )
 
-        # Snapshot: record max update_id BEFORE we start waiting
-        before = self._snapshot_updates()
+        # Utilise self._last_update_id comme borne inférieure (déjà snapshoté
+        # par send_text / send_callback avant l'injection du message utilisateur).
+        # Ne PAS refaire un snapshot ici — cela consommerait la réponse du bot
+        # avant que le polling ne commence.
+        before = self._last_update_id
 
         deadline = time.monotonic() + timeout
         collected: list[dict] = []
-        grace_remaining = 3  # number of extra polls after reaching expected_count
-
-        # Mark all messages seen so far as confirmed by advancing the offset
-        updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
-        self._client.get(
-            updates_url,
-            params={"offset": before + 1, "timeout": 1},
-        )
+        grace_remaining = 3
 
         while time.monotonic() < deadline:
             updates_url = f"{self.tg_mock_url}/bot{self.bot_token}/getUpdates"
             resp = self._client.get(
                 updates_url,
-                params={"offset": before + 1, "timeout": 1},
+                params={"offset": before, "timeout": 1},
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -321,7 +320,6 @@ class TgMockClient:
                             collected.append(upd["message"])
                             if uid > self._last_update_id:
                                 self._last_update_id = uid
-                        # Avance l'offset pour confirmer la réception
                         if uid > before:
                             before = uid
 
@@ -337,8 +335,8 @@ class TgMockClient:
             time.sleep(poll_interval)
 
         logger.warning(
-            "wait_for_reply timeout after %ss — got %d/%d messages",
-            timeout, len(collected), expected_count,
+            "wait_for_reply timeout after %ss — got %d/%d messages (last_update_id=%d)",
+            timeout, len(collected), expected_count, self._last_update_id,
         )
         return collected  # partial results instead of raising
 
@@ -385,6 +383,18 @@ class TgMockClient:
 
     def close(self) -> None:
         self._client.close()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def reset_mock_telegram(tg_mock_client):
+    """Vide le buffer du mock Telegram ET le compteur client entre chaque test."""
+    import httpx
+    try:
+        httpx.post(f"{TG_MOCK_URL}/debug/reset", timeout=2.0)
+    except Exception:
+        pass  # mock peut ne pas être accessible (tests unitaires)
+    tg_mock_client._last_update_id = 0
+    yield
 
 
 @pytest.fixture(scope="session")

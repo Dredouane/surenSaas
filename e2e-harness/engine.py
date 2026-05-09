@@ -1,18 +1,22 @@
 """E2E session runner for multi-step Telegram bot testing.
 
 Orchestrates multi-turn conversations: sends user messages, clicks
-inline buttons via send_callback, accumulates history, and calls the
-LLM judge at each step.
+inline buttons via send_callback, accumulates history, calls the
+LLM judge at each step, and generates a Markdown report.
 """
 
 import logging
 import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from conftest import TgMockClient
 from models import Scenario, Step, Verdict
 
 logger = logging.getLogger(__name__)
+
+REPORTS_DIR = Path(__file__).resolve().parent / "logs"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -91,33 +95,94 @@ class SessionRunner:
         )
 
         verdicts: list[Verdict] = []
-        for i, step in enumerate(scenario.steps):
-            logger.info("Step %d/%d: type=%s content=%s", i + 1, len(scenario.steps), step.type, step.content[:60])
+        try:
+            for i, step in enumerate(scenario.steps):
+                logger.info("Step %d/%d: type=%s content=%s", i + 1, len(scenario.steps), step.type, step.content[:60])
 
-            # Execute the step
-            verdict = self.run_step(step, step_index=i)
-            verdicts.append(verdict)
+                # Execute the step
+                verdict = self.run_step(step, step_index=i)
+                verdicts.append(verdict)
 
-            # Check if expected verdict matches
-            expected_pass = step.expected_verdict == "pass"
-            if expected_pass:
-                if not verdict.passed:
-                    logger.warning(
-                        "Step %d FAILED (expected pass): score=%d reason=%s",
-                        i, verdict.score, verdict.reason,
-                    )
+                # Check if expected verdict matches
+                expected_pass = step.expected_verdict == "pass"
+                if expected_pass:
+                    if not verdict.passed:
+                        logger.warning(
+                            "Step %d FAILED (expected pass): score=%d reason=%s",
+                            i, verdict.score, verdict.reason,
+                        )
+                    else:
+                        logger.info("Step %d PASSED ✓", i)
                 else:
-                    logger.info("Step %d PASSED ✓", i)
-            else:
-                if verdict.passed:
-                    logger.warning(
-                        "Step %d PASSED (expected fail): score=%d reason=%s",
-                        i, verdict.score, verdict.reason,
-                    )
-                else:
-                    logger.info("Step %d correctly FAILED ✓ (expected fail)", i)
+                    if verdict.passed:
+                        logger.warning(
+                            "Step %d PASSED (expected fail): score=%d reason=%s",
+                            i, verdict.score, verdict.reason,
+                        )
+                    else:
+                        logger.info("Step %d correctly FAILED ✓ (expected fail)", i)
+        finally:
+            # Generate report même en cas d'exception
+            report_path = self.save_report(scenario, verdicts)
+            logger.info("📝 Report saved: %s", report_path)
 
         return verdicts
+
+    def save_report(self, scenario: Scenario, verdicts: list[Verdict]) -> Path:
+        """Generate a horodated Markdown report for this scenario run.
+
+        Writes to ``logs/YYYYMMDD_HHMMSS/{test_case}_report.md``.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = REPORTS_DIR / timestamp
+        run_dir.mkdir(parents=True, exist_ok=True)
+        filename = run_dir / f"{scenario.test_case.lower()}_report.md"
+
+        lines = [
+            f"# Rapport E2E — {scenario.test_case}",
+            f"**Date :** {datetime.now().isoformat()}",
+            f"**Description :** {scenario.description}",
+            "",
+            "---",
+            "",
+            "## Transcription",
+            "",
+        ]
+
+        for msg in self.history:
+            role = msg.get("role", "unknown")
+            content = str(msg.get("content", ""))
+            prefix = "👤 **Utilisateur**" if role == "user" else "🤖 **Bot**"
+            lines.append(f"### {prefix}")
+            lines.append("")
+            lines.append(content)
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+        lines.append("## Verdicts")
+        lines.append("")
+
+        for v in verdicts:
+            step = scenario.steps[v.step_index]
+            status_icon = "✅" if v.passed else "❌"
+            status_text = "PASS" if v.passed else "FAIL"
+            lines.append(f"### Step {v.step_index} — `{step.type}` : {status_icon} {status_text}")
+            lines.append("")
+            lines.append(f"**Attendu :** `{step.expected_verdict}`")
+            lines.append("")
+            lines.append(f"**Raison du Juge :** {v.reason}")
+            lines.append("")
+
+        lines.append("---")
+        all_pass = all(v.passed for v in verdicts)
+        final_icon = "✅" if all_pass else "❌"
+        final_text = "TOUS VERTS" if all_pass else "ÉCHEC(S)"
+        lines.append(f"## Résultat final : {final_icon} {final_text}")
+
+        content = "\n".join(lines)
+        filename.write_text(content, encoding="utf-8")
+        return filename
 
     def run_step(self, step: Step, step_index: int = 0) -> Verdict:
         """Execute a single step and evaluate the bot's response.
