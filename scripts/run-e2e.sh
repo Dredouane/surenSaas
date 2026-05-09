@@ -66,7 +66,7 @@ docker compose -f "$E2E_DIR/docker-compose.e2e.yml" up -d 2>&1
 echo "⏳ Waiting for tg-mock to respond on port 8081..."
 TG_MOCK_READY=false
 for i in $(seq 1 15); do
-    if curl -sf "http://localhost:8081/" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:8081/bot${BOT_TOKEN}/getMe" > /dev/null 2>&1; then
         echo "   ✅ tg-mock ready (attempt $i)"
         TG_MOCK_READY=true
         break
