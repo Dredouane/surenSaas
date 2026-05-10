@@ -209,6 +209,22 @@ def call_model_node(state: AgentState):
         force_tool=force_tool,
     )
     
+    # Injection early-stage de context_summary dans les tool_calls
+    # Garantit que le tool_result_formatter pourra afficher les données
+    # utilisateur, quel que soit le chemin dans le graphe (whitelist ou HITL)
+    if response.tool_calls:
+        last_user_content = ""
+        if state.get("messages"):
+            last_msg = state["messages"][-1]
+            last_user_content = str(last_msg.content) if last_msg.content else ""
+        for tc in response.tool_calls:
+            args = tc.get("args", {})
+            if "context_summary" not in args or not args.get("context_summary"):
+                truncated = last_user_content[:120]
+                if len(last_user_content) > 120:
+                    truncated += "..."
+                args["context_summary"] = truncated
+    
     return {"messages": [response]}
 
 def pre_reflector_node(state: AgentState):
@@ -359,7 +375,8 @@ def tool_result_formatter_node(state: AgentState):
         except Exception:
             options = [str(d)[:50] for d in data]
         
-        full_text = f"{ai_content}\n\nSur quel chantier ? Voici les résultats :"
+        chantier_lines = "\n".join(f"- {opt}" for opt in options)
+        full_text = f"{ai_content}\n\nChantiers trouvés :\n{chantier_lines}\n\nSur quel chantier ?"
         return {
             "messages": [AIMessage(
                 content=json.dumps({
