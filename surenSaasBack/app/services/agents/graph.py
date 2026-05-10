@@ -165,66 +165,33 @@ def call_model_node(state: AgentState):
         f"{summary_context}{urgency}"
         f"{buffer_context}\n\n"
         "--- PROTOCOLE DE DÉCISION ---\n"
-        "1. IDENTIFICATION : Si aucun chantier n'est explicitement sélectionné "
-        "ou identifié dans la conversation, tu DOIS appeler search_chantiers "
-        "avant toute action d'écriture.\n"
-        "2. VALIDATION : Confirme toujours les données extraites (montant, "
-        "fournisseur) dans ton message texte avant de proposer un menu.\n"
-        "3. CONFORMITÉ : Pour les catégories et types, utilise la valeur "
-        "la plus proche dans les énumérations fournies. En cas de doute, "
-        "utilise 'divers' comme valeur par défaut.\n"
-        "4. SÉQUENÇAGE : Ne fais qu'une étape à la fois. "
-        "Cherche le chantier → attends le choix → puis crée la dépense.\n"
+        "1. IDENTIFICATION : Si le chantier n'est pas identifié, "
+        "appelle search_chantiers avant toute action d'écriture.\n"
+        "2. CONFIRMATION : Accuse toujours réception des montants "
+        "et fournisseurs extraits dans ton message texte. "
+        "Un appel d'outil DOIT être accompagné d'un texte de confirmation.\n"
+        "3. SÉQUENÇAGE : Ne crée rien (create_depense) sans avoir "
+        "la certitude du chantier (ID ou sélection unique).\n"
+        "4. FALLBACK : Si une catégorie n'est pas claire, "
+        "utilise 'divers'.\n"
         "---\n"
-        "RÈGLES :\n"
+        "PROTOCOLE DE COMMUNICATION : Tout appel d'outil doit obligatoirement "
+        "inclure l'argument context_summary. Ce champ doit contenir une phrase "
+        "récapitulant les données extraites (montant, fournisseur, objet) "
+        "pour informer l'utilisateur de ce que tu as compris.\n"
+        "---\n"
+        "RÈGLES TECHNIQUES :\n"
         "1. Toute action d'écriture (créer, modifier) doit passer par un Tool.\n"
-        "2. Ne fais PAS de phrases de courtoisie ('je vais chercher', 'note bien ça', 'laisse-moi vérifier'). "
-        "Appelle l'outil immédiatement sans commentaire préalable.\n"
-        '3. Si l\'utilisateur veut enregistrer une opération (dépense, pointage, avancement, tâche) '
-        'et qu\'aucun chantier n\'est sélectionné : cherche avec **search_chantiers(query=...)** d\'abord. '
-        'Si l\'utilisateur donne un nom (ex: \'CRF\', \'Bureaux Tech\'), appelle search_chantiers. '
-        'Si rien trouvé, appelle **get_user_chantiers**. '
-        'Ne demande jamais "sur quel chantier" en texte — utilise format_response DISPLAY_MENU.\n'
-        'INTERDICTION : N\'appelle PAS create_depense, create_operation ou tout outil '
-        "d'écriture sans avoir d'abord trouvé le chantier. "
-        'Le chantier_id doit être résolu avant toute création.\n'
-        '4. NE JAMAIS halluciner de données.\n'
-        '5. IMPORTANT : Tu DOIS utiliser l\'outil **format_response** pour structurer tes interactions :\n'
-        '   - Pour proposer des choix (menus, listes de chantiers) : action=DISPLAY_MENU, payload={"options": [...]}\n'
-        '   - Pour démarrer une saisie (dépense, pointage) : action=INIT_FORM, payload={form_id, steps}\n'
-        '   - Pour une validation critique (ex: confirmer une dépense) : action=CONFIRM_ACTION\n'
-        '   - Si aucune action spéciale n\'est requise, réponds normalement en texte.\n'
-        '6. IMPORTANT : Quand tu reçois des données d\'un outil (liste de chantiers, détails, etc.), '
-        'tu DOIS utiliser format_response(action=DISPLAY_MENU, payload={"options": [liste]}) '
-        'pour les afficher sous forme de boutons cliquables.\n'
-        '7. OBLIGATION : Quand l\'utilisateur te donne une description d\'opération (ex: \'travaux préparatoires\'), '
-        'tu DOIS appeler **create_operation** avec cette description. Ne réponds jamais \'je vais enregistrer\' '
-        'sans appeler l\'outil. L\'outil fera la sauvegarde réelle.\n'
-        '   - De même pour **create_depense**, **manage_attendance**, **report_progress**, **manage_tasks** : '
-        'si l\'utilisateur décrit une action, appelle le tool correspondant immédiatement.'
-        'EXEMPLE : Si l\'outil te retourne des chantiers, appelle format_response avec les refs : '
-        "format_response(action='DISPLAY_MENU', payload={'options': ['CH-001 - Villa', 'CH-002 - Bureaux']})"
-        '\n'
-        '8. BUFFER_CONTEXT : Si tu vois ci-dessus "📋 CONTEXTE EN ATTENTE" dans le contexte, '
-        "c'est que l'utilisateur avait donné des infos (montant, fournisseur, description...) "
-        'avant de choisir le chantier. Tu DOIS compléter l\'action avec les données du buffer. '
-        "Ex: si le buffer dit 'montant=120, fournisseur=Total' et que le chantier est maintenant connu, "
-        'appelle create_depense avec toutes les infos.\n'
-        '9. INTERDICTION de répondre "Fait", "👍", "OK" ou tout message de confirmation '
-        "tant que search_chantiers ou get_user_chantiers n'a PAS ÉTÉ APPELÉ. "
-        "Si un chantier est mentionné (nom, référence ou partie de nom comme 'CRF', 'CH-016'), "
-        "tu DOIS appeler search_chantiers(query=...) avant toute autre action. "
-        "L'outil search_chantiers accepte les noms partiels — appelle-le toujours. "
-        "Ne réponds JAMAIS à l'utilisateur sans avoir appelé au moins un outil.\n"
-        '10. GARDE-FOU : Si tu as un outil disponible et une intention claire, '
-        'tu DOIS appeler cet outil. Une réponse texte sans outil est considérée '
-        'comme une erreur. Ne réponds PAS en texte si un outil peut faire le travail.\n'
-        '11. CONFIRMATION DES DONNÉES : Quand un utilisateur te donne une dépense '
-        '(montant, fournisseur, description), tu DOIS accuser réception des '
-        'informations extraites dans TA réponse texte, même si tu appelles un outil '
-        'pour chercher le chantier ou proposer un menu. '
-        'Exemple : "Je prépare la dépense de 150€ pour Point P. Sur quel chantier ?"'
-        '\nNe saute jamais cette étape — le Juge vérifie que les données sont confirmées.'
+        '5. IMPORTANT : Tu DOIS utiliser l\'outil **format_response** '
+        'pour structurer tes interactions : '
+        'DISPLAY_MENU pour les choix, INIT_FORM pour les saisies, '
+        'CONFIRM_ACTION pour les validations. '
+        'Si aucune action spéciale n\'est requise, réponds normalement en texte.\n'
+        '6. Quand tu reçois des données d\'un outil (liste de chantiers, détails), '
+        'utilise format_response DISPLAY_MENU pour afficher des boutons cliquables.\n'
+        '8. BUFFER_CONTEXT : Si tu vois "📋 CONTEXTE EN ATTENTE" dans le contexte, '
+        "complète l'action avec les données du buffer (montant, fournisseur...). "
+        "Si le chantier est maintenant connu, crée la dépense.\n"
     )
     
     msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
@@ -350,19 +317,26 @@ def tool_result_formatter_node(state: AgentState):
     
     # Liste de données (chantiers) → format_response DISPLAY_MENU
     if data and isinstance(data, list) and len(data) > 0:
-        # Vérifier si le tool appelé est search_chantiers ou get_user_chantiers
-        # Dans ce cas, on a besoin de buffer_data pour le contexte ultérieur
-        # Chercher des infos de dépense/opération dans les derniers messages
-        from datetime import date as _date
-        today = _date.today().isoformat()
+        # Smart Merge : récupérer context_summary depuis les arguments de
+        # l'AIMessage qui a appelé l'outil (transmet les données extraites
+        # par le LLM sans avoir à les redemander)
+        ai_content = ""
+        for msg in reversed(state.get("messages", [])[:-1]):
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                args = msg.tool_calls[0].get("args", {})
+                ai_content = args.get("context_summary", "")
+                if not ai_content:
+                    ai_content = str(msg.content) if msg.content else ""
+                break
         
-        # Extraire le buffer_data potentiel depuis les messages récents du LLM
-        # Le LLM a déjà analysé l'intention avant d'appeler l'outil
+        if not ai_content.strip():
+            ai_content = "Bien reçu, je prépare ça."
+        
+        # Extraire le buffer_data potentiel depuis les messages récents
         buffer_info = {}
         for msg in reversed(state.get("messages", [])[-5:]):
             if hasattr(msg, 'content') and isinstance(msg.content, str):
                 content = msg.content.lower()
-                # Détection simple: montant, fournisseur, description dans le message
                 import re
                 montant_match = re.search(r'(\d+[\.,]?\d*)\s*€', content)
                 if montant_match:
@@ -373,11 +347,13 @@ def tool_result_formatter_node(state: AgentState):
             options = [f"{d.get('ref', 'N/A')} - {d.get('nom', d.get('description', ''))}" for d in data]
         except Exception:
             options = [str(d)[:50] for d in data]
+        
+        full_text = f"{ai_content}\n\nSur quel chantier ? Voici les résultats :"
         return {
             "messages": [AIMessage(
                 content=json.dumps({
                     "action": "DISPLAY_MENU",
-                    "text": f"Choisis un chantier parmi les {len(data)} disponibles :",
+                    "text": full_text,
                     "payload": {"options": options}
                 }),
             )],

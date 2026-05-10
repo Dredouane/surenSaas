@@ -74,7 +74,7 @@ def standard_response(success: bool, data: Any = None, error: str = None, sugges
 # --- TOOLS ---
 
 @tool("get_user_chantiers", args_schema=GetChantiersSchema)
-def get_user_chantiers(org_id: str, statut: Optional[str] = None) -> Dict[str, Any]:
+def get_user_chantiers(org_id: str, statut: Optional[str] = None, context_summary: str = "") -> Dict[str, Any]:
     """Récupère la liste des chantiers accessibles pour une organisation."""
     try:
         if not org_id:
@@ -90,7 +90,7 @@ def get_user_chantiers(org_id: str, statut: Optional[str] = None) -> Dict[str, A
         return standard_response(False, error=str(e))
 
 @tool("get_chantier_details", args_schema=GetChantierDetailsSchema)
-def get_chantier_details(org_id: str, chantier_id: str) -> Dict[str, Any]:
+def get_chantier_details(org_id: str, chantier_id: str, context_summary: str = "") -> Dict[str, Any]:
     """Récupère les détails financiers complets d'un chantier spécifique."""
     try:
         uuid = resolve_chantier_uuid(org_id, chantier_id)
@@ -109,7 +109,8 @@ def create_operation(
     type: str = "autre",
     montant: Optional[float] = None,
     quantite: Optional[float] = None,
-    unite: Optional[str] = None
+    unite: Optional[str] = None,
+    context_summary: str = ""
 ) -> Dict[str, Any]:
     """Enregistre une opération terrain (HTL) pour un chantier."""
     try:
@@ -132,7 +133,7 @@ def create_operation(
         return standard_response(False, error=str(e))
 
 @tool("manage_attendance", args_schema=ManageAttendanceSchema)
-def manage_attendance(org_id: str, chantier_id: str, date: str, ressources: List[Dict[str, Any]]) -> Dict[str, Any]:
+def manage_attendance(org_id: str, chantier_id: str, date: str, ressources: List[Dict[str, Any]], context_summary: str = "") -> Dict[str, Any]:
     """Gère les pointages de présence pour un chantier à une date donnée."""
     try:
         uuid = resolve_chantier_uuid(org_id, chantier_id)
@@ -180,7 +181,8 @@ def report_progress(
     avancement_pourcentage: float,
     quantite: Optional[float] = None,
     unite: str = "u",
-    prix_unitaire: float = 0.0
+    prix_unitaire: float = 0.0,
+    context_summary: str = ""
 ) -> Dict[str, Any]:
     """Ajoute un avancement de travaux sur une ligne de situation."""
     try:
@@ -209,7 +211,8 @@ def manage_tasks(
     tache_id: Optional[str] = None,
     titre: Optional[str] = None,
     description: Optional[str] = None,
-    priorite: str = "moyenne"
+    priorite: str = "moyenne",
+    context_summary: str = ""
 ) -> Dict[str, Any]:
     """Gère les tâches du chantier (lister, créer, terminer)."""
     try:
@@ -245,7 +248,7 @@ class SearchChantierSchema(BaseModel):
 
 
 @tool("search_chantiers", args_schema=SearchChantierSchema)
-def search_chantiers(org_id: str, query: str) -> Dict[str, Any]:
+def search_chantiers(org_id: str, query: str, context_summary: str = "") -> Dict[str, Any]:
     """Cherche un chantier par référence (ref) ou nom avec ILIKE.
     Usage : quand l'utilisateur donne un nom ou ref de chantier (ex: 'CRF', 'CH-016', 'Bureaux').
     Retourne les chantiers correspondants, maximum 5 résultats.

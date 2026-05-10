@@ -107,6 +107,7 @@ def create_depense(
     fournisseur: str = "Telegram",
     categorie: str = "autre",
     date_depense: Optional[str] = None,
+    context_summary: str = "",
 ) -> dict:
     """Persiste une dépense en DB avec le statut 'en_attente_validation'.
 

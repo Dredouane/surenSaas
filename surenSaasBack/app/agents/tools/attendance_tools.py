@@ -198,7 +198,7 @@ def _upsert_attendance_internal(
 # ─── Tools LangGraph (décorés) ──────────────────────────────────
 
 @tool("match_resources", args_schema=MatchResourcesSchema)
-def match_resources(org_id: str, chantier_id: str, query: str) -> dict:
+def match_resources(org_id: str, chantier_id: str, query: str, context_summary: str = "") -> dict:
     """Cherche des ressources par fuzzy matching sur le champ 'nom'."""
     return _match_resources_internal(org_id=org_id, chantier_id=chantier_id, query=query)
 
@@ -209,6 +209,7 @@ def upsert_attendance(
     chantier_id: str,
     date_pointage: str,
     ressources: List[dict],
+    context_summary: str = "",
 ) -> dict:
     """Enregistre ou met à jour les présences pour un pointage à une date donnée."""
     return _upsert_attendance_internal(
