@@ -5,6 +5,7 @@ Gestion des webhooks entrants de Telegram.
 Dispatche les requêtes vers les services appropriés.
 """
 
+import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -205,10 +206,16 @@ class WebhookHandlerService:
                              f"last_action_status={final_state_values.get('last_action_status')}, "
                              f"pending_form={final_state_values.get('pending_form') is not None}")
             await self.tg_interface.send_message(user_id, text_to_send, reply_markup=reply_markup)
-        # Inclure le texte de la réponse dans le return pour les tests E2E
+        # Inclure le texte + boutons dans le return pour les tests E2E (mode sync)
         reply_text = text_to_send if all_messages else None
         reply_action = str(parsed.action) if all_messages and parsed else None
-        return {"status": "ok", "reply_text": reply_text, "reply_action": reply_action}
+        reply_markup_json = json.dumps(reply_markup) if reply_markup else None
+        return {
+            "status": "ok",
+            "reply_text": reply_text,
+            "reply_action": reply_action,
+            "reply_markup": reply_markup_json,
+        }
 
     async def _process_graph_callback(self, graph, config, callback_query, correlation_id):
         user_id = callback_query['from']['id']

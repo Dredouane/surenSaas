@@ -2,6 +2,7 @@ test_case: "SESSION-001-CRF-BUFFER"
 description: "Dépense 150€ carburant Point P sur chantier CRF. Le bot doit trouver CRF via search_chantiers, proposer menu, puis restaurer buffer_data après clic callback."
 steps:
   - type: text
+    mode: sync
     content: "J'ai acheté pour 150€ de carburant chez Point P pour le chantier CRF"
     judge_prompt: |
       Vérifie que l'assistant :
@@ -13,6 +14,7 @@ steps:
     expected_verdict: pass
 
   - type: callback
+    mode: async
     content: "chantier-crf-001"
     judge_prompt: |
       Vérifie que l'assistant :

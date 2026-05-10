@@ -35,6 +35,7 @@ class Step(BaseModel):
         expected_verdict: Whether the bot is expected to pass or fail this step.
     """
     type: Literal["text", "callback", "document", "photo"]
+    mode: Literal["sync", "async"] = "sync"
     content: str
     caption: str = ""
     judge_prompt: str = ""

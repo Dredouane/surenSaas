@@ -1,0 +1,43 @@
+test_case: "CH016-ROBUSTNESS"
+description: "Facture 250.50€ Leroy Merlin, interruption météo, puis chantier CH-016. Vérifie la persistance du buffer_data et que le bot gère une conversation multi-tour sans perdre le contexte."
+steps:
+  - type: text
+    mode: sync
+    content: "Salut ! J'ai une facture de 250.50€ chez Leroy Merlin."
+    judge_prompt: |
+      Vérifie que le bot :
+      1. Accuse réception de la dépense (montant 250.50€, fournisseur Leroy Merlin)
+      2. Demande sur quel chantier ou cherche le chantier
+      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+    expected_verdict: pass
+
+  - type: text
+    mode: sync
+    content: "Au fait, est-ce qu'il va pleuvoir demain ?"
+    judge_prompt: |
+      Vérifie que le bot :
+      1. Répond à la question ou dit qu'il ne peut pas répondre
+      2. NE redemande PAS la facture ou le montant
+      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+    expected_verdict: pass
+
+  - type: text
+    mode: sync
+    content: "C'est pour le chantier CH-016."
+    judge_prompt: |
+      Vérifie que le bot :
+      1. Cherche le chantier CH-016 (search_chantiers ou get_user_chantiers)
+      2. Propose un DISPLAY_MENU avec le chantier CH-016
+      3. Maintient le contexte de la dépense (250.50€, Leroy Merlin)
+      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+    expected_verdict: pass
+
+  - type: callback
+    mode: async
+    content: "CH-016"
+    judge_prompt: |
+      Vérifie que le bot :
+      1. Restaure la dépense (montant 250.50€, fournisseur Leroy Merlin)
+      2. Propose la création de la dépense (validation HITL avec boutons Confirmer/Annuler)
+      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+    expected_verdict: pass

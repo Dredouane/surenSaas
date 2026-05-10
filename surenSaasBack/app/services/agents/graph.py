@@ -244,6 +244,17 @@ def pre_reflector_node(state: AgentState):
     if "chantier_id" in args and not args.get("chantier_id") and not chantier_id:
         return {"messages": [AIMessage(content="👷 Pour quel chantier tu veux faire ça ? Je n'ai pas le nom ou la référence.")]}
     
+    # Injection du context_summary si absent (garantit que le
+    # tool_result_formatter peut afficher les données utilisateur,
+    # même si le LLM ne remplit pas ce champ)
+    if "context_summary" not in args or not args.get("context_summary"):
+        for msg in reversed(state.get("messages", [])):
+            if isinstance(msg, HumanMessage) and msg.content:
+                args["context_summary"] = str(msg.content)[:120]
+                break
+        if not args.get("context_summary"):
+            args["context_summary"] = "Action utilisateur"
+    
     # Mise à jour des arguments dans le tool_call
     call["args"] = args
     # On recrée un AIMessage avec les tool_calls modifiés pour que le ToolNode les lise

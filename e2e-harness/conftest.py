@@ -186,20 +186,24 @@ class TgMockClient:
 
     def _parse_result(self, data: dict) -> dict:
         reply = None
+        reply_markup = None
         # Format 1: {"status": "agentic_success", "result": {"reply_text": "..."}}
         if "result" in data and isinstance(data["result"], dict):
             reply = data["result"].get("reply_text")
+            reply_markup = data["result"].get("reply_markup")
         # Format 2: le result est un dict avec reply_text directement
         if reply is None and "reply_text" in data:
             reply = data["reply_text"]
+            reply_markup = data.get("reply_markup")
         # Format 3: le result n'a pas de reply_text mais a une structure JSON — le sérialiser
         if reply is None and "result" in data:
             res = data["result"]
             if isinstance(res, dict):
                 reply = res.get("reply_text") or res.get("message") or res.get("text") or json.dumps(res, ensure_ascii=False, default=str)
+                reply_markup = res.get("reply_markup") or reply_markup
             elif isinstance(res, str):
                 reply = res
-        return {"backend_status": 200, "reply_text": reply}
+        return {"backend_status": 200, "reply_text": reply, "reply_markup": reply_markup}
 
     def send_text(self, text: str, thread_id: Optional[str] = None) -> dict:
         self._snapshot_updates()

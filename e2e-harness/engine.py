@@ -188,9 +188,13 @@ class SessionRunner:
     def run_step(self, step: Step, step_index: int = 0) -> Verdict:
         """Execute a single step and evaluate the bot's response.
 
-        After injecting the user message via send_*(), polls tg-mock's
-        getUpdates to capture the bot's reply asynchronously. All messages
-        collected in a short window are concatenated for the Judge.
+        Supports two response modes:
+        - ``sync`` (défaut pour text/doc/photo) : lit ``reply_text``
+          directement depuis la réponse HTTP du webhook.
+        - ``async`` (défaut pour callback) : poll tg-mock via
+          ``wait_for_reply()``.
+
+        Le mode peut être forcé via ``step.mode`` dans le YAML.
 
         Args:
             step: The step definition (type, content, judge_prompt).
@@ -199,6 +203,9 @@ class SessionRunner:
         Returns:
             A ``Verdict`` with the judge's evaluation.
         """
+        # Déterminer le mode de récupération
+        step_mode = getattr(step, 'mode', None) or ("async" if step.type == "callback" else "sync")
+
         # Execute the action — the send_* method snapshots update_id first
         if step.type == "text":
             result = self.mock_client.send_text(
@@ -226,22 +233,43 @@ class SessionRunner:
         else:
             raise ValueError(f"Unsupported step type: {step.type}")
 
-        # Poll tg-mock for the bot's reply (asynchronous)
-        bot_messages = self.mock_client.wait_for_reply(
-            expected_count=1,
-            timeout=30.0,
-            poll_interval=0.3,
-        )
+        # Récupérer la réponse du bot selon le mode
+        if step_mode == "sync":
+            # Mode synchrone : lire reply_text + reply_markup depuis la
+            # réponse HTTP du webhook, et construire un message factice
+            # pour que send_callback puisse cliquer sur les boutons
+            bot_reply_text = ""
+            bot_messages = []
+            if isinstance(result, dict):
+                bot_reply_text = result.get("reply_text") or ""
+                reply_markup_raw = result.get("reply_markup")
+                if reply_markup_raw:
+                    # Passer les boutons dans le message factice
+                    import json as _json
+                    try:
+                        markup = _json.loads(reply_markup_raw) if isinstance(reply_markup_raw, str) else reply_markup_raw
+                        bot_messages = [{"text": bot_reply_text, "reply_markup": markup}]
+                    except Exception:
+                        bot_messages = [{"text": bot_reply_text}]
+                else:
+                    bot_messages = [{"text": bot_reply_text}] if bot_reply_text else []
+        else:
+            # Mode asynchrone : poll tg-mock (callback)
+            bot_messages = self.mock_client.wait_for_reply(
+                expected_count=1,
+                timeout=30.0,
+                poll_interval=0.3,
+            )
+            # Concatenate all message texts
+            bot_reply_parts = []
+            for msg in bot_messages:
+                text = msg.get("text") or msg.get("caption") or ""
+                if text:
+                    bot_reply_parts.append(text)
+            bot_reply_text = "\n".join(bot_reply_parts)
+
         # Stocker pour send_callback (step suivant)
         self._last_bot_messages = bot_messages
-
-        # Concatenate all message texts for the judge
-        bot_reply_parts = []
-        for msg in bot_messages:
-            text = msg.get("text") or msg.get("caption") or ""
-            if text:
-                bot_reply_parts.append(text)
-        bot_reply_text = "\n".join(bot_reply_parts)
 
         # Accumulate user message to history
         self.history.append({
