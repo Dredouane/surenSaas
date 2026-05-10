@@ -283,6 +283,17 @@ class WebhookHandlerService:
                 await self.tg_interface.send_message(user_id, text, reply_markup=reply_markup)
             return {"status": "ok"}
 
+        # Routage annulation buffer (action:cancel_buffer)
+        if data == "action:cancel_buffer":
+            try:
+                await graph.aupdate_state(config, {"buffer_data": None})
+            except Exception:
+                pass
+            await self.tg_interface.send_message(
+                user_id, "C'est oublié ! Que puis-je faire d'autre ?"
+            )
+            return {"status": "ok"}
+
         # Routage des callbacks de formulaire (act:... ou form:...)
         if data.startswith("act:") or data.startswith("form:"):
             await self._handle_struct_callback(graph, config, data, user_id, callback_query)

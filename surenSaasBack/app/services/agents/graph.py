@@ -156,7 +156,11 @@ def call_model_node(state: AgentState):
     buffer_context = ""
     buf = state.get("buffer_data")
     if buf:
-        buffer_context = f"\n📋 CONTEXTE EN ATTENTE : Tu avais commencé à traiter une opération avant de demander le chantier. Infos collectées : {buf}. Complète maintenant l'action."
+        summary = buf.get("summary", "") if isinstance(buf, dict) else ""
+        if summary:
+            buffer_context = f"\n📋 ACTION EN COURS : {summary}. Finalise cette action ou propose à l'utilisateur de l'annuler."
+        else:
+            buffer_context = f"\n📋 CONTEXTE EN ATTENTE : Tu avais commencé à traiter une opération avant de demander le chantier. Infos collectées : {buf}. Complète maintenant l'action."
     print(f"[BUFFER_STATE] buffer_data={json.dumps(buf if buf else {})} | chantier_id={state.get('chantier_id', 'None')}")
     
     system_prompt = (
@@ -343,39 +347,44 @@ def tool_result_formatter_node(state: AgentState):
     data = res.get('data')
     
     # Liste de données (chantiers) → format_response DISPLAY_MENU
+    # Smart Merge : récupérer context_summary depuis les arguments de
+    # l'AIMessage qui a appelé l'outil (transmet les données extraites
+    # par le LLM sans avoir à les redemander)
+    ai_content = ""
+    for msg in reversed(state.get("messages", [])[:-1]):
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            args = msg.tool_calls[0].get("args", {})
+            ai_content = args.get("context_summary", "")
+            if not ai_content:
+                ai_content = str(msg.content) if msg.content else ""
+            break
+    
+    if not ai_content.strip():
+        ai_content = "Bien reçu, je prépare ça."
+    
+    # Extraire le buffer_data potentiel depuis les messages récents
+    buffer_info = {}
+    for msg in reversed(state.get("messages", [])[-5:]):
+        if hasattr(msg, 'content') and isinstance(msg.content, str):
+            content = msg.content.lower()
+            import re
+            montant_match = re.search(r'(\d+[\.,]?\d*)\s*€', content)
+            if montant_match:
+                buffer_info["montant_detected"] = montant_match.group(0)
+                buffer_info["montant_raw"] = montant_match.group(1)
+    buffer_info["summary"] = ai_content  # Persistance du contexte
+    
     if data and isinstance(data, list) and len(data) > 0:
-        # Smart Merge : récupérer context_summary depuis les arguments de
-        # l'AIMessage qui a appelé l'outil (transmet les données extraites
-        # par le LLM sans avoir à les redemander)
-        ai_content = ""
-        for msg in reversed(state.get("messages", [])[:-1]):
-            if isinstance(msg, AIMessage) and msg.tool_calls:
-                args = msg.tool_calls[0].get("args", {})
-                ai_content = args.get("context_summary", "")
-                if not ai_content:
-                    ai_content = str(msg.content) if msg.content else ""
-                break
-        
-        if not ai_content.strip():
-            ai_content = "Bien reçu, je prépare ça."
-        
-        # Extraire le buffer_data potentiel depuis les messages récents
-        buffer_info = {}
-        for msg in reversed(state.get("messages", [])[-5:]):
-            if hasattr(msg, 'content') and isinstance(msg.content, str):
-                content = msg.content.lower()
-                import re
-                montant_match = re.search(r'(\d+[\.,]?\d*)\s*€', content)
-                if montant_match:
-                    buffer_info["montant_detected"] = montant_match.group(0)
-                    buffer_info["montant_raw"] = montant_match.group(1)
-        
         try:
             options = [f"{d.get('ref', 'N/A')} - {d.get('nom', d.get('description', ''))}" for d in data]
         except Exception:
             options = [str(d)[:50] for d in data]
         
-        chantier_lines = "\n".join(f"- {opt}" for opt in options)
+        # Ajouter bouton Annuler si une action est en cours
+        if buffer_info.get("summary", "").strip():
+            options.append("❌ Annuler / Reset")
+        
+        chantier_lines = "\n".join(f"- {opt}" for opt in options if not opt.startswith("❌"))
         full_text = f"{ai_content}\n\nChantiers trouvés :\n{chantier_lines}\n\nSur quel chantier ?"
         return {
             "messages": [AIMessage(
@@ -383,6 +392,19 @@ def tool_result_formatter_node(state: AgentState):
                     "action": "DISPLAY_MENU",
                     "text": full_text,
                     "payload": {"options": options}
+                }),
+            )],
+            "buffer_data": buffer_info if buffer_info else None,
+            "last_action_status": "idle"
+        }
+    
+    # Fallback : pas de chantier trouvé mais on garde le contexte
+    if ai_content.strip():
+        return {
+            "messages": [AIMessage(
+                content=json.dumps({
+                    "action": "DISPLAY_TEXT",
+                    "text": f"Je n'ai pas trouvé de chantier.\n{ai_content}\nPeux-tu préciser le nom ?"
                 }),
             )],
             "buffer_data": buffer_info if buffer_info else None,
