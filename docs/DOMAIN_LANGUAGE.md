@@ -224,6 +224,52 @@ Contexte : SurenSaaS — Gestion de chantiers de construction
 
 ---
 
+## Termes du Domaine — Module AO v2 (Moteur de Pricing & Benchmarking)
+
+> Ajouté le 2026-05-11 — Session de refonte AO_SPECIFICATION_V2
+
+| Terme | Définition | Contexte/Module | Contrainte |
+|-------|-----------|-----------------|------------|
+| **Dossier AO** | Dossier de consultation publié par l'Acheteur, contenant les documents de référence (BPU vierge, CCTP, RC). C'est l'entité **parente**. | AO > Dossiers | Table `ao_dossiers`. Jamais `appel_offre` ou `ao_candidature` pour désigner le dossier source |
+| **Candidature** | Réponse financière déposée par un offreur (notre client, un concurrent, un partenaire) en réponse à un Dossier AO. C'est l'entité **enfant**. | AO > Candidatures | Table `ao_candidatures`. Une candidature appartient toujours à un `dossier_id` |
+| **Type de Candidature** | Nature de l'offreur : `OUR_OFFER` (notre client), `COMPETITOR` (concurrent identifié via ATTRI), `PARTNER` (partenaire uploadé manuellement) | AO > Candidatures | Enum `ao_candidature_type`. Toujours utiliser ces valeurs, jamais de strings libres |
+| **Ligne de Prix** | Unité atomique de valeur du système. Prix unitaire extrait d'un BPU/DQE, enrichi de son contexte technique (CCTP) et de son statut compétitif (ATTRI). | AO > Pricing | Table `ao_price_lines`. C'est l'entité centrale du moteur de pricing |
+| **Code Métier** | Identifiant normalisé d'une prestation dans la taxonomie hybride. Ex: `DIAG_AMIANTE_AVT_TRAVAUX`, `DIAG_PLOMB_CREP`. | AO > Taxonomie | Colonne `code_metier`. Format : `{DOMAINE}_{PRESTATION}[_{SOUS_TYPE}]`. Assigné par l'Agent Synthétiseur |
+| **Taxonomie Hybride** | Classification à deux niveaux des prestations diagnostics/travaux IDF, pilotée par l'IA. Niveau 1 : domaine (`DIAG_AMIANTE`). Niveau 2 : sous-type (`AVANT_TRAVAUX`). | AO > Normalisation | Le mapping est effectué par l'Agent Synthétiseur via prompt Gemini Pro |
+| **Agent Synthétiseur** | Agent IA central déclenché manuellement après traitement des documents obligatoires. Orchestre : extraction des lignes de prix → normalisation taxonomie → matching BPU↔CCTP → calcul Gap ATTRI. | AO > Agents | Fichier `ao_synthetiseur.py`. Remplace le `ao_lens_engine.py` de la v1 |
+| **Contexte Technique** | Lien persistant entre une Ligne de Prix (BPU) et la section CCTP qui l'encadre techniquement. Stocké avec un score de confiance et un extrait justificatif. | AO > Matching | Table `ao_price_technical_context`. Colonnes : `price_line_id`, `cctp_section_id`, `confidence_score`, `justification_snippet` |
+| **Justification Snippet** | Extrait court du CCTP expliquant le lien technique avec une ligne de prix. Généré par Gemini Pro lors du matching. | AO > Matching | Colonne `justification_snippet` dans `ao_price_technical_context`. Permet de répondre "Pourquoi ce prix ?" sans relancer l'IA |
+| **ATTRI** | Avis d'Attribution — document officiel indiquant le nom du gagnant et le montant global HT de l'offre retenue. Ne contient PAS le détail ligne par ligne. | AO > Documents | Type `ATTRI` dans l'enum `ao_document_type`. Utilisé pour calculer le Gap de compétitivité |
+| **Gap de Compétitivité** | Écart en pourcentage entre le montant total d'une candidature et le montant de l'offre retenue (ATTRI). Un Gap positif = offre au-dessus du prix gagnant. | AO > Benchmarking | Colonne `gap_vs_attri_pct` sur `ao_candidatures`. Formule : `((montant_total - attri_montant) / attri_montant) * 100` |
+| **Knowledge Base (KB)** | Base de données de prix de référence alimentée par les lignes de prix validées (`in_knowledge_base = TRUE`). Sert de fondation à l'Explorateur de Prix. | AO > KB | Flag `in_knowledge_base` sur `ao_price_lines`. Vue `ao_kb_prix_reference` pour la consultation |
+| **KB Locale** | Vecteurs CCTP/RC d'un seul Dossier AO, utilisés uniquement pour le matching BPU↔CCTP de l'Agent Synthétiseur. | AO > RAG | Filtrage sur `dossier_id` dans `ao_embeddings` |
+| **KB Cross-AO** | Ensemble des lignes de prix validées de tous les dossiers de l'org. Sert au benchmarking et à l'Explorateur de Prix. | AO > RAG | Données de `ao_kb_prix_reference` (vue SQL). Isolation stricte par `org_id` |
+| **Explorateur de Prix** | Interface de consultation de la KB Cross-AO. Permet de rechercher une prestation et de voir : prix moyen gagnant, dernier prix client, min/max, références sources. | AO > Frontend | Page `/dashboard/ao/explorer`. Composant `PriceExplorer.tsx` |
+| **Dernier Prix Client** | Dernier prix unitaire utilisé par notre client (`OUR_OFFER`) pour un code métier donné. Affiché dans l'Explorateur de Prix. | AO > KB | Sous-requête dans `ao_kb_prix_reference` filtrée sur `type_candidature = 'OUR_OFFER'` ORDER BY `created_at DESC` |
+| **HITL AO** | Validation humaine des lignes de prix dont le score de confiance est inférieur au seuil (85%). Permet de corriger le code métier ou le prix avant injection en KB. | AO > Validation | Enum `ao_validation_statut` : `EN_ATTENTE`, `VALIDE`, `REJETE`, `CORRIGE`, `AUTO_VALIDE`. Interface : `HITLValidationTable.tsx` |
+| **Seuil de Confiance** | Score minimum (0.85) en dessous duquel une ligne de prix passe en validation humaine (`EN_ATTENTE`). Au-dessus : `AUTO_VALIDE`. | AO > HITL | Constante `AO_CONFIDENCE_THRESHOLD = 0.85`. S'applique à `normalisation_confiance` et `confidence_score` (matching) |
+| **Worker Extraction** | Service dédié à l'extraction brute d'un type de fichier. Trois workers : PDF (Gemini OCR), Excel (openpyxl double-passe), DOCX (python-docx par section). | AO > Pipeline | Fichiers : `ao_excel_extractor.py`, `ao_docx_extractor.py`. PDF via `generic_extractor.py` existant |
+| **Double-Passe Excel** | Stratégie d'extraction Excel consistant à lire le fichier deux fois avec `openpyxl` : une fois pour les formules (`data_only=False`) et une fois pour les valeurs calculées (`data_only=True`). | AO > Worker Excel | Colonne `formule_brute` + `valeur_calculee` sur `ao_price_lines`. Les formules révèlent les marges et règles de calcul |
+| **Complétude Dossier** | État d'un Dossier AO indiquant que tous les documents obligatoires (BPU + DQE + CCTP) sont présents et traités. Condition nécessaire pour déclencher l'Agent Synthétiseur. | AO > Pipeline | Colonne `docs_obligatoires_ok` sur `ao_dossiers`. Calculée par `check_dossier_completude()` |
+| **Statut Dossier** | État du pipeline d'un Dossier AO : `INCOMPLET` → `PRET` → `EN_ANALYSE` → `ANALYSE_OK` ou `ERROR`. | AO > Pipeline | Enum `ao_dossier_statut`. Colonne `statut` sur `ao_dossiers` |
+| **Traçabilité Source** | Capacité à retrouver l'origine exacte d'une donnée extraite : clé R2, numéro de page PDF, numéro de ligne et nom d'onglet Excel. Permet le lien cliquable vers le document source. | AO > Traçabilité | Colonnes `r2_file_id`, `page_number`, `row_number`, `sheet_name` sur `ao_price_lines` et `ao_embeddings` |
+| **Chunk Sémantique** | Unité de texte vectorisée respectant la structure logique du document. CCTP : 800–1000 tokens par section. BPU/DQE : 1 ligne = 1 chunk (jamais découpée). | AO > RAG | Stratégie dans `ao_rag_service.py`. L'atomicité des lignes BPU est une règle absolue |
+| **Zone Géo** | Code de département IDF (75, 77, 78, 91, 92, 93, 94, 95). Granularité de référence pour le benchmarking géographique. | AO > Contexte | Colonne `zone_geo` sur `ao_dossiers`, `ao_price_lines`, `ao_embeddings`. Jamais "IDF" en bloc |
+| **Type Acheteur** | Catégorie de l'entité publiant l'AO : `BAILLEUR_SOCIAL`, `COLLECTIVITE`, `PRIVE`, etc. Dimensionne le benchmarking. | AO > Contexte | Colonne `type_acheteur` sur `ao_dossiers` et `ao_price_lines`. Hérité du dossier vers les lignes de prix |
+
+### Règles Strictes — Module AO v2
+
+1. **Toujours `ao_dossiers`** pour l'entité parent (le dossier de consultation de l'acheteur)
+2. **Toujours `ao_candidatures`** pour les réponses déposées (notre client, concurrent, partenaire)
+3. **Toujours `code_metier`** pour l'identifiant normalisé (jamais `category`, `type`, `label`)
+4. **Toujours `in_knowledge_base`** comme flag d'injection KB — une ligne non validée ne doit JAMAIS apparaître dans l'Explorateur de Prix
+5. **Toujours `r2_file_id` + `page_number`** pour toute donnée extraite — la traçabilité source est obligatoire
+6. **1 ligne BPU = 1 chunk** — règle absolue, ne jamais découper une ligne de prix entre deux vecteurs
+7. **`statut`** (pas `status`) sur toutes les tables AO
+8. **`org_id`** sur toutes les tables AO — isolation multi-tenant systématique
+
+---
+
 ## Termes du Domaine — Extension Harnais de Validation (E2E Blackbox)
 
 | Terme | Définition | Contexte | Contrainte |

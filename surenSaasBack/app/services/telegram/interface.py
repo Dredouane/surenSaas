@@ -51,7 +51,8 @@ class TelegramInterface:
 
     async def download_file(self, file_path: str) -> bytes:
         """Télécharge le contenu binaire d'un fichier."""
-        url = f"https://api.telegram.org/file/bot{self.bot_token}/{file_path}"
+        base_for_file = self.base_url.rsplit("/bot", 1)[0]
+        url = f"{base_for_file}/file/bot{self.bot_token}/{file_path}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
             response.raise_for_status()

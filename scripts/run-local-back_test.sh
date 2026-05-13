@@ -26,10 +26,23 @@ echo "=========================================="
 echo "🧹 Nettoyage des processus existants..."
 echo "=========================================="
 
+# Tuer les mock_telegram en cours (sur le port 8081 uniquement)
+if lsof -ti:8081 > /dev/null 2>&1; then
+    echo "  → Arrêt de mock_telegram sur port 8081..."
+    lsof -ti:8081 | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
 # Tuer uvicorn sur le port 8080
 if lsof -ti:8080 > /dev/null 2>&1; then
     echo "  → Arrêt du backend sur port 8080..."
-    lsof -ti:8080 | xargs kill 2>/dev/null || true
+    lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
+# Force kill si le port est toujours occupé
+if lsof -ti:8080 > /dev/null 2>&1; then
+    echo "  → Force kill sur 8080..."
+    fuser -k 8080/tcp 2>/dev/null || true
     sleep 2
 fi
 

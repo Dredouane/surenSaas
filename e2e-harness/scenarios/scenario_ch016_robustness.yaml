@@ -26,18 +26,9 @@ steps:
     content: "C'est pour le chantier CH-016."
     judge_prompt: |
       Vérifie que le bot :
-      1. Cherche le chantier CH-016 (search_chantiers ou get_user_chantiers)
-      2. Propose un DISPLAY_MENU avec le chantier CH-016
-      3. Maintient le contexte de la dépense (250.50€, Leroy Merlin)
-      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
-    expected_verdict: pass
-
-  - type: callback
-    mode: async
-    content: "CH-016"
-    judge_prompt: |
-      Vérifie que le bot :
-      1. Restaure la dépense (montant 250.50€, fournisseur Leroy Merlin)
-      2. Propose la création de la dépense (validation HITL avec boutons Confirmer/Annuler)
+      1. Cherche le chantier CH-016
+      2. Propose DIRECTEMENT la confirmation de la dépense (CONFIRM_ACTION)
+      3. Affiche bien le montant (250.50€), le fournisseur (Leroy Merlin) ET le chantier (CH-016)
+      4. Propose les boutons d'action finale (Valider/Confirmer)
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

@@ -98,12 +98,17 @@ class WebhookHandlerService:
             file_info = await self.tg_interface.get_file(file_id)
             if 'file_path' in file_info:
                 image_bytes = await self.tg_interface.download_file(file_info['file_path'])
+        if 'document' in message:
+            file_id = message['document']['file_id']
+            file_info = await self.tg_interface.get_file(file_id)
+            if 'file_path' in file_info:
+                image_bytes = await self.tg_interface.download_file(file_info['file_path'])
 
         # Context métier initial
         org_id = self._org_id or await self._get_user_org(user_id) or ""
         
         input_data = {
-            "messages": [HumanMessage(content=text)] if text else [],
+            "messages": [HumanMessage(content=text)] if text else [HumanMessage(content="📄 Envoi d'un document à analyser.")],
             "correlation_id": correlation_id,
             "user_name": message['from'].get('first_name', 'Utilisateur'),
             "org_id": org_id,

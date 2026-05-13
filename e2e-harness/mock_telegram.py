@@ -134,6 +134,30 @@ async def get_chat(token: str, chat_id: int = 0):
     }
 
 
+@app.get("/bot{token}/getFile")
+async def get_file(token: str, file_id: str = ""):
+    # Hard-coded : retourne un chemin vers un PDF de test (peu importe le file_id)
+    return {
+        "ok": True,
+        "result": {
+            "file_id": file_id,
+            "file_path": f"mock_docs/{file_id}.pdf",
+            "file_size": 67431,
+        },
+    }
+
+
+@app.get("/file/bot{token}/{file_path:path}")
+async def download_file(token: str, file_path: str):
+    from pathlib import Path
+    pdf_path = Path(__file__).resolve().parent / "data" / "INV-EXA-0001_EXAMPLE-SOCIETE.pdf"
+    if pdf_path.exists():
+        content = pdf_path.read_bytes()
+        from fastapi.responses import Response
+        return Response(content=content, media_type="application/pdf")
+    return {"ok": False, "error": "Fichier non trouvé"}
+
+
 @app.post("/debug/reset")
 async def debug_reset():
     global MESSAGES, UPDATE_COUNTER

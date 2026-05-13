@@ -74,8 +74,12 @@ def startup():
     global _initialized
 
     if _initialized:
-        logger.debug("Vertex AI déjà initialisé, skip")
-        return
+        # Forcer la réinitialisation si le fichier credentials a disparu
+        if os.path.exists(CREDENTIALS_PATH):
+            logger.debug("Vertex AI déjà initialisé, skip")
+            return
+        logger.warning("Fichier credentials manquant, réinitialisation forcée")
+        _initialized = False
 
     creds = _decode_credentials()
     if creds:

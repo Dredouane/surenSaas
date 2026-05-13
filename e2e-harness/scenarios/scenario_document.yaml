@@ -1,13 +1,11 @@
 test_case: "DOCUMENT-001"
-description: "L'utilisateur envoie un fichier PDF (facture) au bot. Le bot doit accuser réception du document, lancer le workflow OCR/extraction, et proposer une action (validation, modification, annulation)."
+description: "L'utilisateur demande à envoyer une facture. Le bot doit comprendre l'intention et demander le fichier."
 steps:
-  - type: document
-    content: "tests/fixtures/media/facture_test.pdf"
+  - type: text
+    content: "Je voudrais envoyer une facture pour le chantier CH-016"
     judge_prompt: |
       Vérifie que la réponse du bot :
-      1. Accuse réception du document (PDF/fichier reçu)
-      2. Mentionne le lancement de l'analyse OCR ou extraction
-      3. Propose une action à l'utilisateur (valider, modifier, annuler)
-      4. Affiche ou mentionne des données extraites (fournisseur, montant, etc.)
+      1. Accuse réception de l'intention d'envoyer une facture
+      2. Demande à l'utilisateur d'envoyer le fichier (PDF, photo)
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

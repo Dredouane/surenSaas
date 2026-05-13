@@ -5,6 +5,7 @@ import uuid as _uuid
 import json
 import copy
 import os
+import logging
 from datetime import date as _today_date
 from typing import Annotated, Sequence, TypedDict, Union, Optional, Dict, Any, List
 
@@ -32,6 +33,8 @@ from app.services.agents.tools import (
 )
 from app.agents.tools.depense_tools import create_depense
 from app.agents.tools.attendance_tools import match_resources, upsert_attendance
+
+logger = logging.getLogger(__name__)
 
 # --- STATE DEFINITION ---
 
@@ -122,31 +125,58 @@ async def audio_expert_node(state: AgentState):
         return {"messages": [HumanMessage(content="[Erreur Audio] Échec traitement.")], "voice_bytes": None}
 
 async def vision_expert_node(state: AgentState):
-    """OCR et classification d'images."""
+    """OCR et classification d'images / documents PDF."""
     log_transition(state, "vision_expert")
     if not state.get("image_bytes"):
         return state
-        
+
+    import tempfile, os
+
     vision_service = VisionExpertService()
     start_time = time.time()
     try:
         chantiers = get_user_chantiers.invoke({"org_id": state["org_id"]})["data"]
-        result = await vision_service.process_photo(state["image_bytes"], chantiers)
-        
-        if not result.is_document:
-            msg = f"👷 Photo de chantier : {result.description}"
-        elif result.besoin_clarification or not result.montant_ttc:
-            msg = f"🧐 J'ai vu un ticket chez {result.fournisseur or 'un fournisseur'}, mais le montant est illisible. Tu peux me le donner ?"
+        image_bytes = state["image_bytes"]
+
+        # Détection PDF : si le fichier commence par %PDF, on utilise l'extracteur générique
+        is_pdf = image_bytes[:4] == b"%PDF"
+        if is_pdf:
+            from app.agents.generic_extractor import create_invoice_extractor
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(image_bytes)
+                tmp_path = tmp.name
+            try:
+                extractor = create_invoice_extractor()
+                result = await extractor.extract(tmp_path)
+                import json as _json
+                extracted_data = result.raw_data.get("extracted_data", {})
+                msg = (
+                    "[SYSTEM-DATA-EXTRACTION]\n"
+                    "STATUS: SUCCESS\n"
+                    "SOURCE: VISION-OCR\n"
+                    f"RAW_JSON_DATA: {_json.dumps(extracted_data, ensure_ascii=False)}\n"
+                    "INSTRUCTION: Analyse ce JSON, présente les informations importantes "
+                    "à l'utilisateur (fournisseur, montants, numéros, etc.) "
+                    "et propose de valider."
+                )
+            finally:
+                os.unlink(tmp_path)
         else:
-            msg = f"💰 Ticket détecté : {result.fournisseur} pour {result.montant_ttc}€ TTC le {result.date}."
-            
+            result = await vision_service.process_photo(image_bytes, chantiers)
+            if not result.is_document:
+                msg = f"👷 Photo de chantier : {result.description}"
+            elif result.besoin_clarification or not result.montant_ttc:
+                msg = f"🧐 J'ai vu un ticket chez {result.fournisseur or 'un fournisseur'}, mais le montant est illisible. Tu peux me le donner ?"
+            else:
+                msg = f"💰 Ticket détecté : {result.fournisseur} pour {result.montant_ttc}€ TTC le {result.date}."
+
         return {
-            "messages": [HumanMessage(content=msg)],
+            "messages": [AIMessage(content=msg)],
             "image_bytes": None,
-            "vision_meta": {"latency_ms": (time.time() - start_time) * 1000, "data": result.model_dump()}
+            "vision_meta": {"latency_ms": (time.time() - start_time) * 1000, "data": {} if is_pdf else result.model_dump()}
         }
     except Exception as e:
-        return {"messages": [HumanMessage(content="[Erreur Vision] Échec analyse.")], "image_bytes": None}
+        return {"messages": [AIMessage(content=f"[Erreur Vision] Échec analyse: {e}")], "image_bytes": None}
 
 def call_model_node(state: AgentState):
     """Cerveau principal."""
@@ -156,6 +186,13 @@ def call_model_node(state: AgentState):
     summary_context = f"\nRésumé précédent : {state.get('summary')}" if state.get("summary") else ""
     urgency = "\n🚨 PRIORITÉ HAUTE" if state.get("is_urgent") else ""
     
+    # Garde-fou : si la liste des messages est vide, on initialise un message par défaut
+    if not state.get("messages"):
+        return {
+            "messages": [AIMessage(content="Je suis prêt à analyser votre document.")],
+            "buffer_data": state.get("buffer_data"),
+        }
+
     buffer_context = ""
     buf = state.get("buffer_data")
     if buf:
@@ -221,6 +258,17 @@ def call_model_node(state: AgentState):
         'sur CH-016" → format_response(CONFIRM_ACTION, '
         '"Confirmer la dépense : 150€ béton sur CH-016 ?")\n'
         'Le chantier est déjà nommé → ne demande PAS "Sur quel chantier ?".\n'
+        '8. ACCUEIL DOCUMENT : Si l\'utilisateur mentionne vouloir enregistrer '
+        'une facture, un reçu ou un document sans l\'avoir encore envoyé, '
+        'tu DOIS l\'encourager et lui demander explicitement d\'envoyer '
+        'le fichier (PDF ou Image).\n'
+        '9. PROTOCOLE SYSTEM-DATA : '
+        'Tout message commençant par [SYSTEM-DATA-EXTRACTION] '
+        'est une transmission directe de l\'outil d\'OCR. '
+        'Le champ RAW_JSON_DATA contient toutes les données extraites. '
+        'Analyse ce JSON et présente les informations importantes à l\'utilisateur '
+        '(fournisseur, montants, numéros, etc.) et propose de valider. '
+        'Ne discute pas la validité du statut SUCCESS.\n'
     )
     
     msgs = [SystemMessage(content=system_prompt)]
