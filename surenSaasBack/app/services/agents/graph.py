@@ -3,6 +3,9 @@ import operator
 import time
 import uuid as _uuid
 import json
+import copy
+import os
+from datetime import date as _today_date
 from typing import Annotated, Sequence, TypedDict, Union, Optional, Dict, Any, List
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -158,26 +161,41 @@ def call_model_node(state: AgentState):
     if buf:
         summary = buf.get("summary", "") if isinstance(buf, dict) else ""
         if summary:
-            buffer_context = f"\n📋 ACTION EN COURS : {summary}. Finalise cette action ou propose à l'utilisateur de l'annuler."
+            buffer_context = (
+    f"\n📋 ACTION EN COURS : {summary}.\n"
+    "LIMITE DE DOMAINE : Tu es un assistant spécialisé dans la gestion de chantier. "
+    "Si un message utilisateur est hors de ton domaine (questions générales, météo, etc.) "
+    "ou ne permet pas de faire progresser l'action en cours : "
+    "décline poliment en rappelant ton rôle, puis recentre immédiatement "
+    "sur l'action ou la donnée en attente."
+)
         else:
             buffer_context = f"\n📋 CONTEXTE EN ATTENTE : Tu avais commencé à traiter une opération avant de demander le chantier. Infos collectées : {buf}. Complète maintenant l'action."
-    print(f"[BUFFER_STATE] buffer_data={json.dumps(buf if buf else {})} | chantier_id={state.get('chantier_id', 'None')}")
+    print(f"[STATE_CHECK] call_model_node | buffer_data keys: {list(buf.keys()) if buf else 'EMPTY'} | chantier_id={state.get('chantier_id', 'None')}")
     
     system_prompt = (
         f"Tu es l'assistant de chantier Suren, ton de 'collègue de terrain' (direct, pro, emojis 👷🏗️). "
         f"Contexte : {state.get('user_name', 'Chef')}, Org: {state.get('org_id', 'Non défini')}, Chantier: {state.get('chantier_id') or 'Non défini'}. "
         f"{summary_context}{urgency}"
         f"{buffer_context}\n\n"
+        "RÈGLE DE RÉSONANCE : Ton message texte (content) doit être le miroir "
+        "de tes actions techniques. Si tu extrais, valides ou manipules des données "
+        "(montants, noms, dates, chantiers, etc.), tu DOIS les citer explicitement "
+        "dans ton texte. L'utilisateur ne voit pas tes appels d'outils, "
+        "il ne voit que tes mots.\n\n"
+        f"Aujourd'hui c'est le {_today_date.today().isoformat()}. Si une date correspond "
+        f"à aujourd'hui dans ta réponse, appelle-la 'aujourd'hui'.\n\n"
+        "TRAITEMENT DOCUMENT : Après l'extraction d'un document, "
+        "présente toujours les données trouvées (montant, fournisseur, etc.) "
+        "et propose les options Valider/Modifier/Annuler via format_response, "
+        "même si des champs sont vides ou à compléter.\n\n"
         "--- PROTOCOLE DE DÉCISION ---\n"
         "1. IDENTIFICATION : Si le chantier n'est pas identifié, "
         "appelle search_chantiers avant toute action d'écriture.\n"
-        "2. CONFIRMATION : Accuse toujours réception des montants "
-        "et fournisseurs extraits dans ton message texte. "
-        "Un appel d'outil DOIT être accompagné d'un texte de confirmation.\n"
         "3. SÉQUENÇAGE : Ne crée rien (create_depense) sans avoir "
         "la certitude du chantier (ID ou sélection unique).\n"
         "4. FALLBACK : Si une catégorie n'est pas claire, "
-        "utilise 'divers'.\n"
+        "utilise 'autre' (catégories acceptées : sous_traitant, fournisseur, autre).\n"
         "---\n"
         "PROTOCOLE DE COMMUNICATION : Tout appel d'outil doit obligatoirement "
         "inclure l'argument context_summary. Ce champ doit contenir une phrase "
@@ -191,14 +209,35 @@ def call_model_node(state: AgentState):
         'DISPLAY_MENU pour les choix, INIT_FORM pour les saisies, '
         'CONFIRM_ACTION pour les validations. '
         'Si aucune action spéciale n\'est requise, réponds normalement en texte.\n'
-        '6. Quand tu reçois des données d\'un outil (liste de chantiers, détails), '
-        'utilise format_response DISPLAY_MENU pour afficher des boutons cliquables.\n'
-        '8. BUFFER_CONTEXT : Si tu vois "📋 CONTEXTE EN ATTENTE" dans le contexte, '
-        "complète l'action avec les données du buffer (montant, fournisseur...). "
-        "Si le chantier est maintenant connu, crée la dépense.\n"
+        '6. OBLIGATOIRE : Tu DOIS appeler format_response avec DISPLAY_MENU '
+        'dès que tu as une liste de chantiers. '
+        'Interdiction formelle de répondre en texte seul dans ce cas.\n'
+        '7. DÉTERMINISME : Dès qu\'une action métier (dépense, pointage, rapport) '
+        'est demandée avec un chantier identifiable (ex: "CH-016", "CRF"), '
+        'interdiction de poser une question de clarification. '
+        'Tu DOIS immédiatement proposer la confirmation '
+        'via format_response avec CONFIRM_ACTION.\n'
+        'EXEMPLE : Message "Aujourd\'hui j\'ai dépensé 150€ pour le béton '
+        'sur CH-016" → format_response(CONFIRM_ACTION, '
+        '"Confirmer la dépense : 150€ béton sur CH-016 ?")\n'
+        'Le chantier est déjà nommé → ne demande PAS "Sur quel chantier ?".\n'
     )
     
-    msgs = [SystemMessage(content=system_prompt)] + list(state["messages"][-10:])
+    msgs = [SystemMessage(content=system_prompt)]
+    for m in list(state["messages"][-10:]):
+        msgs.append(copy.deepcopy(m))
+
+    if buf:
+        summary = buf.get("summary", "") if isinstance(buf, dict) else ""
+        if summary and msgs and isinstance(msgs[-1], HumanMessage) and msgs[-1].content:
+            original = str(msgs[-1].content)
+            msgs[-1].content = (
+                f"📝 CONTEXTE MÉTIER : {summary}\n"
+                f"MESSAGE UTILISATEUR : {original}\n"
+                f"⚠️ INSTRUCTION : Tu DOIS répondre au MESSAGE UTILISATEUR. "
+                f"S'il est hors-sujet (météo, question générale), décline poliment "
+                f"et recentre sur le CONTEXTE MÉTIER ci-dessus."
+            )
     
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
     
@@ -229,6 +268,12 @@ def call_model_node(state: AgentState):
                     truncated += "..."
                 args["context_summary"] = truncated
     
+    # Sonde sortante (silencieuse sauf si DEBUG_LLM est défini)
+    if os.environ.get("DEBUG_LLM"):
+        content_preview = str(response.content)[:200] if response.content else "(no content)"
+        tool_names = [tc.get("name", "?") for tc in (response.tool_calls or [])]
+        print(f"[LLM_RESPONSE] content={content_preview} | tools={tool_names}")
+
     return {"messages": [response]}
 
 def pre_reflector_node(state: AgentState):
@@ -302,10 +347,19 @@ def hitl_formatter_node(state: AgentState):
     
     # Cas 1 : Outil métier appelé → interruption HITL (sauf format_response et lecture seule)
     if last_msg.tool_calls and not is_format_response and not is_read_only:
+        buf = state.get("buffer_data")
+        buf_summary = ""
+        if buf:
+            buf_summary = buf.get("summary", "") if isinstance(buf, dict) else ""
+
+        msg_text = str(last_msg.content) if last_msg.content else ""
+        if buf_summary:
+            msg_text = f"📝 {buf_summary}\n\n{msg_text}"
+
         updates["last_action_status"] = "pending_confirm"
-        updates["buffer_data"] = state.get("buffer_data")  # On garde buffer_data pendant HITL
-        # Priorité au pending_tool_call déjà injecté par pre_reflector (qui contient org_id)
+        updates["buffer_data"] = state.get("buffer_data")
         updates["pending_tool_call"] = state.get("pending_tool_call", last_msg.tool_calls[0])
+        updates["messages"] = [AIMessage(content=msg_text, tool_calls=last_msg.tool_calls or [])]
         return updates
     
     # Cas 2 : format_response (DISPLAY_MENU, INIT_FORM, CONFIRM_ACTION)
@@ -329,8 +383,9 @@ def tool_result_formatter_node(state: AgentState):
     if not isinstance(last_msg, ToolMessage):
         return state
     
-    # Log brut du contenu pour debug
-    print(f"[TOOL_RESULT_RAW] content={str(last_msg.content)[:500]}")
+    # Log brut du contenu pour debug (silencieux sauf si DEBUG_LLM est défini)
+    if os.environ.get("DEBUG_LLM"):
+        print(f"[TOOL_RESULT_RAW] content={str(last_msg.content)[:500]}")
     
     import json
     try:
@@ -414,18 +469,26 @@ def tool_result_formatter_node(state: AgentState):
     # Objet unique → message simple
     if data and isinstance(data, dict):
         nom = data.get('nom', data.get('ref', 'résultat'))
-        return {"messages": [AIMessage(content=f"✅ {nom} chargé.")], "last_action_status": "idle"}
-    
-    msg = res.get('message', 'Opération réussie.')
-    return {"messages": [AIMessage(content=f"✅ {msg}")], "last_action_status": "idle"}
-
-
-# --- EDGE ROUTERS (exportés pour les tests) ---
+        buf_summary = ""
+        if state.get("buffer_data"):
+            buf_summary = state["buffer_data"].get("summary", "")
+        msg_text = f"✅ {nom} chargé."
+        if buf_summary:
+            msg_text = f"📝 {buf_summary}\n\n{msg_text}"
+        return {"messages": [AIMessage(content=msg_text)], "last_action_status": "idle", "buffer_data": state.get("buffer_data")}
+    buf_summary = ""
+    if state.get("buffer_data"):
+        buf_summary = state["buffer_data"].get("summary", "")
+    msg_text = f"✅ {msg}"
+    if buf_summary:
+        msg_text = f"📝 {buf_summary}\n\n{msg_text}"
+    return {"messages": [AIMessage(content=msg_text)], "last_action_status": "idle", "buffer_data": state.get("buffer_data")}
 
 def after_agent(state: AgentState):
     """Route après le LLM : format_response → END (déjà formaté pour l'interface),
     outils métier → pre_reflector (HITL), sinon END."""
     last = state["messages"][-1]
+    print(f"[ROUTE] after_agent → {'pre_reflector' if last.tool_calls else 'END'}")
     if last.tool_calls:
         if any(tc.get("name") == "format_response" for tc in last.tool_calls):
             return END
@@ -440,6 +503,8 @@ def route_input(state: AgentState):
 
 
 def after_pre_reflector(state: AgentState):
+    has_tools = bool(state["messages"][-1].tool_calls)
+    print(f"[ROUTE] after_pre_reflector → {'formatter' if has_tools else 'END'}")
     if isinstance(state["messages"][-1], AIMessage) and not state["messages"][-1].tool_calls:
         return END
     return "formatter"

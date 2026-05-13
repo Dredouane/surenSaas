@@ -88,6 +88,31 @@ def _create_depense_internal(
             "message": f"Dépense {fournisseur} - {montant}€ enregistrée (en attente validation).",
         }
     except Exception as e:
+        err_str = str(e)
+        # Si l'erreur est une valeur ENUM invalide, réessayer avec 'divers'
+        if "invalid input value for enum" in err_str and "categorie" in err_str:
+            logger.warning("[DEPENSE_TOOL] Catégorie invalide pour l'ENUM, fallback sur 'autre'")
+            depense_data["categorie"] = "autre"
+            try:
+                result = sb.table("chantier_depenses").insert(depense_data).execute()
+                created_id = result.data[0]["id"] if result.data else None
+                logger.info("[DEPENSE_TOOL] Dépense créée avec fallback divers: %s", created_id)
+                return {
+                    "success": True,
+                    "data": {"id": created_id} if created_id else {},
+                    "error": None,
+                    "suggestion": None,
+                    "message": f"Dépense {fournisseur} - {montant}€ enregistrée (en attente validation).",
+                }
+            except Exception as fallback_err:
+                logger.error("[DEPENSE_TOOL] Fallback échoué aussi: %s", fallback_err)
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": str(fallback_err),
+                    "suggestion": "Réessaie ou contacte le support.",
+                    "message": None,
+                }
         logger.error("[DEPENSE_TOOL] Erreur création dépense: %s", e)
         return {
             "success": False,

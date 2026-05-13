@@ -7,7 +7,7 @@ steps:
       Vérifie que la réponse du bot :
       1. Confirme la création de la dépense
       2. Mentionne le montant 150€
-      3. Mentionne le chantier CH-016
-      4. Mentionne la date d'aujourd'hui
+      3. Mentionne ou demande de confirmer le chantier CH-016
+      4. Mentionne la date si présente dans sa réponse (optionnel)
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

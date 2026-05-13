@@ -11,6 +11,7 @@ from the webhook response.
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 from typing import Optional
@@ -140,6 +141,7 @@ class TgMockClient:
         self._client = _http_client or httpx.Client(base_url=self.tg_mock_url, timeout=90.0)
         self._history: list[dict] = []
         self._last_update_id = 0
+        self.chat_id = random.randint(100000, 999999)
 
     # ── Webhook endpoint ──────────────────────────────────────────────
 
@@ -154,8 +156,8 @@ class TgMockClient:
     def _make_update(self, message_id: int, text: Optional[str] = None, **extra) -> dict:
         message = {
             "message_id": message_id,
-            "from": dict(TEST_FROM_USER),
-            "chat": {"id": TEST_CHAT_ID, "type": "private"},
+            "from": {"id": self.chat_id, "first_name": "Test", "is_bot": False},
+            "chat": {"id": self.chat_id, "type": "private"},
             "date": int(time.time()),
         }
         if text is not None:
@@ -168,7 +170,7 @@ class TgMockClient:
             "update_id": int(time.time() * 1000) % 1000000,
             "callback_query": {
                 "id": f"cb_{int(time.time() * 1000)}",
-                "from": dict(TEST_FROM_USER),
+                "from": {"id": self.chat_id, "first_name": "Test", "is_bot": False},
                 "message": message,
                 "chat_instance": str(int(time.time())),
                 "data": callback_data,
@@ -401,7 +403,7 @@ def reset_mock_telegram(tg_mock_client):
     yield
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def tg_mock_client(bot_seed, org_id) -> TgMockClient:
     client = TgMockClient(
         tg_mock_url=TG_MOCK_URL,

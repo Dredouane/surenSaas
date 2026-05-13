@@ -22,8 +22,8 @@ _GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-2.5-flash:generateContent"
 )
-_GEMINI_TIMEOUT_S = 15
-_GEMINI_MAX_RETRIES = 2
+_GEMINI_TIMEOUT_S = 30
+_GEMINI_MAX_RETRIES = 1
 
 _DEFAULT_SYSTEM_PROMPT = (
     "Tu es un Auditeur de Session. Tu reçois un historique de conversation "
@@ -85,11 +85,20 @@ def _parse_verdict(text: str) -> Optional[Verdict]:
     except json.JSONDecodeError:
         return None
 
+    # Support both formats: {"verdict": "PASS"} and {"score": 1, "reason": "..."}
     verdict_str = data.get("verdict", "")
     if verdict_str == "PASS":
         return Verdict(score=1, reason=data.get("reason", ""), step_index=0)
     elif verdict_str == "FAIL":
         return Verdict(score=0, reason=data.get("reason", ""), step_index=0)
+
+    score_val = data.get("score")
+    if score_val is not None:
+        return Verdict(
+            score=1 if score_val in (1, "1", True) else 0,
+            reason=data.get("reason", ""),
+            step_index=0,
+        )
     return None
 
 

@@ -331,12 +331,12 @@ class WebhookHandlerService:
                 # Restaurer le contexte : on remet le buffer dans les messages
                 reprise_msg = (
                     f"Le chantier {chantier_ref} est maintenant sélectionné. "
-                    f"Reprends l'action en cours avec ces infos : {buf}. "
+                    f"Reprends l'action en cours : {buf.get('summary', '')}. "
                     f"Termine l'opération."
                 )
                 await graph.aupdate_state(config, {
                     "chantier_id": chantier_uuid,
-                    "buffer_data": None,  # Vider le buffer après utilisation
+                    "buffer_data": buf,  # Conserver le buffer pour le prochain tour
                     "messages": [
                         HumanMessage(content=f"Je sélectionne le chantier {chantier_ref} (UUID: {chantier_uuid})"),
                         AIMessage(content=reprise_msg)
@@ -352,10 +352,15 @@ class WebhookHandlerService:
                 })
             
             # Feedback utilisateur Telegram
-            await self.tg_interface.send_message(
-                user_id,
-                f"✅ **Chantier {chantier_ref} sélectionné.**\n\nQue veux-tu faire ? (Dépense, rapport, pointage...)"
-            )
+            buf_summary = ""
+            if buf:
+                buf_summary = buf.get("summary", "") if isinstance(buf, dict) else ""
+            msg = f"✅ **Chantier {chantier_ref} sélectionné.**"
+            if buf_summary:
+                msg += f"\n\n📝 {buf_summary}\n\nSouhaites-tu terminer cette action ? (Confirme ou annule)"
+            else:
+                msg += "\n\nQue veux-tu faire ? (Dépense, rapport, pointage...)"
+            await self.tg_interface.send_message(user_id, msg)
             return {"status": "ok"}
 
         # Fallback : callback non reconnu, on le traite comme un message texte

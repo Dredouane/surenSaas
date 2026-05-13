@@ -328,7 +328,7 @@ def _convert_native_response_to_aimessage(response) -> "langchain_core.messages.
     if not candidate:
         return AIMessage(content="")
 
-    parts = candidate.content.parts
+    parts = candidate.content.parts if candidate.content else []
     text_parts = []
     tool_calls = []
 
@@ -346,7 +346,7 @@ def _convert_native_response_to_aimessage(response) -> "langchain_core.messages.
 
     return AIMessage(
         content="\n".join(text_parts),
-        tool_calls=tool_calls if tool_calls else None,
+        tool_calls=tool_calls if tool_calls else [],
     )
 
 

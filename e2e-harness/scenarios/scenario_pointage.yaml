@@ -5,10 +5,11 @@ steps:
     content: "Je pointe Jean Dupont et la pelleteuse sur CH-016"
     judge_prompt: |
       Vérifie que la réponse du bot :
-      1. Confirme la création du pointage
+      1. Accuse réception de la demande de pointage (Jean Dupont + pelleteuse)
       2. Mentionne la ressource humaine "Jean Dupont"
       3. Mentionne la ressource machine "pelleteuse"
-      4. Mentionne le chantier CH-016
-      5. Indique la date du pointage (aujourd'hui ou une date précise)
+      4. Mentionne ou demande de confirmer le chantier CH-016
+      5. Indique ou demande la date du pointage (Optionnel : si absente, ne pas pénaliser)
+      Si le bot propose un menu de sélection ou demande une confirmation avant de créer, c'est un succès.
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

@@ -259,13 +259,15 @@ def search_chantiers(org_id: str, query: str, context_summary: str = "") -> Dict
         q = (query or "").strip()
         if len(q) < 2:
             return standard_response(False, error="Requête trop courte (min 2 caractères)")
-        
+        # Normaliser les tirets : CH-016 ou CH016 doivent matcher CH-016
+        search_q = q.replace("-", "%")
+
         result = (
             get_supabase()
             .table("chantiers")
             .select("id, ref, nom, statut")
             .eq("org_id", org_id)
-            .or_(f"ref.ilike.%{q}%,nom.ilike.%{q}%")
+            .or_(f"ref.ilike.%{search_q}%,nom.ilike.%{search_q}%")
             .limit(5)
             .execute()
         )

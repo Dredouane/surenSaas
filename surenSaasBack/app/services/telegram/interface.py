@@ -20,6 +20,7 @@ class TelegramInterface:
     async def send_message(self, chat_id: int, text: str, reply_markup: Optional[Dict] = None):
         url = f"{self.base_url}/sendMessage"
         safe_text = _html.escape(text) if text else text
+        print(f"[TELEGRAM_OUTGOING] text='{str(text)[:100]}'")
         payload = {
             "chat_id": chat_id,
             "text": safe_text,
