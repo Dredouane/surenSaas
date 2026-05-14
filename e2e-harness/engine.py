@@ -295,6 +295,21 @@ class SessionRunner:
         # Build conversation history text for the judge
         conversation_text = self._format_conversation_for_judge()
 
+        # Extraire les boutons du reply_markup pour les passer au Judge
+        bot_actions = ""
+        if bot_messages:
+            import json as _json
+            for msg in bot_messages:
+                rp = msg.get("reply_markup") or {}
+                kb = rp.get("inline_keyboard") or []
+                for row in kb:
+                    for btn in row:
+                        txt = btn.get("text", "")
+                        cbd = btn.get("callback_data", "")
+                        bot_actions += f"  - [{txt}] (callback: {cbd})\n"
+            if bot_actions:
+                bot_actions = bot_actions.strip()
+
         # Evaluate the bot reply with the judge
         from judge import judge_step
 
@@ -303,6 +318,7 @@ class SessionRunner:
             bot_reply=bot_reply_text,
             conversation_history=conversation_text,
             step_index=step_index,
+            bot_actions=bot_actions,
         )
 
         return verdict_obj

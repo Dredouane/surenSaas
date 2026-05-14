@@ -145,6 +145,7 @@ def judge_step(
     conversation_history: str = "",
     system_prompt: str = "",
     step_index: int = 0,
+    bot_actions: str = "",
 ) -> Verdict:
     """Evaluate a single step of a scenario using Gemini Flash.
 
@@ -169,6 +170,9 @@ def judge_step(
 
     system = system_prompt or _DEFAULT_SYSTEM_PROMPT
     prompt = _build_prompt(system, scenario_prompt, conversation_history)
+
+    if bot_actions:
+        prompt += f"\n\nBOUTONS DISPONIBLES (envoyés à l'utilisateur) :\n{bot_actions}"
 
     text = _call_gemini(prompt, api_key)
     if text is None:
