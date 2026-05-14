@@ -87,10 +87,15 @@ class WebhookHandlerService:
         
         voice_bytes = None
         if 'voice' in message:
-            file_id = message['voice']['file_id']
-            file_info = await self.tg_interface.get_file(file_id)
-            if 'file_path' in file_info:
-                voice_bytes = await self.tg_interface.download_file(file_info['file_path'])
+            # Si un MOCK_TRANSCRIPTION est présent, on ne télécharge pas le fichier audio
+            if "[MOCK_TRANSCRIPTION]" in text:
+                voice_bytes = None
+                logger.debug("🎤 Mock vocal détecté, téléchargement audio ignoré")
+            else:
+                file_id = message['voice']['file_id']
+                file_info = await self.tg_interface.get_file(file_id)
+                if 'file_path' in file_info:
+                    voice_bytes = await self.tg_interface.download_file(file_info['file_path'])
         
         image_bytes = None
         if 'photo' in message:
@@ -106,7 +111,7 @@ class WebhookHandlerService:
 
         # Context métier initial
         org_id = self._org_id or await self._get_user_org(user_id) or ""
-        
+
         input_data = {
             "messages": [HumanMessage(content=text)] if text else [HumanMessage(content="📄 Envoi d'un document à analyser.")],
             "correlation_id": correlation_id,
@@ -118,11 +123,11 @@ class WebhookHandlerService:
             "audio_meta": {},
             "vision_meta": {},
             "summary": "",
-                "last_action_status": "idle",
-                "pending_tool_call": None,
-                "hitl_choice": None,
-                "pending_form": None
-            }
+            "last_action_status": "idle",
+            "pending_tool_call": None,
+            "hitl_choice": None,
+            "pending_form": None,
+        }
 
         # Nettoyage automatique si l'historique est trop grand (évite la noyade du LLM)
         try:
@@ -361,11 +366,16 @@ class WebhookHandlerService:
             if buf:
                 buf_summary = buf.get("summary", "") if isinstance(buf, dict) else ""
             msg = f"✅ **Chantier {chantier_ref} sélectionné.**"
+            reply_markup = None
             if buf_summary:
-                msg += f"\n\n📝 {buf_summary}\n\nSouhaites-tu terminer cette action ? (Confirme ou annule)"
+                msg += f"\n\n📝 {buf_summary}\n\nSouhaites-tu terminer cette action ?"
+                reply_markup = self.tg_interface.build_inline_keyboard([
+                    {"text": "✅ Confirmer", "callback_data": "hitl:confirm"},
+                    {"text": "❌ Annuler", "callback_data": "hitl:cancel"},
+                ])
             else:
                 msg += "\n\nQue veux-tu faire ? (Dépense, rapport, pointage...)"
-            await self.tg_interface.send_message(user_id, msg)
+            await self.tg_interface.send_message(user_id, msg, reply_markup=reply_markup)
             return {"status": "ok"}
 
         # Fallback : callback non reconnu, on le traite comme un message texte

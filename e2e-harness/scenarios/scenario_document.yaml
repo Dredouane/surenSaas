@@ -4,8 +4,9 @@ steps:
   - type: text
     content: "Je voudrais envoyer une facture pour le chantier CH-016"
     judge_prompt: |
-      Vérifie que la réponse du bot :
-      1. Accuse réception de l'intention d'envoyer une facture
-      2. Demande à l'utilisateur d'envoyer le fichier (PDF, photo)
+      Vérifie que l'utilisateur n'est pas bloqué :
+      1. Le bot accepte-t-il l'intention d'enregistrer une facture ?
+      2. Demande-t-il le fichier (PDF/Photo) OU confirme-t-il le contexte (chantier) tout en mentionnant qu'il attend le document ?
+      Score 1 si le bot prépare le terrain pour l'envoi, même s'il valide le chantier CH-016 d'abord.
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

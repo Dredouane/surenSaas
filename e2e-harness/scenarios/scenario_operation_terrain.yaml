@@ -1,0 +1,11 @@
+test_case: "OPERATION-TERRAIN-001"
+steps:
+  - type: text
+    content: "Je voudrais signaler une opération : on a fini le coffrage sur le chantier CH-014."
+    judge_prompt: |
+      Vérifie l'intelligence de l'aiguillage :
+      1. Le bot a-t-il identifié l'intention 'Opération' (coffrage) ? 
+      2. Le chantier CH-014 a-t-il été identifié ou recherché via search_chantiers ?
+      3. Le bot propose-t-il une suite logique (menu de sélection, confirmation ou demande de validation) ?
+      Score 1 si l'opération est reconnue sur le bon chantier.
+    expected_verdict: pass

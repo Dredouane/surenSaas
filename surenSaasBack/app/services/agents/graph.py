@@ -140,7 +140,19 @@ async def vision_expert_node(state: AgentState):
 
         # Détection PDF : si le fichier commence par %PDF, on utilise l'extracteur générique
         is_pdf = image_bytes[:4] == b"%PDF"
-        if is_pdf:
+        vision_data = {}
+        is_operation_photo = False
+
+        # Si un workflow Opération est en cours, on saute l'OCR et on attache l'image comme illustration
+        buf = state.get("buffer_data")
+        if buf and isinstance(buf, dict) and buf.get("workflow") == "operation":
+            msg = (
+                "[SYSTEM-DATA-PHOTO-ATTACHED]\n"
+                "STATUS: ATTACHED\n"
+                "INFO: Une image a été jointe à l'opération en cours."
+            )
+            is_operation_photo = True
+        elif is_pdf:
             from app.agents.generic_extractor import create_invoice_extractor
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(image_bytes)
@@ -173,7 +185,7 @@ async def vision_expert_node(state: AgentState):
         return {
             "messages": [AIMessage(content=msg)],
             "image_bytes": None,
-            "vision_meta": {"latency_ms": (time.time() - start_time) * 1000, "data": {} if is_pdf else result.model_dump()}
+            "vision_meta": {"latency_ms": (time.time() - start_time) * 1000, "data": vision_data if is_operation_photo else ({} if is_pdf else result.model_dump())}
         }
     except Exception as e:
         return {"messages": [AIMessage(content=f"[Erreur Vision] Échec analyse: {e}")], "image_bytes": None}
@@ -182,131 +194,102 @@ def call_model_node(state: AgentState):
     """Cerveau principal."""
     log_transition(state, "agent")
     
-    # 1. Résumé et mémoire
-    summary_context = f"\nRésumé précédent : {state.get('summary')}" if state.get("summary") else ""
-    urgency = "\n🚨 PRIORITÉ HAUTE" if state.get("is_urgent") else ""
+    # --- 1. EXTRACTION DU SCOPE ---
+    msgs = state.get("messages", [])
+    buf = state.get("buffer_data")
+    org_id = state.get("org_id", "Non défini")
+    user_name = state.get("user_name", "Utilisateur")
+    chantier_id = state.get("chantier_id")
+    summary = buf.get("summary", "").replace("Résumé précédent : ", "").strip() if buf else ""
     
     # Garde-fou : si la liste des messages est vide, on initialise un message par défaut
-    if not state.get("messages"):
+    if not msgs:
         return {
             "messages": [AIMessage(content="Je suis prêt à analyser votre document.")],
             "buffer_data": state.get("buffer_data"),
         }
 
-    buffer_context = ""
-    buf = state.get("buffer_data")
-    if buf:
-        summary = buf.get("summary", "") if isinstance(buf, dict) else ""
-        if summary:
-            buffer_context = (
-    f"\n📋 ACTION EN COURS : {summary}.\n"
-    "LIMITE DE DOMAINE : Tu es un assistant spécialisé dans la gestion de chantier. "
-    "Si un message utilisateur est hors de ton domaine (questions générales, météo, etc.) "
-    "ou ne permet pas de faire progresser l'action en cours : "
-    "décline poliment en rappelant ton rôle, puis recentre immédiatement "
-    "sur l'action ou la donnée en attente."
-)
-        else:
-            buffer_context = f"\n📋 CONTEXTE EN ATTENTE : Tu avais commencé à traiter une opération avant de demander le chantier. Infos collectées : {buf}. Complète maintenant l'action."
-    print(f"[STATE_CHECK] call_model_node | buffer_data keys: {list(buf.keys()) if buf else 'EMPTY'} | chantier_id={state.get('chantier_id', 'None')}")
+    urgency = "\n🚨 PRIORITÉ HAUTE" if state.get("is_urgent") else ""
+    print(f"[STATE_CHECK] call_model_node | buffer_data keys: {list(buf.keys()) if buf else 'EMPTY'} | chantier_id={chantier_id or 'None'}")
     
+    # --- 2. CLASSIFIER DÉTERMINISTE ---
+    if not buf and msgs:
+        last_text = str(msgs[-1].content or "").lower()
+        if "signaler" in last_text or "opération" in last_text:
+            buf = {
+                "workflow": "operation",
+                "step": "init",
+                "summary": "Signalement d'opération terrain en cours...",
+            }
+            state["buffer_data"] = buf  # Persistance pour les nœuds suivants
+
+    # --- 3. CONSTRUCTION DU PROMPT (Scope sécurisé) ---
     system_prompt = (
-        f"Tu es l'assistant de chantier Suren, ton de 'collègue de terrain' (direct, pro, emojis 👷🏗️). "
-        f"Contexte : {state.get('user_name', 'Chef')}, Org: {state.get('org_id', 'Non défini')}, Chantier: {state.get('chantier_id') or 'Non défini'}. "
-        f"{summary_context}{urgency}"
-        f"{buffer_context}\n\n"
-        "RÈGLE DE RÉSONANCE : Ton message texte (content) doit être le miroir "
-        "de tes actions techniques. Si tu extrais, valides ou manipules des données "
-        "(montants, noms, dates, chantiers, etc.), tu DOIS les citer explicitement "
-        "dans ton texte. L'utilisateur ne voit pas tes appels d'outils, "
-        "il ne voit que tes mots.\n\n"
-        f"Aujourd'hui c'est le {_today_date.today().isoformat()}. Si une date correspond "
-        f"à aujourd'hui dans ta réponse, appelle-la 'aujourd'hui'.\n\n"
-        "TRAITEMENT DOCUMENT : Après l'extraction d'un document, "
-        "présente toujours les données trouvées (montant, fournisseur, etc.) "
-        "et propose les options Valider/Modifier/Annuler via format_response, "
-        "même si des champs sont vides ou à compléter.\n\n"
-        "--- PROTOCOLE DE DÉCISION ---\n"
-        "1. IDENTIFICATION : Si le chantier n'est pas identifié, "
-        "appelle search_chantiers avant toute action d'écriture.\n"
-        "3. SÉQUENÇAGE : Ne crée rien (create_depense) sans avoir "
-        "la certitude du chantier (ID ou sélection unique).\n"
-        "4. FALLBACK : Si une catégorie n'est pas claire, "
-        "utilise 'autre' (catégories acceptées : sous_traitant, fournisseur, autre).\n"
-        "---\n"
-        "PROTOCOLE DE COMMUNICATION : Tout appel d'outil doit obligatoirement "
-        "inclure l'argument context_summary. Ce champ doit contenir une phrase "
-        "récapitulant les données extraites (montant, fournisseur, objet) "
-        "pour informer l'utilisateur de ce que tu as compris.\n"
-        "---\n"
-        "RÈGLES TECHNIQUES :\n"
-        "1. Toute action d'écriture (créer, modifier) doit passer par un Tool.\n"
-        '5. IMPORTANT : Tu DOIS utiliser l\'outil **format_response** '
-        'pour structurer tes interactions : '
-        'DISPLAY_MENU pour les choix, INIT_FORM pour les saisies, '
-        'CONFIRM_ACTION pour les validations. '
-        'Si aucune action spéciale n\'est requise, réponds normalement en texte.\n'
-        '6. OBLIGATOIRE : Tu DOIS appeler format_response avec DISPLAY_MENU '
-        'dès que tu as une liste de chantiers. '
-        'Interdiction formelle de répondre en texte seul dans ce cas.\n'
-        '7. DÉTERMINISME : Dès qu\'une action métier (dépense, pointage, rapport) '
-        'est demandée avec un chantier identifiable (ex: "CH-016", "CRF"), '
-        'interdiction de poser une question de clarification. '
-        'Tu DOIS immédiatement proposer la confirmation '
-        'via format_response avec CONFIRM_ACTION.\n'
-        'EXEMPLE : Message "Aujourd\'hui j\'ai dépensé 150€ pour le béton '
-        'sur CH-016" → format_response(CONFIRM_ACTION, '
-        '"Confirmer la dépense : 150€ béton sur CH-016 ?")\n'
-        'Le chantier est déjà nommé → ne demande PAS "Sur quel chantier ?".\n'
-        '8. ACCUEIL DOCUMENT : Si l\'utilisateur mentionne vouloir enregistrer '
-        'une facture, un reçu ou un document sans l\'avoir encore envoyé, '
-        'tu DOIS l\'encourager et lui demander explicitement d\'envoyer '
-        'le fichier (PDF ou Image).\n'
-        '9. PROTOCOLE SYSTEM-DATA : '
-        'Tout message commençant par [SYSTEM-DATA-EXTRACTION] '
-        'est une transmission directe de l\'outil d\'OCR. '
-        'Le champ RAW_JSON_DATA contient toutes les données extraites. '
-        'Analyse ce JSON et présente les informations importantes à l\'utilisateur '
-        '(fournisseur, montants, numéros, etc.) et propose de valider. '
-        'Ne discute pas la validité du statut SUCCESS.\n'
+        f"Tu es l'assistant de chantier **Suren**, ton de 'collègue de terrain' (direct, pro, emojis 👷🏗️). \n"
+        f"Tu es un **MOTEUR DE SESSION DE CAPTURE**. Ton rôle est de piloter une session unique "
+        f"(1 Workflow + 1 Chantier) jusqu'à sa validation.\n\n"
+        f"--- CADRE DE SESSION ---\n"
+        f"1. UNITÉ DE TRAVAIL : Une session = 1 Workflow unique + 1 Chantier unique.\n"
+        f"2. ÉTANCHÉITÉ : Interdiction de mélanger les workflows.\n"
+        f"3. RÈGLE DE RÉSONANCE : Cite explicitement les montants, noms et chantiers techniques.\n\n"
+        f"--- PROTOCOLES TECHNIQUES ---\n"
+        f"R1. DÉTERMINISME : Si infos clés présentes, INTERDICTION de clarifier. "
+        f"Passe à la validation : CONFIRM_ACTION (Dépense/Pointage) ou DISPLAY_MENU (Opération).\n"
+        f"R2. PRIORITÉ CHANTIER : Si non identifié, appelle search_chantiers. "
+        f"Si 1 résultat unique : utilise l'ID (UUID) technique renvoyé, JAMAIS le nom ou la référence (ex: CH-016). "
+        f"Si plusieurs résultats : DISPLAY_MENU.\n"
+        f"R3. ACCUEIL DOCUMENT : Si l'utilisateur veut envoyer un document, "
+        f"TA SEULE MISSION est de lui demander le fichier (PDF/Image).\n"
+        f"R4. PROTOCOLE OCR : Analyse le RAW_JSON_DATA, présente les faits et propose de valider.\n"
+        f"R5. PROTOCOLE PHOTO-OPÉRATION : Confirme la réception et ré-affiche le menu via DISPLAY_MENU.\n\n"
+        f"--- INTERFACE (FORMAT_RESPONSE) ---\n"
+        f"- DISPLAY_MENU : Pour les listes de chantiers ou options d'opération : "
+        f"['✅ Valider', '📸 Ajouter Photo', '❌ Annuler'].\n"
+        f"- INIT_FORM : Pour les saisies multi-champs.\n"
+        f"- CONFIRM_ACTION : Pour la validation finale (inclure context_summary).\n\n"
+        f"--- CONTEXTE DE SESSION ---\n"
+        f"Aujourd'hui : {_today_date.today().isoformat()}. Utilisateur: {user_name}, Org: {org_id}.\n"
+        f"Chantier actuel : {chantier_id or 'Non défini'}.\n"
+        f"📝 MÉMOIRE DE SESSION : {summary}\n\n"
+        f"MESSAGE UTILISATEUR : {str(msgs[-1].content or '')[:200]}\n\n"
+        f"⚠️ INSTRUCTION : Réponds en priorité à l'historique ci-dessous. "
+        f"Recentrer sur la MÉMOIRE DE SESSION si nécessaire. Applique la RÉSONANCE."
     )
-    
-    msgs = [SystemMessage(content=system_prompt)]
-    for m in list(state["messages"][-10:]):
-        msgs.append(copy.deepcopy(m))
+
+    prompt_msgs = [SystemMessage(content=system_prompt)]
+    for m in list(msgs[-10:]):
+        prompt_msgs.append(copy.deepcopy(m))
 
     if buf:
-        summary = buf.get("summary", "") if isinstance(buf, dict) else ""
-        if summary and msgs and isinstance(msgs[-1], HumanMessage) and msgs[-1].content:
-            original = str(msgs[-1].content)
-            msgs[-1].content = (
-                f"📝 CONTEXTE MÉTIER : {summary}\n"
-                f"MESSAGE UTILISATEUR : {original}\n"
+        s = buf.get("summary", "") if isinstance(buf, dict) else ""
+        if s and prompt_msgs and isinstance(prompt_msgs[-1], HumanMessage) and prompt_msgs[-1].content:
+            orig = str(prompt_msgs[-1].content)
+            prompt_msgs[-1].content = (
+                f"📝 CONTEXTE MÉTIER : {s}\n"
+                f"MESSAGE UTILISATEUR : {orig}\n"
                 f"⚠️ INSTRUCTION : Tu DOIS répondre au MESSAGE UTILISATEUR. "
                 f"S'il est hors-sujet (météo, question générale), décline poliment "
                 f"et recentre sur le CONTEXTE MÉTIER ci-dessus."
             )
-    
+
     tools = [get_user_chantiers, get_chantier_details, create_depense, create_operation, manage_attendance, report_progress, manage_tasks, format_response, match_resources, upsert_attendance, search_chantiers]
-    
+
     force_tool = any(
-        kw in str(state["messages"][-1].content).lower()
+        kw in str(msgs[-1].content).lower()
         for kw in ["chantier", "recherche", "trouve"]
     )
-    
+
     response = llm_provider.invoke(
-        messages=msgs,
+        messages=prompt_msgs,
         tools=tools,
         force_tool=force_tool,
     )
-    
+
     # Injection early-stage de context_summary dans les tool_calls
-    # Garantit que le tool_result_formatter pourra afficher les données
-    # utilisateur, quel que soit le chemin dans le graphe (whitelist ou HITL)
     if response.tool_calls:
         last_user_content = ""
-        if state.get("messages"):
-            last_msg = state["messages"][-1]
+        if msgs:
+            last_msg = msgs[-1]
             last_user_content = str(last_msg.content) if last_msg.content else ""
         for tc in response.tool_calls:
             args = tc.get("args", {})
@@ -315,14 +298,14 @@ def call_model_node(state: AgentState):
                 if len(last_user_content) > 120:
                     truncated += "..."
                 args["context_summary"] = truncated
-    
+
     # Sonde sortante (silencieuse sauf si DEBUG_LLM est défini)
     if os.environ.get("DEBUG_LLM"):
         content_preview = str(response.content)[:200] if response.content else "(no content)"
         tool_names = [tc.get("name", "?") for tc in (response.tool_calls or [])]
         print(f"[LLM_RESPONSE] content={content_preview} | tools={tool_names}")
 
-    return {"messages": [response]}
+    return {"messages": [response], "buffer_data": buf}
 
 def pre_reflector_node(state: AgentState):
     """Vérifie la cohérence avant d'autoriser l'HITL. Injecte automatiquement l'org_id si manquant."""

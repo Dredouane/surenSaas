@@ -1,0 +1,18 @@
+test_case: "OPERATION-AUDIO-001"
+steps:
+  - type: text
+    content: "Je signale une opération, on a fait le terrassement sur le chantier CH-015."
+    judge_prompt: |
+      Vérifie l'intelligence de l'aiguillage :
+      1. Le bot a-t-il identifié l'intention 'Opération' (terrassement) ?
+      2. Le chantier CH-015 a-t-il été identifié ou recherché ?
+      Score 1 si l'opération est reconnue sur le bon chantier.
+    expected_verdict: pass
+  - type: text
+    content: "Voici la photo du terrassement."
+    judge_prompt: |
+      Vérifie la non-régression OCR :
+      1. Le bot accepte-t-il l'information sans tenter d'extraire des données de facture (OCR) ?
+      2. Le bot reste-t-il dans le contexte de l'opération de terrassement sur CH-015 ?
+      Score 1 si l'information est acceptée comme illustration.
+    expected_verdict: pass

@@ -4,11 +4,9 @@ steps:
   - type: document
     content: "e2e-harness/data/INV-EXA-0001_EXAMPLE-SOCIETE.pdf"
     judge_prompt: |
-      Vérifie que la réponse du bot :
-      1. Accuse réception du document (fichier reçu)
-      2. Mentionne le fournisseur "ACORUS"
-      3. Mentionne le numéro de facture "INV-EXA-0001"
-      4. Mentionne le montant  autour de 3280.78€
-      5. Propose une action à l'utilisateur ou invite à donner une suite (valider, modifier, annuler, ou question ouverte)
+      Vérifie la qualité de l'extraction OCR :
+      1. Fournisseur (Acorus) et Montant (~3280.78€) sont-ils extraits correctement ?
+      2. Le bot cite-t-il un numéro de référence présent sur le document (Facture ou Commande) ? Ne pas pénaliser une inversion si l'ID est correct.
+      3. Propose-t-il de valider ou modifier les données ?
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

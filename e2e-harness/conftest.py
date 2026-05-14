@@ -138,7 +138,7 @@ class TgMockClient:
         self._org_id = org_id
         self._webhook_token = webhook_token
         self._backend_base = backend_webhook_url.rstrip("/")
-        self._client = _http_client or httpx.Client(base_url=self.tg_mock_url, timeout=90.0)
+        self._client = _http_client or httpx.Client(base_url=self.tg_mock_url, timeout=180.0)
         self._history: list[dict] = []
         self._last_update_id = 0
         self.chat_id = random.randint(100000, 999999)

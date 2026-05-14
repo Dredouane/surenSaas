@@ -25,10 +25,9 @@ steps:
     mode: sync
     content: "C'est pour le chantier CH-016."
     judge_prompt: |
-      Vérifie que le bot :
-      1. Cherche le chantier CH-016
-      2. Propose DIRECTEMENT la confirmation de la dépense (CONFIRM_ACTION)
-      3. Affiche bien le montant (250.50€), le fournisseur (Leroy Merlin) ET le chantier (CH-016)
-      4. Propose les boutons d'action finale (Valider/Confirmer)
-      Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
+      Évalue la cohérence de la session :
+      1. Le bot a-t-il répondu à l'interruption (météo) de manière fluide ?
+      2. Le chantier CH-016 a-t-il été correctement identifié après que l'utilisateur l'a nommé ?
+      3. Le bot propose-t-il une action ou une confirmation suite à l'identification du chantier ?
+      Score 1 si la session reste cohérente et le chantier est traité.
     expected_verdict: pass

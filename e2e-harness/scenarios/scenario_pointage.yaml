@@ -4,12 +4,10 @@ steps:
   - type: text
     content: "Je pointe Jean Dupont et la pelleteuse sur CH-016"
     judge_prompt: |
-      Vérifie que la réponse du bot :
-      1. Accuse réception de la demande de pointage (Jean Dupont + pelleteuse)
-      2. Mentionne la ressource humaine "Jean Dupont"
-      3. Mentionne la ressource machine "pelleteuse"
-      4. Mentionne ou demande de confirmer le chantier CH-016
-      5. Indique ou demande la date du pointage (Optionnel : si absente, ne pas pénaliser)
-      Si le bot propose un menu de sélection ou demande une confirmation avant de créer, c'est un succès.
+      Vérifie la capture exhaustive de l'intention :
+      1. Le bot a-t-il détecté les DEUX ressources (Jean Dupont ET pelleteuse) ?
+      2. Le chantier CH-016 est-il identifié ou cité dans la réponse ?
+      3. Le bot propose-t-il une suite logique (confirmation, menu de sélection, ou demande de validation) ?
+      Score 0 si l'une des deux ressources (humaine ou machine) est totalement oubliée.
       Réponds UNIQUEMENT en JSON : {"score": 1|0, "reason": "..."}
     expected_verdict: pass

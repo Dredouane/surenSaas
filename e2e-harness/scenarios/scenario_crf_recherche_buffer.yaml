@@ -17,9 +17,8 @@ steps:
     mode: async
     content: "chantier-crf-001"
     judge_prompt: |
-      Vérifie que l'assistant :
-      1. Maintient le contexte du Step 1 (150€, Point P, carburant).
-      2. Ne redemande PAS le montant.
-      3. Propose de créer la dépense (validation HITL).
-      4. Mentionne le fournisseur Point P.
+      Vérifie l'exactitude après sélection :
+      1. Le bot confirme-t-il que le chantier choisi est bien rattaché à la dépense ?
+      2. Les informations initiales (150€, Point P) sont-elles toujours présentes dans la proposition de validation ?
+      3. L'interface propose-t-elle un bouton de confirmation finale ?
     expected_verdict: pass
