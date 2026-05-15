@@ -158,8 +158,28 @@ export SUREN_DEEP_SEEK_API_KEY="${SUREN_DEEP_SEEK_API_KEY:-${NEMO_CLAW_DEEP_SEEK
 if [ "$USE_TG_MOCK" = true ]; then
     echo "  → Mode tg-mock : TELEGRAM_API_URL=http://localhost:8081"
     export TELEGRAM_API_URL="http://localhost:8081"
+    # Lancer le mock Telegram si pas déjà en cours
+    if ! lsof -ti:8081 > /dev/null 2>&1; then
+        echo "  → Démarrage de mock_telegram sur port 8081..."
+        MOCK_PATH="$SCRIPT_DIR/e2e-harness/mock_telegram.py"
+        nohup python3 "$MOCK_PATH" > /tmp/mock_telegram.log 2>&1 &
+        disown
+        sleep 2
+    else
+        echo "  → mock_telegram déjà en cours sur 8081"
+    fi
 else
     echo "  → Mode réel : TELEGRAM_API_URL=https://api.telegram.org (défaut)"
+    # Lancer le tunnel SSH si pas déjà en cours
+    if ! pgrep -f "manage_tunnel.py" > /dev/null 2>&1; then
+        echo "  → Démarrage du tunnel SSH..."
+        TUNNEL_PATH="$SCRIPT_DIR/scripts/manage_tunnel.py"
+        nohup python3 "$TUNNEL_PATH" > /tmp/tunnel.log 2>&1 &
+        disown
+        sleep 3
+    else
+        echo "  → Tunnel déjà en cours"
+    fi
 fi
 
 echo "✅ Variables d'environnement exportées"

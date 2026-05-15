@@ -6,6 +6,7 @@ Dispatche les requêtes vers les services appropriés.
 """
 
 import json
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -127,6 +128,7 @@ class WebhookHandlerService:
             "pending_tool_call": None,
             "hitl_choice": None,
             "pending_form": None,
+            "last_message_time": time.time(),
         }
 
         # Nettoyage automatique si l'historique est trop grand (évite la noyade du LLM)
@@ -338,19 +340,9 @@ class WebhookHandlerService:
             
             # Construire le message de reprise avec ou sans buffer
             if buf:
-                # Restaurer le contexte : on remet le buffer dans les messages
-                reprise_msg = (
-                    f"Le chantier {chantier_ref} est maintenant sélectionné. "
-                    f"Reprends l'action en cours : {buf.get('summary', '')}. "
-                    f"Termine l'opération."
-                )
                 await graph.aupdate_state(config, {
                     "chantier_id": chantier_uuid,
                     "buffer_data": buf,  # Conserver le buffer pour le prochain tour
-                    "messages": [
-                        HumanMessage(content=f"Je sélectionne le chantier {chantier_ref} (UUID: {chantier_uuid})"),
-                        AIMessage(content=reprise_msg)
-                    ]
                 })
             else:
                 await graph.aupdate_state(config, {

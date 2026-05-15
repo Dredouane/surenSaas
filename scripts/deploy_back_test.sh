@@ -248,7 +248,7 @@ if [ "$HAS_GMAIL" = true ]; then
     SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
 fi
 if [ "$HAS_R2" = true ]; then
-    SECRETS="$SECRETS,R2_ENDPOINT_URL=r2-endpoint-url:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_TOKEN=r2-token:latest"
+    SECRETS="$SECRETS,R2_ENDPOINT_URL=r2-endpoint-url:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_TOKEN=r2-token:latest,R2_BUCKET_NAME=r2-bucket-name:latest"
 fi
 
 gcloud run deploy $TEST_BACK_SERVICE_NAME \

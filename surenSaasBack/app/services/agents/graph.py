@@ -200,6 +200,14 @@ def call_model_node(state: AgentState):
     org_id = state.get("org_id", "Non défini")
     user_name = state.get("user_name", "Utilisateur")
     chantier_id = state.get("chantier_id")
+
+    # TTL : On vide le buffer si l'inactivité dépasse 5 minutes
+    now = time.time()
+    last_msg_time = state.get("last_message_time", now)
+    if buf and (now - last_msg_time) > 300:
+        buf = None
+        state["buffer_data"] = None
+
     summary = buf.get("summary", "").replace("Résumé précédent : ", "").strip() if buf else ""
     
     # Garde-fou : si la liste des messages est vide, on initialise un message par défaut
@@ -250,10 +258,13 @@ def call_model_node(state: AgentState):
         f"--- CONTEXTE DE SESSION ---\n"
         f"Aujourd'hui : {_today_date.today().isoformat()}. Utilisateur: {user_name}, Org: {org_id}.\n"
         f"Chantier actuel : {chantier_id or 'Non défini'}.\n"
-        f"📝 MÉMOIRE DE SESSION : {summary}\n\n"
-        f"MESSAGE UTILISATEUR : {str(msgs[-1].content or '')[:200]}\n\n"
-        f"⚠️ INSTRUCTION : Réponds en priorité à l'historique ci-dessous. "
-        f"Recentrer sur la MÉMOIRE DE SESSION si nécessaire. Applique la RÉSONANCE."
+        f"📝 MÉMOIRE DE SESSION (CONSÉQUENCE DU PASSÉ) : {summary or 'Aucune session active.'}\n\n"
+        f"⚠️ INSTRUCTIONS DE NAVIGATION :\n"
+        f"1. ANALYSE DE CONTINUITÉ : Évalue si le message actuel s'inscrit "
+        f"dans la suite du RÉSUMÉ.\n"
+        f"2. GESTION DE RUPTURE : Si le message introduit un nouveau workflow "
+        f"sans rapport avec le passé, IGNORE totalement la MÉMOIRE DE SESSION, "
+        f"initialise à neuf et signale-le poliment.\n"
     )
 
     prompt_msgs = [SystemMessage(content=system_prompt)]
@@ -305,7 +316,7 @@ def call_model_node(state: AgentState):
         tool_names = [tc.get("name", "?") for tc in (response.tool_calls or [])]
         print(f"[LLM_RESPONSE] content={content_preview} | tools={tool_names}")
 
-    return {"messages": [response], "buffer_data": buf}
+    return {"messages": [response], "buffer_data": buf, "last_message_time": now}
 
 def pre_reflector_node(state: AgentState):
     """Vérifie la cohérence avant d'autoriser l'HITL. Injecte automatiquement l'org_id si manquant."""
@@ -470,6 +481,12 @@ def tool_result_formatter_node(state: AgentState):
         if buffer_info.get("summary", "").strip():
             options.append("❌ Annuler / Reset")
         
+        existing_buf = state.get("buffer_data")
+        merged_buf = dict(buffer_info) if buffer_info else {}
+        if existing_buf and isinstance(existing_buf, dict) and "workflow" in existing_buf:
+            merged_buf["workflow"] = existing_buf["workflow"]
+        buf_result = merged_buf if merged_buf else existing_buf
+        
         chantier_lines = "\n".join(f"- {opt}" for opt in options if not opt.startswith("❌"))
         full_text = f"{ai_content}\n\nChantiers trouvés :\n{chantier_lines}\n\nSur quel chantier ?"
         return {
@@ -480,12 +497,17 @@ def tool_result_formatter_node(state: AgentState):
                     "payload": {"options": options}
                 }),
             )],
-            "buffer_data": buffer_info if buffer_info else None,
+            "buffer_data": buf_result,
             "last_action_status": "idle"
         }
     
     # Fallback : pas de chantier trouvé mais on garde le contexte
     if ai_content.strip():
+        existing_buf = state.get("buffer_data")
+        merged_buf = dict(buffer_info) if buffer_info else {}
+        if existing_buf and isinstance(existing_buf, dict) and "workflow" in existing_buf:
+            merged_buf["workflow"] = existing_buf["workflow"]
+        buf_result = merged_buf if merged_buf else existing_buf
         return {
             "messages": [AIMessage(
                 content=json.dumps({
@@ -493,7 +515,7 @@ def tool_result_formatter_node(state: AgentState):
                     "text": f"Je n'ai pas trouvé de chantier.\n{ai_content}\nPeux-tu préciser le nom ?"
                 }),
             )],
-            "buffer_data": buffer_info if buffer_info else None,
+            "buffer_data": buf_result,
             "last_action_status": "idle"
         }
     
