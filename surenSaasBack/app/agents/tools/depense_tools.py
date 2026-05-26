@@ -35,6 +35,7 @@ def _create_depense_internal(
     fournisseur: str = "Telegram",
     categorie: str = "autre",
     date_depense: Optional[str] = None,
+    invoice_id: Optional[str] = None,
     _supabase=None,
 ) -> dict:
     """Implémentation réelle de create_depense, sans décorateur @tool.
@@ -70,10 +71,10 @@ def _create_depense_internal(
         "montant": float(montant),
         "date": depense_date,
         "categorie": categorie,
-        # 'statut' est un enum géré par la DB (default='validee')
-        # 'status' est une colonne text libre pour le workflow
         "status": "en_attente_validation",
     }
+    if invoice_id:
+        depense_data["invoice_id"] = invoice_id
 
     try:
         sb = _supabase or get_supabase()

@@ -36,6 +36,12 @@ echo ""
 echo -e "${YELLOW}🔐 Vérification des secrets dans ~/.bashrc...${NC}"
 MISSING_VARS=()
 
+# Tools API Key (optionnel - pour Hermes/agents externes)
+HAS_TOOLS_API_KEY=false
+if [ ! -z "$TOOLS_API_KEY" ]; then
+    HAS_TOOLS_API_KEY=true
+fi
+
 if [ -z "$TEST_SUPABASE_SERVICE_KEY" ]; then
     MISSING_VARS+=("TEST_SUPABASE_SERVICE_KEY")
 fi
@@ -103,6 +109,12 @@ if [ "$HAS_GMAIL" = true ]; then
 else
     echo -e "${YELLOW}⚠️  SUREN_GMAIL_OAUTH_* non défini (Module Emails désactivé)${NC}"
 fi
+if [ "$HAS_TOOLS_API_KEY" = true ]; then
+    echo -e "${GREEN}✅ TOOLS_API_KEY trouvée (API REST agents externes activée)${NC}"
+else
+    echo -e "${YELLOW}⚠️  TOOLS_API_KEY non défini (API REST agents externes désactivée)${NC}"
+fi
+
 if [ "$HAS_R2" = true ]; then
     echo -e "${GREEN}✅ Credentials Cloudflare R2 trouvés (Stockage GED activé)${NC}"
 else
@@ -187,6 +199,11 @@ if [ "$HAS_GMAIL" = true ]; then
     create_or_update_secret "gmail-account" "${SUREN_GMAIL_ACCOUNT:-REDACTED_EMAIL}"
 fi
 
+# Tools API Key (optionnel - Hermes/agents externes)
+if [ "$HAS_TOOLS_API_KEY" = true ]; then
+    create_or_update_secret "tools-api-key" "$TOOLS_API_KEY"
+fi
+
 # Cloudflare R2 (obligatoire)
 if [ "$HAS_R2" = true ]; then
     create_or_update_secret "r2-endpoint-url" "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
@@ -247,6 +264,10 @@ fi
 if [ "$HAS_GMAIL" = true ]; then
     SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
 fi
+if [ "$HAS_TOOLS_API_KEY" = true ]; then
+    SECRETS="$SECRETS,TOOLS_API_KEY=tools-api-key:latest"
+fi
+
 if [ "$HAS_R2" = true ]; then
     SECRETS="$SECRETS,R2_ENDPOINT_URL=r2-endpoint-url:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_TOKEN=r2-token:latest,R2_BUCKET_NAME=r2-bucket-name:latest"
 fi

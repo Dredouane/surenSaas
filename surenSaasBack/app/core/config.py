@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     open_router_api_key: str = ""
     whisper_model: str = "whisper-large-v3"
 
+    # Clé API pour les endpoints REST tools (Hermes / autres agents)
+    tools_api_key: str = ""
+
     # Cloudflare R2 Configuration (S3-Compatible)
     # Mêmes credentials pour test et prod (isolation par folder)
     r2_endpoint_url: str = ""       # SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT
@@ -179,6 +182,9 @@ class Settings(BaseSettings):
             ]),
             ("llm_provider", [
                 "LLM_PROVIDER",
+            ]),
+            ("tools_api_key", [
+                "TOOLS_API_KEY",
             ]),
             ("deepseek_api_key", [
                 "DEEPSEEK_API_KEY",

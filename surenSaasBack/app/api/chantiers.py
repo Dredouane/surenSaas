@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.api.auth import get_current_user_from_cookie, get_supabase
 from app.core.logging import get_logger
+from app.core.config import settings
 from app.services.tma_auth_service import TmaAuthService
 
 logger = get_logger(__name__)
@@ -19,8 +20,13 @@ def _get_user_id(user: dict) -> str:
 
 
 def check_user_org_access(request: Request, org_id: str):
-    """Vérifie l'accès : cookie de session SaaS ou JWT TMA (Authorization Bearer)."""
-    # Essayer d'abord le JWT TMA
+    """Vérifie l'accès : cookie de session SaaS, JWT TMA (Authorization Bearer), ou X-API-Key (service)."""
+    # 1. X-API-Key (service-to-service, ex: Hermes agent)
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key and settings.tools_api_key and api_key == settings.tools_api_key:
+        return {"org_id": org_id, "user_id": None, "role": "service"}
+
+    # 2. JWT TMA (Authorization Bearer)
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
@@ -35,7 +41,7 @@ def check_user_org_access(request: Request, org_id: str):
         except Exception:
             pass
 
-    # Fallback : cookie de session SaaS Desktop
+    # 3. Cookie de session SaaS Desktop
     user = get_current_user_from_cookie(request)
     if user["org_id"] != org_id:
         raise HTTPException(status_code=403, detail="Acces non autorise a cette organisation")
@@ -1135,6 +1141,23 @@ async def list_pointages(request: Request, org_id: str = Query(...), chantier_id
             for p in pointages:
                 p["ressources"] = pr_by_pointage.get(p["id"], [])
 
+        # Debug: log first pointage's first ressource nom
+        if pointages and pointages[0].get("ressources"):
+            first_nom = pointages[0]["ressources"][0].get("nom", "VIDE")
+            first_rid = pointages[0]["ressources"][0].get("ressource_id", "?")
+            logger.info(f"[POINTAGES_DEBUG] RAW dict: first ressource nom={first_nom!r}, rid={first_rid}")
+
+            # Tester la validation Pydantic
+            from app.api.chantiers import PointageResponse
+            try:
+                validated = PointageResponse(**pointages[0])
+                if validated.ressources:
+                    logger.info(f"[POINTAGES_DEBUG] Pydantic validated: first ressource nom={validated.ressources[0].nom!r}")
+                else:
+                    logger.info(f"[POINTAGES_DEBUG] Pydantic: ressources vides après validation!")
+            except Exception as e:
+                logger.error(f"[POINTAGES_DEBUG] Pydantic error: {e}")
+
         return pointages
     except HTTPException:
         raise
@@ -1182,6 +1205,28 @@ async def update_pointage(request: Request, org_id: str = Query(...), chantier_i
         raise
     except Exception as e:
         logger.error(f"Erreur mise a jour pointage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{chantier_id}/pointages/{pointage_id}/validate")
+async def validate_pointage(request: Request, org_id: str = Query(...), chantier_id: str = None, pointage_id: str = None):
+    try:
+        check_user_org_access(request, org_id)
+        resolve_chantier_uuid(org_id, chantier_id)
+        sb = get_supabase()
+        now = datetime.utcnow().isoformat()
+        existing = sb.table("chantier_pointages").select("status").eq("id", pointage_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Pointage non trouvé")
+        status_actuel = existing.data[0].get("status")
+        if status_actuel in ("en_attente_validation", "valide"):
+            raise HTTPException(status_code=409, detail=f"Pointage déjà {status_actuel}, impossible de modifier (R12)")
+        sb.table("chantier_pointages").update({"status": "en_attente_validation", "updated_at": now}).eq("id", pointage_id).execute()
+        return {"success": True, "message": "Pointage validé et passé en attente de validation"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erreur validation pointage: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
