@@ -1130,9 +1130,14 @@ async def list_pointages(request: Request, org_id: str = Query(...), chantier_id
             pr_by_pointage = defaultdict(list)
             for r in pr_rows:
                 cr = cr_lookup.get(r["ressource_id"], {})
+                meta = r.get("metadata", {})
+                meta_nom = ""
+                if isinstance(meta, dict):
+                    meta_nom = meta.get("nom", "")
+                nom = meta_nom or cr.get("nom", "")
                 pr_by_pointage[r["pointage_id"]].append({
                     "ressource_id": r["ressource_id"],
-                    "nom": cr.get("nom", ""),
+                    "nom": nom,
                     "type": cr.get("type", "homme"),
                     "periode": r["periode"],
                     "heures_prevues": r.get("heures_prevues"),

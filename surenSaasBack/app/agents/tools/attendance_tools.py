@@ -169,11 +169,19 @@ def _upsert_attendance_internal(
             "ressource_id": res_id,
             "presence": present,
             "periode": "journee",
+            "metadata": {"nom": nom},
         }
 
         if existing.data:
+            existing_id = existing.data[0]["id"]
+            # Préserver les metadata existantes
+            existing_meta = sb.table("chantier_pointage_ressources").select("metadata").eq("id", existing_id).execute()
+            old_meta = existing_meta.data[0].get("metadata", {}) if existing_meta.data else {}
+            if isinstance(old_meta, dict) and not old_meta.get("nom"):
+                old_meta["nom"] = nom
+                line_data["metadata"] = old_meta
             sb.table("chantier_pointage_ressources").update(line_data).eq(
-                "id", existing.data[0]["id"]
+                "id", existing_id
             ).execute()
         else:
             line_data["org_id"] = org_id
