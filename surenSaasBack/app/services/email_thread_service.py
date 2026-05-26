@@ -329,6 +329,79 @@ class ThreadService:
                 .eq("id", str(thread_id))\
                 .execute()
     
+    async def find_thread_by_semantic_similarity(
+        self,
+        email_id: str,
+        chantier_id: str,
+        org_id: str,
+        similarity_threshold: float = 0.85,
+    ) -> Optional[str]:
+        try:
+            from app.services.emails.embedding_service import embedding_service
+            import numpy as np
+
+            embedding_resp = self.client.table("email_embeddings")\
+                .select("embedding")\
+                .eq("email_id", email_id)\
+                .eq("source_type", "email_body")\
+                .limit(1)\
+                .execute()
+
+            if not embedding_resp.data:
+                return None
+
+            email_vector = embedding_resp.data[0]["embedding"]
+
+            threads_resp = self.client.table("email_threads")\
+                .select("id, gmail_thread_id, last_email_at")\
+                .eq("org_id", org_id)\
+                .eq("chantier_id", chantier_id)\
+                .order("last_email_at", desc=True)\
+                .limit(20)\
+                .execute()
+
+            if not threads_resp.data:
+                return None
+
+            best_thread_id = None
+            best_score = 0.0
+
+            for thread in threads_resp.data:
+                thread_embed_resp = self.client.table("email_embeddings")\
+                    .select("embedding")\
+                    .eq("email_id", thread["id"])\
+                    .eq("source_type", "email_body")\
+                    .order("chunk_index", desc=True)\
+                    .limit(1)\
+                    .execute()
+
+                if not thread_embed_resp.data:
+                    continue
+
+                thread_vector = thread_embed_resp.data[0]["embedding"]
+
+                try:
+                    v1 = np.array(email_vector)
+                    v2 = np.array(thread_vector)
+                    v1_norm = np.linalg.norm(v1)
+                    v2_norm = np.linalg.norm(v2)
+                    if v1_norm > 0 and v2_norm > 0:
+                        score = float(np.dot(v1, v2) / (v1_norm * v2_norm))
+                        if score > best_score:
+                            best_score = score
+                            best_thread_id = thread["id"]
+                except Exception:
+                    continue
+
+            if best_score >= similarity_threshold and best_thread_id:
+                logger.info(f"Thread similaire: {best_thread_id} (cosine={best_score:.3f})")
+                return best_thread_id
+
+        except Exception as e:
+            logger.warning(f"Erreur semantic similarity: {e}")
+
+        return None
+    
     # ============================================================================
     # Chat Sessions
     # ============================================================================

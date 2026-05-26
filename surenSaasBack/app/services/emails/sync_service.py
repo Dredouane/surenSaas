@@ -406,6 +406,17 @@ class SyncService:
         # 9. Lancer la vectorisation async (après reconstruction)
         asyncio.create_task(embedding_service.vectorize_email_async(email_id))
         
+        # 10. Brancher le pipeline Hermès (ChantierRouter + HermesExtractor)
+        asyncio.create_task(
+            _run_hermes_pipeline(
+                email_id=email_id,
+                org_id=str(routing.org_id),
+                subject=extracted.subject,
+                body=extracted.body_cleaned or "",
+                sender_email=extracted.from_email or "",
+            )
+        )
+        
         logger.info(f"Message {message_id} processed successfully, email_id: {email_id}")
         
         return {
@@ -451,6 +462,82 @@ class SyncService:
             delivered_to=delivered_to,
             routing_status=routing.routing_status,
         )
+
+
+async def _run_hermes_pipeline(
+    email_id: str,
+    org_id: str,
+    subject: str,
+    body: str,
+    sender_email: str,
+):
+    """
+    Pipeline Hermès asynchrone déclenché après le stockage de l'email.
+    
+    1. ChantierRouter → identifie le chantier
+    2. Met à jour email_threads avec chantier_id et métadonnées Hermès
+    3. HermesExtractor → extrait tâches/dépenses/notifications et dispatche
+    """
+    try:
+        from app.core.logging import get_logger
+        from app.services.emails.chantier_router import chantier_router
+        from app.services.emails.hermes_extractor import hermes_extractor
+        from app.api.auth import get_supabase
+    except ImportError as e:
+        logger.error(f"Erreur d'importation dans _run_hermes_pipeline: {e}")
+        return
+
+    _logger = get_logger("hermes_pipeline")
+
+    try:
+        await asyncio.sleep(3)
+
+        routing_result = await chantier_router.route(
+            org_id=org_id, subject=subject, body=body, sender_email=sender_email,
+        )
+
+        chantier_id = routing_result.chantier_id
+
+        try:
+            sb = get_supabase()
+            email_resp = sb.table("emails")\
+                .select("gmail_thread_id")\
+                .eq("id", email_id)\
+                .maybe_single()\
+                .execute()
+
+            if email_resp and email_resp.data:
+                gmail_thread_id = email_resp.data.get("gmail_thread_id")
+                if gmail_thread_id:
+                    update_data = {
+                        "hermes_processed_at": datetime.utcnow().isoformat(),
+                        "hermes_confidence": routing_result.confidence,
+                    }
+                    if chantier_id:
+                        update_data["chantier_id"] = chantier_id
+                    else:
+                        update_data["hermes_ignore_reason"] = routing_result.reason
+                        update_data["chantier_id"] = None
+
+                    sb.table("email_threads")\
+                        .update(update_data)\
+                        .eq("gmail_thread_id", gmail_thread_id)\
+                        .eq("org_id", org_id)\
+                        .execute()
+        except Exception as e:
+            _logger.warning(f"[Hermès Pipeline] Erreur MAJ thread: {e}")
+
+        if chantier_id:
+            _logger.info(f"[Hermès] Email {email_id} → chantier {chantier_id} (méthode: {routing_result.method})")
+            result = await hermes_extractor.extract_and_dispatch(
+                email_id=email_id, chantier_id=chantier_id, org_id=org_id,
+            )
+            _logger.info(f"[Hermès] Dispatch terminé: {result}")
+        else:
+            _logger.info(f"[Hermès] Email {email_id} non rattaché — ignoré ({routing_result.reason})")
+
+    except Exception as e:
+        _logger.error(f"[Hermès Pipeline] Erreur générale: {e}", exc_info=True)
 
 
 # Instance singleton

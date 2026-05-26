@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -10,6 +11,31 @@ from app.services.tma_auth_service import TmaAuthService
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/chantiers", tags=["chantiers"])
+
+
+async def _index_chantier_embedding(chantier_id: str, org_id: str, nom: str, ref: str, adresse: str):
+    """Indexe un chantier dans chantier_embeddings (appelé en background)."""
+    try:
+        from app.services.emails.embedding_service import embedding_service
+
+        text = f"Chantier : {nom}. Référence : {ref}. Adresse : {adresse}."
+        vector = await embedding_service.generate_embedding(text)
+
+        sb = get_supabase()
+        sb.table("chantier_embeddings").delete().eq("chantier_id", chantier_id).execute()
+
+        sb.table("chantier_embeddings").insert({
+            "org_id": org_id,
+            "chantier_id": chantier_id,
+            "content_chunk": text,
+            "embedding": vector,
+            "chunk_index": 0,
+            "chunk_total": 1,
+        }).execute()
+
+        logger.info(f"[Chantier] Embedding indexé pour chantier {chantier_id}")
+    except Exception as e:
+        logger.warning(f"[Chantier] Erreur indexation embedding: {e}")
 
 _tma_auth = TmaAuthService()
 
