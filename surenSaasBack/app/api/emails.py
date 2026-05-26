@@ -792,3 +792,84 @@ async def download_email_attachment(
     except Exception as e:
         logger.error(f"❌ Erreur téléchargement PJ: {e}")
         raise HTTPException(status_code=500, detail=f"Erreur lors du téléchargement: {str(e)}")
+
+
+# ============================================================================
+# Endpoint Hermès : emails non dispatchés
+# ============================================================================
+
+hermes_router = APIRouter(prefix="/api/v1", tags=["hermes"])
+
+
+@hermes_router.get("/emails/unread")
+async def get_unread_emails(
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Retourne les emails vectorisés non encore dispatchés par Hermès.
+
+    Format attendu par Hermès :
+    [{ "id": "...", "from": "...", "subject": "...", "body": "...", "date": "...", "attachments": [...] }]
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    result = sb.table("emails").select(
+        "id, gmail_message_id, subject, sender_email, sender_name, "
+        "content_text, content_text_raw, sent_at, received_at, "
+        "has_attachments, attachments_count, gmail_thread_id"
+    ).eq("org_id", org_id).eq("processing_status", "vectorized")\
+     .order("received_at", desc=True).limit(limit).execute()
+
+    emails = result.data or []
+
+    # Filtrer ceux qui ont déjà un log dans hermes_dispatch_log
+    email_ids = [e["id"] for e in emails]
+    dispatched = set()
+    if email_ids:
+        log_resp = sb.table("hermes_dispatch_log")\
+            .select("email_id")\
+            .in_("email_id", email_ids)\
+            .execute()
+        dispatched = {r["email_id"] for r in (log_resp.data or [])}
+
+    unread = [e for e in emails if e["id"] not in dispatched]
+
+    # Récupérer les pièces jointes pour chaque email
+    attachment_ids = [e["id"] for e in unread]
+    attachments_map = {}
+    if attachment_ids:
+        att_resp = sb.table("email_attachments")\
+            .select("id, email_id, filename, mime_type, file_size_bytes, ocr_text")\
+            .in_("email_id", attachment_ids)\
+            .execute()
+        for att in (att_resp.data or []):
+            eid = att["email_id"]
+            if eid not in attachments_map:
+                attachments_map[eid] = []
+            attachments_map[eid].append({
+                "id": att["id"],
+                "filename": att["filename"],
+                "mime_type": att["mime_type"],
+                "size": att.get("file_size_bytes"),
+                "ocr_text": att.get("ocr_text"),
+            })
+
+    formatted = []
+    for e in unread:
+        formatted.append({
+            "id": e["id"],
+            "from": e.get("sender_email", ""),
+            "from_name": e.get("sender_name", ""),
+            "subject": e.get("subject", ""),
+            "body": e.get("content_text_raw") or e.get("content_text", ""),
+            "date": e.get("sent_at") or e.get("received_at", ""),
+            "thread_id": e.get("gmail_thread_id"),
+            "has_attachments": e.get("has_attachments", False),
+            "attachments": attachments_map.get(e["id"], []),
+        })
+
+    return {"success": True, "count": len(formatted), "data": formatted}

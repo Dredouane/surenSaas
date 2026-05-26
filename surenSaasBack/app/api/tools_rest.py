@@ -638,3 +638,143 @@ async def list_situations(chantier_id: str, org_id: str = Query(...)):
     uuid = resolve_chantier_uuid(org_id, chantier_id)
     result = get_supabase().table("chantier_situations").select("*").eq("chantier_id", uuid).order("numero", desc=True).execute()
     return {"success": True, "data": result.data or []}
+
+
+# ============================================================================
+# Endpoints Hermès : Recherche chantier + Budget
+# ============================================================================
+
+
+@router.post("/chantiers/search")
+async def search_chantiers(
+    query: str = Query(...),
+    org_id: str = Query(...),
+    limit: int = Query(5, ge=1, le=20),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Recherche sémantique de chantiers par texte (keyword + vector).
+
+    Hermès envoie un texte (sujet + corps d'email) et récupère les chantiers
+    les plus pertinents. Deux passes : keyword SQL puis RAG vectoriel.
+    """
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    # 1. Passe keyword : ILIKE sur nom / ref
+    keyword_results = sb.table("chantiers")\
+        .select("id, nom, ref, adresse, statut")\
+        .eq("org_id", org_id)\
+        .in_("statut", ["en_cours", "en_attente"])\
+        .or_(f"nom.ilike.%{query}%,ref.ilike.%{query}%")\
+        .limit(limit)\
+        .execute()
+
+    seen = set()
+    merged = []
+
+    for c in (keyword_results.data or []):
+        seen.add(c["id"])
+        merged.append({
+            "chantier_id": c["id"],
+            "nom": c.get("nom"),
+            "ref": c.get("ref"),
+            "adresse": c.get("adresse"),
+            "method": "keyword",
+            "score": 1.0,
+        })
+
+    # 2. Passe vectorielle : RPC match_chantiers
+    try:
+        from app.services.emails.embedding_service import embedding_service
+        import asyncio
+
+        vector = await embedding_service.generate_embedding(query)
+        loop = asyncio.get_event_loop()
+
+        def _rpc():
+            return sb.rpc("match_chantiers", {
+                "query_embedding": vector,
+                "org_id_filter": org_id,
+                "match_threshold": 0.65,
+                "match_count": limit,
+            }).execute()
+
+        vector_results = await loop.run_in_executor(None, _rpc)
+
+        for c in (vector_results.data or []):
+            cid = str(c["chantier_id"])
+            if cid not in seen:
+                seen.add(cid)
+                merged.append({
+                    "chantier_id": cid,
+                    "nom": c.get("content", ""),
+                    "ref": None,
+                    "adresse": None,
+                    "method": "vector",
+                    "score": round(c.get("similarity", 0), 4),
+                })
+    except Exception as e:
+        logger.warning(f"[search_chantiers] Passe vectorielle ignorée: {e}")
+
+    return {"success": True, "count": len(merged[:limit]), "data": merged[:limit]}
+
+
+@router.get("/chantiers/{chantier_id}/budget")
+async def get_chantier_budget(
+    chantier_id: str,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Retourne l'enveloppe financière complète d'un chantier.
+
+    Hermès utilise ces infos pour vérifier les montants disponibles
+    avant de créer une dépense.
+    """
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+    uuid = resolve_chantier_uuid(org_id, chantier_id)
+
+    c_resp = sb.table("chantiers").select(
+        "id, ref, nom, montant_base, ts_avenants, montant_revise, "
+        "situations_facturees, total_depenses, marge_brute"
+    ).eq("id", uuid).single().execute()
+
+    if not c_resp.data:
+        raise HTTPException(status_code=404, detail="Chantier non trouvé")
+
+    chantier = c_resp.data
+
+    # Dépenses validées
+    dep_resp = sb.table("chantier_depenses")\
+        .select("montant")\
+        .eq("chantier_id", uuid)\
+        .execute()
+
+    total_depenses = sum(d.get("montant", 0) or 0 for d in (dep_resp.data or []))
+    montant_base = chantier.get("montant_base", 0) or 0
+    montant_revise = chantier.get("montant_revise", 0) or 0
+    ts_avenants = chantier.get("ts_avenants", 0) or 0
+    situations_facturees = chantier.get("situations_facturees", 0) or 0
+    marge_brute = chantier.get("marge_brute", 0) or 0
+
+    budget_total = montant_revise or montant_base
+    budget_disponible = budget_total - total_depenses
+
+    return {
+        "success": True,
+        "data": {
+            "chantier_id": chantier["id"],
+            "ref": chantier.get("ref"),
+            "nom": chantier.get("nom"),
+            "montant_base": montant_base,
+            "ts_avenants": ts_avenants,
+            "montant_revise": montant_revise,
+            "budget_total": budget_total,
+            "total_depenses_engagees": total_depenses,
+            "budget_disponible": budget_disponible,
+            "situations_facturees": situations_facturees,
+            "marge_brute": marge_brute,
+        },
+    }
