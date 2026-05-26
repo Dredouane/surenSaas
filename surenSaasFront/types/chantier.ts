@@ -60,11 +60,12 @@ export interface Depense {
   chantierId: string;
   date: Date | string;
   fournisseur: string;
-  categorie: 'sous_traitant' | 'fournisseur' | 'autre' | 'conducteur';
+  categorie: 'sous_traitant' | 'fournisseur' | 'autre' | 'conducteur' | string;
   description: string;
   montant: number;
   factureRef?: string;
   invoiceId?: string;
+  invoiceItems?: any[];
   statut?: 'en_attente' | 'validee' | 'rejetee';
   validePar?: string;
   createdAt: Date | string;

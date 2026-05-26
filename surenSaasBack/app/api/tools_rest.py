@@ -567,10 +567,34 @@ async def list_operations(chantier_id: str, org_id: str = Query(...), statut: Op
 
 @router.get("/chantiers/{chantier_id}/pointages", dependencies=[Depends(verify_tools_api_key)])
 async def list_pointages(chantier_id: str, org_id: str = Query(...)):
+    from collections import defaultdict
     _check_org_id(org_id)
     uuid = resolve_chantier_uuid(org_id, chantier_id)
-    result = get_supabase().table("chantier_pointages").select("*").eq("chantier_id", uuid).order("date", desc=True).execute()
-    return {"success": True, "data": result.data or []}
+    sb = get_supabase()
+    pointages_res = sb.table("chantier_pointages").select("*").eq("chantier_id", uuid).order("date", desc=True).execute()
+    pointages = pointages_res.data or []
+    if pointages:
+        pointage_ids = [p["id"] for p in pointages]
+        pr_res = sb.table("chantier_pointage_ressources").select("*").in_("pointage_id", pointage_ids).execute()
+        pr_rows = pr_res.data or []
+        ressource_ids = list(set(r["ressource_id"] for r in pr_rows))
+        cr_lookup = {}
+        if ressource_ids:
+            cr_res = sb.table("chantier_ressources").select("id, nom, type").in_("id", ressource_ids).execute()
+            cr_lookup = {cr["id"]: cr for cr in (cr_res.data or [])}
+        pr_by_pointage = defaultdict(list)
+        for r in pr_rows:
+            cr = cr_lookup.get(r["ressource_id"], {})
+            pr_by_pointage[r["pointage_id"]].append({
+                "ressource_id": r["ressource_id"],
+                "nom": cr.get("nom", ""),
+                "type": cr.get("type", "homme"),
+                "periode": r["periode"],
+                "heures_prevues": r.get("heures_prevues"),
+            })
+        for p in pointages:
+            p["ressources"] = pr_by_pointage.get(p["id"], [])
+    return {"success": True, "data": pointages}
 
 
 @router.get("/chantiers/{chantier_id}/taches", dependencies=[Depends(verify_tools_api_key)])

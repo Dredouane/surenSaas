@@ -44,6 +44,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Depense } from '@/types/chantier';
 import { scrollToDetail } from '@/lib/scroll-to-detail';
+import DepenseDetailView from './DepenseDetailView';
 
 interface DepensesTableProps {
   chantierId: string;
@@ -57,11 +58,9 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
   const [filterCategorie, setFilterCategorie] = useState('all');
   const [filterFournisseur, setFilterFournisseur] = useState('all');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedDepense, setSelectedDepense] = useState<Depense | null>(null);
+  const [selectedDepense, setSelectedDepense] = useState<any>(null);
   const [editDepenseMode, setEditDepenseMode] = useState(false);
   const [editDepenseForm, setEditDepenseForm] = useState({ fournisseur: '', description: '', montant: '', categorie: 'autre', date: '' });
-  const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
-  const [invoiceItemsLoading, setInvoiceItemsLoading] = useState(false);
   const [newDepense, setNewDepense] = useState({
     fournisseur: '',
     description: '',
@@ -92,6 +91,7 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
           statut: d.statut || 'validee',
           validePar: d.valide_par || '',
           invoiceId: d.invoice_id,
+          invoiceItems: d.invoice_items || [],
           createdAt: d.created_at,
           updatedAt: d.updated_at || d.created_at,
         })));
@@ -204,6 +204,27 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
     setFilterCategorie('all');
     setFilterFournisseur('all');
   };
+
+  // Vue détail d'une dépense
+  if (selectedDepense) {
+    return (
+      <DepenseDetailView
+        depense={{
+          id: selectedDepense.id,
+          fournisseur: selectedDepense.fournisseur,
+          montant: selectedDepense.montant,
+          description: selectedDepense.description,
+          date: selectedDepense.date,
+          categorie: selectedDepense.categorie,
+          statut: selectedDepense.statut,
+          invoice_id: selectedDepense.invoiceId,
+          invoice_items: selectedDepense.invoiceItems,
+          facture_ref: selectedDepense.factureRef,
+        }}
+        onBack={() => setSelectedDepense(null)}
+      />
+    );
+  }
 
   return (
     <Card>
@@ -406,7 +427,14 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                 </TableHeader>
                 <TableBody>
                   {filteredDepenses.map((depense) => (
-                    <TableRow key={depense.id} className="hover:bg-muted/50">
+                    <TableRow
+                      key={depense.id}
+                      className="hover:bg-muted/50 cursor-pointer"
+                      onClick={() => {
+                        setSelectedDepense(depense);
+                        scrollToDetail();
+                      }}
+                    >
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -437,26 +465,19 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                         )}
                       </TableCell>
                       <TableCell>
+                        {(depense.invoiceId && (depense.invoiceItems ?? []).length > 0) && (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                            <Package className="w-3 h-3 mr-1" />
+                            {(depense.invoiceItems ?? []).length} lignes
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" onClick={async () => {
-                            setSelectedDepense(depense);
-                            scrollToDetail();
-                            setInvoiceItems([]);
-                            if (depense.invoiceId) {
-                              setInvoiceItemsLoading(true);
-                              try {
-                                const invRes = await fetch(`/api/v1/invoices/${depense.invoiceId}?org_id=${orgId}`, { credentials: 'include' });
-                                if (invRes.ok) {
-                                  const inv = await invRes.json();
-                                  setInvoiceItems(inv.items || []);
-                                }
-                              } catch (e) { console.error('Erreur chargement lignes facture:', e); }
-                              setInvoiceItemsLoading(false);
-                            }
-                          }}>Détails</Button>
                           {depense.statut === 'en_attente' && (
                             <>
-                              <Button variant="ghost" size="sm" className="text-green-600" onClick={async () => {
+                              <Button variant="ghost" size="sm" className="text-green-600" onClick={async (e) => {
+                                e.stopPropagation();
                                 await fetch(`/api/v1/chantiers/${chantierId}/depenses/${depense.id}?org_id=${orgId}`, {
                                   method: 'PUT', credentials: 'include',
                                   headers: { 'Content-Type': 'application/json' },
@@ -464,7 +485,8 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                                 });
                                 fetchDepenses();
                               }}>Valider</Button>
-                              <Button variant="ghost" size="sm" className="text-red-600" onClick={async () => {
+                              <Button variant="ghost" size="sm" className="text-red-600" onClick={async (e) => {
+                                e.stopPropagation();
                                 await fetch(`/api/v1/chantiers/${chantierId}/depenses/${depense.id}?org_id=${orgId}`, {
                                   method: 'PUT', credentials: 'include',
                                   headers: { 'Content-Type': 'application/json' },
@@ -564,14 +586,9 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                   {selectedDepense.factureRef && <div><Label>Réf. facture</Label><p>{selectedDepense.factureRef}</p></div>}
                 </div>
               )}
-              {selectedDepense.invoiceId && (
+              {selectedDepense.invoiceId && selectedDepense.invoiceItems && selectedDepense.invoiceItems.length > 0 && (
                 <div className="border-t pt-4 mt-4">
                   <Label className="text-base font-medium mb-3 block">Lignes de facture</Label>
-                  {invoiceItemsLoading ? (
-                    <p className="text-sm text-muted-foreground">Chargement...</p>
-                  ) : invoiceItems.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Aucune ligne détaillée</p>
-                  ) : (
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -582,7 +599,7 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {invoiceItems.map((item: any, i: number) => (
+                        {selectedDepense.invoiceItems.map((item: any, i: number) => (
                           <TableRow key={i}>
                             <TableCell>{item.description}</TableCell>
                             <TableCell className="text-right">{item.quantity}</TableCell>
@@ -592,7 +609,6 @@ export default function DepensesTable({ chantierId, orgId, onRefresh }: Depenses
                         ))}
                       </TableBody>
                     </Table>
-                  )}
                 </div>
               )}
           </CardContent>
