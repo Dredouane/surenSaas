@@ -65,12 +65,6 @@ elif [ ! -z "$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64" ]; then
     HAS_GEMINI=true
 fi
 
-# Gmail OAuth2 (partagé test/prod - même compte Gmail)
-HAS_GMAIL=false
-if [ ! -z "$SUREN_GMAIL_OAUTH_CLIENT_ID" ] && [ ! -z "$SUREN_GMAIL_OAUTH_CLIENT_SECRET" ] && [ ! -z "$SUREN_GMAIL_OAUTH_REFRESH_TOKEN" ]; then
-    HAS_GMAIL=true
-fi
-
 # Cloudflare R2 (obligatoire - stockage de fichiers)
 HAS_R2=false
 if [ ! -z "$SUREN_GED_CLOUDFLARE_TOKEN" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT" ] && [ ! -z "$SUREN_GED_CLOUDFLARE_BUCKET_NAME" ]; then
@@ -104,11 +98,7 @@ if [ "$HAS_GEMINI" = true ]; then
 else
     echo -e "${YELLOW}⚠️  Clé Gemini non définie (Gemini désactivé)${NC}"
 fi
-if [ "$HAS_GMAIL" = true ]; then
-    echo -e "${GREEN}✅ SUREN_GMAIL_OAUTH_* trouvé (Module Emails activé)${NC}"
-else
-    echo -e "${YELLOW}⚠️  SUREN_GMAIL_OAUTH_* non défini (Module Emails désactivé)${NC}"
-fi
+echo -e "${GREEN}✅ Secrets Gmail OAuth créés (Module Emails activé)${NC}"
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
     echo -e "${GREEN}✅ TOOLS_API_KEY trouvée (API REST agents externes activée)${NC}"
 else
@@ -190,14 +180,15 @@ if [ "$HAS_GEMINI" = true ]; then
     create_or_update_secret "test-google-gemini-api-key" "$GEMINI_VALUE"
 fi
 
-# Gmail OAuth2 (optionnel, mais recommandé)
-if [ "$HAS_GMAIL" = true ]; then
-    create_or_update_secret "gmail-oauth-client-id" "$SUREN_GMAIL_OAUTH_CLIENT_ID"
-    create_or_update_secret "gmail-oauth-client-secret" "$SUREN_GMAIL_OAUTH_CLIENT_SECRET"
-    create_or_update_secret "gmail-oauth-refresh-token" "$SUREN_GMAIL_OAUTH_REFRESH_TOKEN"
-    # L'email account n'est pas un secret, mais on le stocke quand même pour centraliser
-    create_or_update_secret "gmail-account" "${SUREN_GMAIL_ACCOUNT:-REDACTED_EMAIL}"
-fi
+# Gmail OAuth2 (obligatoire pour Hermès)
+GMAIL_CLIENT_ID="${SUREN_GMAIL_OAUTH_CLIENT_ID:-$(grep "^GMAIL_OAUTH_CLIENT_ID=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
+GMAIL_CLIENT_SECRET="${SUREN_GMAIL_OAUTH_CLIENT_SECRET:-$(grep "^GMAIL_OAUTH_CLIENT_SECRET=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
+GMAIL_REFRESH_TOKEN="${SUREN_GMAIL_OAUTH_REFRESH_TOKEN:-$(grep "^GMAIL_OAUTH_REFRESH_TOKEN=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
+
+create_or_update_secret "gmail-oauth-client-id" "$GMAIL_CLIENT_ID"
+create_or_update_secret "gmail-oauth-client-secret" "$GMAIL_CLIENT_SECRET"
+create_or_update_secret "gmail-oauth-refresh-token" "$GMAIL_REFRESH_TOKEN"
+create_or_update_secret "gmail-account" "REDACTED_EMAIL"
 
 # Tools API Key (optionnel - Hermes/agents externes)
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
@@ -250,6 +241,7 @@ cat > $ENV_FILE << EOF
 ALLOWED_ORIGINS: "$CORS_ORIGINS"
 ENVIRONMENT: "test"
 ORG_ID: "$NEXT_PUBLIC_ORG_ID"
+GCP_PROJECT_ID: "suren-saas"
 DEBUG: "true"
 EOF
 
@@ -261,9 +253,8 @@ fi
 if [ "$HAS_GEMINI" = true ]; then
     SECRETS="$SECRETS,GOOGLE_API_KEY=test-google-gemini-api-key:latest"
 fi
-if [ "$HAS_GMAIL" = true ]; then
-    SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
-fi
+# Gmail OAuth toujours inclus (obligatoire pour Hermès)
+SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
     SECRETS="$SECRETS,TOOLS_API_KEY=tools-api-key:latest"
 fi
