@@ -185,10 +185,16 @@ GMAIL_CLIENT_ID="${SUREN_GMAIL_OAUTH_CLIENT_ID:-$(grep "^GMAIL_OAUTH_CLIENT_ID="
 GMAIL_CLIENT_SECRET="${SUREN_GMAIL_OAUTH_CLIENT_SECRET:-$(grep "^GMAIL_OAUTH_CLIENT_SECRET=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
 GMAIL_REFRESH_TOKEN="${SUREN_GMAIL_OAUTH_REFRESH_TOKEN:-$(grep "^GMAIL_OAUTH_REFRESH_TOKEN=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
 
-create_or_update_secret "gmail-oauth-client-id" "$GMAIL_CLIENT_ID"
-create_or_update_secret "gmail-oauth-client-secret" "$GMAIL_CLIENT_SECRET"
-create_or_update_secret "gmail-oauth-refresh-token" "$GMAIL_REFRESH_TOKEN"
-create_or_update_secret "gmail-account" "REDACTED_EMAIL"
+if [ ! -z "$GMAIL_CLIENT_ID" ] && [ ! -z "$GMAIL_CLIENT_SECRET" ] && [ ! -z "$GMAIL_REFRESH_TOKEN" ]; then
+    create_or_update_secret "gmail-oauth-client-id" "$GMAIL_CLIENT_ID"
+    create_or_update_secret "gmail-oauth-client-secret" "$GMAIL_CLIENT_SECRET"
+    create_or_update_secret "gmail-oauth-refresh-token" "$GMAIL_REFRESH_TOKEN"
+    create_or_update_secret "gmail-account" "REDACTED_EMAIL"
+    echo -e "${GREEN}✅ Secrets Gmail OAuth créés${NC}"
+else
+    echo -e "${YELLOW}⚠️  Gmail OAuth non configuré - les secrets ne sont pas créés.${NC}"
+    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_OAUTH_CLIENT_ID, SUREN_GMAIL_OAUTH_CLIENT_SECRET, SUREN_GMAIL_OAUTH_REFRESH_TOKEN${NC}"
+fi
 
 # Tools API Key (optionnel - Hermes/agents externes)
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
@@ -253,8 +259,14 @@ fi
 if [ "$HAS_GEMINI" = true ]; then
     SECRETS="$SECRETS,GOOGLE_API_KEY=test-google-gemini-api-key:latest"
 fi
-# Gmail OAuth toujours inclus (obligatoire pour Hermès)
-SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
+# Gmail OAuth (conditionnel - seulement si les secrets existent)
+HAS_GMAIL_SECRETS=false
+if gcloud secrets describe "gmail-oauth-refresh-token" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+    HAS_GMAIL_SECRETS=true
+fi
+if [ "$HAS_GMAIL_SECRETS" = true ]; then
+    SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
+fi
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
     SECRETS="$SECRETS,TOOLS_API_KEY=tools-api-key:latest"
 fi
