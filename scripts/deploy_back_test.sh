@@ -19,6 +19,11 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
+# Charger ~/.bashrc pour avoir accès aux variables d'env (client Gmail, secrets, etc.)
+if [ -f ~/.bashrc ]; then
+    source ~/.bashrc
+fi
+
 # Charger l'environnement TEST (sans secrets)
 if [ ! -f .env.test ]; then
     echo -e "${RED}❌ Erreur: .env.test non trouvé${NC}"
@@ -183,7 +188,7 @@ fi
 # Gmail OAuth2 (obligatoire pour Hermès)
 GMAIL_CLIENT_ID="${SUREN_GMAIL_OAUTH_CLIENT_ID:-$(grep "^GMAIL_OAUTH_CLIENT_ID=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
 GMAIL_CLIENT_SECRET="${SUREN_GMAIL_OAUTH_CLIENT_SECRET:-$(grep "^GMAIL_OAUTH_CLIENT_SECRET=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
-GMAIL_REFRESH_TOKEN="${SUREN_GMAIL_OAUTH_REFRESH_TOKEN:-$(grep "^GMAIL_OAUTH_REFRESH_TOKEN=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
+GMAIL_REFRESH_TOKEN="${SUREN_GMAIL_OAUTH_CLIENT_REFRESH_TOKEN:-$(grep "^GMAIL_OAUTH_REFRESH_TOKEN=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
 
 if [ ! -z "$GMAIL_CLIENT_ID" ] && [ ! -z "$GMAIL_CLIENT_SECRET" ] && [ ! -z "$GMAIL_REFRESH_TOKEN" ]; then
     create_or_update_secret "gmail-oauth-client-id" "$GMAIL_CLIENT_ID"
@@ -193,7 +198,7 @@ if [ ! -z "$GMAIL_CLIENT_ID" ] && [ ! -z "$GMAIL_CLIENT_SECRET" ] && [ ! -z "$GM
     echo -e "${GREEN}✅ Secrets Gmail OAuth créés${NC}"
 else
     echo -e "${YELLOW}⚠️  Gmail OAuth non configuré - les secrets ne sont pas créés.${NC}"
-    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_OAUTH_CLIENT_ID, SUREN_GMAIL_OAUTH_CLIENT_SECRET, SUREN_GMAIL_OAUTH_REFRESH_TOKEN${NC}"
+    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_OAUTH_CLIENT_ID, SUREN_GMAIL_OAUTH_CLIENT_SECRET, SUREN_GMAIL_OAUTH_CLIENT_REFRESH_TOKEN${NC}"
 fi
 
 # Tools API Key (optionnel - Hermes/agents externes)
