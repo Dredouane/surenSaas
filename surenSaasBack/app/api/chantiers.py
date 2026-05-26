@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, Header
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -1398,3 +1398,52 @@ async def delete_notification(request: Request, org_id: str = Query(...), chanti
     except Exception as e:
         logger.error(f"Erreur suppression notification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _index_all_chantiers(chantiers: list):
+    """Indexe tous les chantiers d'une liste en arrière-plan."""
+    from app.services.emails.embedding_service import embedding_service
+
+    for c in chantiers:
+        try:
+            text = f"Chantier : {c['nom']}. Référence : {c.get('ref','')}. Adresse : {c.get('adresse','')}."
+            vector = await embedding_service.generate_embedding(text)
+            sb = get_supabase()
+            sb.table("chantier_embeddings").delete().eq("chantier_id", c["id"]).execute()
+            sb.table("chantier_embeddings").insert({
+                "org_id": c["org_id"],
+                "chantier_id": c["id"],
+                "content_chunk": text,
+                "embedding": vector,
+                "chunk_index": 0,
+                "chunk_total": 1,
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Erreur indexation chantier {c.get('id')}: {e}")
+
+
+@router.post("/backfill-embeddings")
+async def backfill_chantier_embeddings(
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Endpoint protégé par X-API-Key pour backfill des embeddings de tous les chantiers d'une org."""
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+    chantiers = sb.table("chantiers")\
+        .select("id, org_id, nom, ref, adresse")\
+        .eq("org_id", org_id)\
+        .execute()
+
+    if not chantiers.data:
+        return {"success": False, "message": "Aucun chantier trouvé pour cette organisation"}
+
+    asyncio.create_task(_index_all_chantiers(chantiers.data))
+    logger.info(f"Backfill embeddings lancé pour {len(chantiers.data)} chantier(s) (org={org_id})")
+
+    return {
+        "success": True,
+        "message": f"Indexation de {len(chantiers.data)} chantier(s) lancée en arrière-plan",
+    }
