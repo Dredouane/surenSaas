@@ -50,7 +50,7 @@ class EmailSyncRequest(BaseModel):
     account_id: str = Field(..., description="ID du compte Gmail à synchroniser")
     sync_mode: str = Field(default="incremental", description="Mode: incremental ou historical")
     date_range: Optional[dict] = Field(None, description="{start_date, end_date} si mode=historical")
-    max_emails: int = Field(default=1000, description="Nombre max d'emails à traiter")
+    max_emails: int = Field(default=10, description="Nombre max d'emails à traiter par lot (défaut: 10)")
 
 
 class EmailSyncResponse(BaseModel):
@@ -62,6 +62,8 @@ class EmailSyncResponse(BaseModel):
     vectorized: int
     errors: int
     last_uid: int
+    has_more: bool = False
+    total_remaining: int = 0
     duration_seconds: int
     completed_at: datetime
 

@@ -33,19 +33,19 @@ class SyncService:
         account_id: str,
         sync_mode: str = "incremental",
         date_range: Optional[Dict[str, str]] = None,
-        max_emails: int = 1000
+        max_emails: int = 10
     ) -> Dict[str, Any]:
         """
-        Synchronise les emails d'un compte Gmail.
-        
+        Synchronise les emails d'un compte Gmail par lots de 10.
+
         Args:
             account_id: UUID du compte email
             sync_mode: "incremental" ou "historical"
             date_range: {start_date, end_date} si mode historical
-            max_emails: Limite de sécurité
-            
+            max_emails: Nombre max d'emails à traiter par lot (défaut: 10)
+
         Returns:
-            Statistiques de synchro
+            Statistiques de synchro + flag has_more pour pagination
         """
         stats = {
             "account_id": account_id,
@@ -60,7 +60,9 @@ class SyncService:
             "vectorized": 0,
             "errors": 0,
             "last_uid": 0,
-            "duration_seconds": 0
+            "duration_seconds": 0,
+            "has_more": False,
+            "total_remaining": 0,
         }
         
         start_time = datetime.utcnow()
@@ -78,18 +80,37 @@ class SyncService:
             gmail_client = create_gmail_client(refresh_token)
             await gmail_client.connect()
             
-            # 3. Récupérer les messages
+            # 3. Récupérer les messages (lot de max_emails)
             if sync_mode == "historical" and date_range:
                 from datetime import datetime as dt
                 start = dt.strptime(date_range["start_date"], "%Y-%m-%d")
                 end = dt.strptime(date_range["end_date"], "%Y-%m-%d")
                 messages = await gmail_client.list_messages_by_date_range(start, end, max_emails)
             else:
-                messages = await gmail_client.list_messages(since_uid=last_sync_uid if last_sync_uid > 0 else None)
+                messages = await gmail_client.list_messages(
+                    since_uid=last_sync_uid if last_sync_uid > 0 else None,
+                    max_results=max_emails,
+                )
             
-            logger.info(f"Found {len(messages)} messages to process")
+            # Extraire les métadonnées de pagination
+            has_more = False
+            total_remaining = 0
+            batch_newest_uid = 0
+            if messages:
+                batch_info = messages[0].get("_batch_info", {})
+                has_more = batch_info.get("has_more", False)
+                total_remaining = batch_info.get("total_remaining", 0)
+                batch_newest_uid = batch_info.get("newest_uid", 0)
+                # Nettoyer les métadonnées des messages avant traitement
+                for m in messages:
+                    m.pop("_has_more", None)
+                    m.pop("_total_remaining", None)
+                    m.pop("_batch_info", None)
+            
+            logger.info(f"Found {len(messages)} messages to process (has_more={has_more}, remaining={total_remaining})")
             
             # 4. Traiter chaque message
+            max_uid_in_batch = 0
             for msg in messages:
                 try:
                     result = await self._process_message(
@@ -101,22 +122,34 @@ class SyncService:
                     
                     if result["stored"]:
                         stats["synced"] += 1
-                        stats["last_uid"] = max(stats["last_uid"], int(msg.get("historyId", 0)))
                     else:
                         stats["ignored"] += 1
                         reason = result.get("ignore_reason", "unknown")
                         if reason in stats["ignored_breakdown"]:
                             stats["ignored_breakdown"][reason] += 1
+                    
+                    # Suivre le plus grand UID traité dans ce lot
+                    uid_val = int(msg.get("id", 0))
+                    if uid_val > max_uid_in_batch:
+                        max_uid_in_batch = uid_val
                         
                 except Exception as e:
                     logger.error(f"Error processing message {msg.get('id')}: {e}")
                     stats["errors"] += 1
             
-            # 5. Mettre à jour le compte
-            await email_db.update_email_account(account_id, {
-                "last_sync_uid": stats["last_uid"],
-                "last_sync_at": datetime.utcnow().isoformat()
-            })
+            # 5. Mettre à jour le compte : ne sauvegarder QUE si on a traité des messages
+            #    last_sync_uid = le plus grand UID de ce lot
+            #    Si has_more est True, le prochain cron reprendra à cet UID
+            new_last_uid = max(stats.get("last_uid", 0), max_uid_in_batch)
+            if new_last_uid > 0:
+                stats["last_uid"] = new_last_uid
+                await email_db.update_email_account(account_id, {
+                    "last_sync_uid": new_last_uid,
+                    "last_sync_at": datetime.utcnow().isoformat()
+                })
+            
+            stats["has_more"] = has_more
+            stats["total_remaining"] = total_remaining
             
             # Calculer la durée
             duration = (datetime.utcnow() - start_time).total_seconds()

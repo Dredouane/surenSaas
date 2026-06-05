@@ -166,29 +166,46 @@ class GmailClient:
         self,
         since_uid: Optional[int] = None,
         query: Optional[str] = None,
-        max_results: int = 100,
+        max_results: int = 10,
     ) -> List[Dict[str, Any]]:
-        """Liste les messages depuis la boîte de réception."""
+        """Liste les messages depuis la boîte de réception.
+
+        Retourne les messages les PLUS ANCIENS en premier (ceux pas encore traités).
+        Le sync_service utilise le last_uid pour avancer progressivement.
+        """
         self._ensure_connected()
-        mode = query or "ALL"
 
         try:
             self._imap.select("INBOX", readonly=True)
 
-            if since_uid:
-                status, data = self._imap.search(None, f"UID {since_uid}:*", mode)
-            else:
-                status, data = self._imap.search(None, mode)
+            search_criteria = "ALL"
+            if query and isinstance(query, str) and query.strip():
+                search_criteria = query
 
+            status, data = self._imap.search(None, search_criteria)
             if status != "OK" or not data[0]:
                 return []
 
-            uids = data[0].split()
-            # Prendre les max_results plus récents
-            uids = uids[-max_results:] if len(uids) > max_results else uids
+            all_uids = data[0].split()
+
+            # Si since_uid fourni, ne prendre que les UIDs plus grands
+            uids_to_process = []
+            if since_uid:
+                for uid_str in all_uids:
+                    if int(uid_str) > since_uid:
+                        uids_to_process.append(uid_str)
+            else:
+                uids_to_process = all_uids
+
+            total_remaining = len(uids_to_process)
+
+            # Prendre les PLUS ANCIENS en priorité (début de la liste)
+            batch = uids_to_process[:max_results]
+
+            logger.info(f"IMAP: {len(batch)} messages sur {total_remaining} restants (since_uid={since_uid})")
 
             messages = []
-            for uid_str in uids:
+            for uid_str in batch:
                 status, msg_data = self._imap.fetch(uid_str, "(RFC822)")
                 if status != "OK":
                     continue
@@ -196,9 +213,20 @@ class GmailClient:
                 parsed = email.message_from_bytes(raw_email)
                 uid_int = int(uid_str)
                 msg_dict = self._msg_to_gmail_dict(uid_int, parsed)
+                msg_dict["_has_more"] = total_remaining > max_results
+                msg_dict["_total_remaining"] = total_remaining
                 messages.append(msg_dict)
 
-            logger.info(f"IMAP: {len(messages)} messages récupérés")
+            # Ajouter les métadonnées de pagination au premier élément
+            if messages:
+                messages[0]["_batch_info"] = {
+                    "batch_size": len(batch),
+                    "total_remaining": total_remaining,
+                    "has_more": total_remaining > max_results,
+                    "oldest_uid": int(batch[0]),
+                    "newest_uid": int(batch[-1]) if batch else None,
+                }
+
             return messages
 
         except imaplib.IMAP4.error as e:
@@ -209,10 +237,9 @@ class GmailClient:
         self,
         start_date: datetime,
         end_date: datetime,
-        max_results: int = 1000,
+        max_results: int = 10,
     ) -> List[Dict[str, Any]]:
         """Liste les messages par plage de dates via IMAP."""
-        # IMAP utilise les dates au format DD-Mon-YYYY
         start_str = start_date.strftime("%d-%b-%Y")
         end_str = end_date.strftime("%d-%b-%Y")
         query = f"SINCE {start_str} BEFORE {end_str}"

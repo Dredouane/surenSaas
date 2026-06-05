@@ -338,12 +338,16 @@ setup_scheduler_job() {
     echo -e "${GREEN}  ✅ $name${NC}"
 }
 
-# Job 1 : Sync Gmail (toutes les 5 min)
+# Job 1 : Sync Gmail (toutes les 5 min - par lots de 10)
 if [ ! -z "$SUREN_GMAIL_RECEPTION_IMAP_MDP" ]; then
+    GMAIL_ACCOUNT_UUID="${GMAIL_ACCOUNT_ID:-8b67f73e-e627-4405-b36f-a8ad481c337a}"
+    SYNC_BODY="{\"account_id\": \"$GMAIL_ACCOUNT_UUID\", \"sync_mode\": \"incremental\", \"max_emails\": 10}"
     setup_scheduler_job \
         "hermes-email-sync" \
         "*/5 * * * *" \
-        "/api/v1/tools/emails/sync?account_id=${GMAIL_ACCOUNT_ID:-8b67f73e-e627-4405-b36f-a8ad481c337a}"
+        "/api/v1/tools/emails/sync" \
+        "POST" \
+        "$SYNC_BODY"
 fi
 
 echo ""
