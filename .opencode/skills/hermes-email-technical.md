@@ -1,53 +1,55 @@
 ---
 name: hermes-email-technical
-description: Technical implementation details of the Hermès email pipeline — LLM with_structured_output, pgvector RPC, async patterns, dispatch logic. Use when modifying the pipeline code.
+description: Détails techniques du pipeline email V2 — endpoints API, migration SQL, structure email_ai_analysis, execution dispatch.
 ---
 
-# Hermès Email Integration: Technical Deep Dive
+# Hermès Email Technical V2
 
-## 1. Chantier Routing (`services/emails/chantier_router.py`)
+## Flux complet
 
-**3-pass strategy:**
+```
+Ingestion IMAP → Stockage → Vectorisation → ChantierRouter
+    → email_threads.status = READY_FOR_AI
+    → Hermès poll GET /ready-for-analysis
+    → Hermès analyse (LLM Gemini)
+    → Hermès POST /{thread_id}/analysis
+    → email_ai_analysis créé + status = PENDING_VALIDATION
+    → Humain clique "Valider" sur Telegram/Front
+    → POST /analysis/{id}/execute
+    → Backend exécute proposed_actions (dépenses/tâches/notifications)
+    → status = PROCESSED
+```
 
-- **Pass 1 — Keyword**: SQL ILIKE on `chantiers.nom`/`ref`. Confidence 0.90. Requires unique match.
-- **Pass 2 — Vector**: Generate embedding → pgvector `match_chantiers` RPC. Threshold 0.72.
-- **Pass 3 — LLM**: Gemini with_structured_output. Threshold 0.60. Validates UUID against DB.
+## Endpoints
 
-Uses `vertex_service.get_chat_model().with_structured_output(_LLMRoutingOutput)`.
+### GET /api/v1/emails/ready-for-analysis
+- **Query** : `org_id`, `company_id` (opt), `limit` (max 50)
+- **Filtre** : `email_threads.status = 'READY_FOR_AI' AND detected_chantier_id IS NOT NULL`
+- **Retourne** : Threads avec emails, attachments, infos chantier
 
-## 2. Hermès Extractor (`services/emails/hermes_extractor.py`)
+### POST /api/v1/emails/{thread_id}/analysis
+- **Body** : `{summary, detected_urgency, proposed_actions, raw_llm_response}`
+- **Validation** : Thread doit être en `READY_FOR_AI`
+- **Effet** : Crée `email_ai_analysis` + passe thread en `PENDING_VALIDATION`
 
-- **LLM**: `.with_structured_output(HermesExtractionResult)`.
-- **Dispatch**: Calls `_manage_taches_internal`, `_create_depense_internal`, `NotificationService`.
-- **Audit**: Every action logged to `hermes_dispatch_log`.
-- **LLM calls wrapped** in `run_in_executor` (sync LangChain invoke).
+### POST /api/v1/analysis/{analysis_id}/execute
+- **Body** : `{action: "accept"|"reject", rejection_reason?}`
+- **Validation** : Analyse doit exister, thread en `PENDING_VALIDATION`
+- **Effet accept** : Exécute `proposed_actions` (CREATE_EXPENSE, CREATE_TASK, SEND_NOTIFICATION)
+- **Effet reject** : Marque thread `REJECTED` avec raison
 
-## 3. Async Pipeline
+## proposed_actions
 
-Triggered in `sync_service.py` via `asyncio.create_task(_run_hermes_pipeline(...))` after vectorization.
+```json
+[{"type": "CREATE_EXPENSE", "payload": {"montant": 450, "fournisseur": "..."}},
+ {"type": "CREATE_TASK", "payload": {"titre": "...", "priorite": "haute"}},
+ {"type": "SEND_NOTIFICATION", "payload": {"message": "...", "urgence": "critical"}}]
+```
 
-Flow: `ChantierRouter.route()` → update `email_threads` → `HermesExtractor.extract_and_dispatch()`.
+## Migration SQL
 
-## 4. Database
-
-- Supabase client via `get_supabase()`.
-- pgvector for `chantier_embeddings` and `match_chantiers` RPC.
-- Migrations in `db/schema/NNN_*.sql`.
-
-## 5. Email Accounts
-
-Table: `email_accounts` with columns `id, org_id, email_address, oauth_refresh_token, is_active`.
-
-The base Gmail address is `REDACTED_EMAIL`. Alias format: `+{org_slug}#{company_slug}` (separator configurable via `EMAIL_ALIAS_SEPARATOR`, default `#`).
-
-## 6. Key Files
-
-| File | Role |
-|------|------|
-| `services/emails/sync_service.py` | Orchestrator: Gmail poll → process → vectorize → Hermès |
-| `services/emails/chantier_router.py` | 3-pass Chantier routing |
-| `services/emails/hermes_extractor.py` | LLM extraction + dispatch |
-| `services/emails/alias_router.py` | Parse `Delivered-To` alias → org/company |
-| `services/emails/embedding_service.py` | Vector generation (text-embedding-004) |
-| `scripts/hermes_email_sync.py` | Cron entrypoint |
-| `db/schema/020_hermes_email_chantier.sql` | Migration: new tables + RPC |
+`db/schema/022_email_v2_cycle_vie.sql` :
+- Crée l'enum `email_processing_status`
+- Ajoute `status` + `detected_chantier_id` à `email_threads`
+- Crée `email_ai_analysis`
+- Migre les statuts existants vers `READY_FOR_AI`

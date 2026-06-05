@@ -1,25 +1,36 @@
 ---
 name: hermes-email-domain
-description: Defines ubiquitous language for Hermès email processing, including Chantiers, Email Threads, routing, extraction, and dispatch actions. Use when working on the email agent pipeline.
+description: Définit le langage ubiquitaire pour le pipeline d'emails Hermès V2. Utiliser pour toute modification du flux email (ingestion, analyse HITL, exécution).
 ---
 
-# Hermès Email Processing Domain Language
+# Hermès Email Domain Language V2
 
-Core terminology for the SurenSaaS email integration.
+## Cycle de vie email_processing_status
 
-## Core Entities
+| Statut | Signification | Déclenché par |
+|--------|--------------|---------------|
+| `NEW` | Email reçu brut, pas encore traité | Backend (ingestion) |
+| `READY_FOR_AI` | Vectorisé + chantier identifié, prêt pour Hermès | Backend (vectorisation) |
+| `PENDING_VALIDATION` | Hermès a soumis son analyse, en attente de l'humain | Hermès (POST /analysis) |
+| `PROCESSED` | Actions exécutées après validation humaine | Backend (POST /execute) |
+| `REJECTED` | L'humain a refusé l'analyse | Backend (POST /execute reject) |
+| `FAILED` | Erreur technique (OCR, embedding, etc.) | Backend |
 
-- **Chantier**: A construction project. Primary context for incoming emails. Linked via `chantier_id`.
-- **Email**: Individual email message stored after ingestion. Has `gmail_thread_id` for threading.
-- **EmailThread**: A conversation thread. Can span multiple emails. Linked to a Chantier via `chantier_id`.
-- **Hermes Pipeline**: Automated workflow: Ingestion → Routing → Vectorization → Extraction → Dispatch.
+## Rôles
 
-## Key Concepts
+- **Backend (Cloud Run)** : Plomberie (ingestion IMAP, stockage, vectorisation, endpoints API)
+- **Hermès (VPS)** : Cerveau (analyse LLM, propositions d'actions, orchestration)
+- **Utilisateur** : Valide ou rejette les propositions via Telegram ou Frontend
 
-- **Email Ingestion**: Gmail sync via `SyncService`, `GmailClient`, `EmailChainService`.
-- **Chantier Routing**: Associate email with correct Chantier (3 passes: keyword, vector, LLM).
-- **Embedding**: Vector representation (768-dim, text-embedding-004) for similarity search.
-- **Structured Extraction**: Pydantic models from LLM (tasks, expenses, notifications).
-- **Dispatch**: Auto-create tasks, expenses, notifications in backend.
-- **Alias Routing**: `REDACTED_EMAIL` format.
-- **Notifications**: Telegram alerts via NotificationService.
+## Endpoints Hermès
+
+| Endpoint | Rôle |
+|----------|------|
+| `GET /api/v1/emails/ready-for-analysis` | Hermès récupère les threads prêts (READY_FOR_AI) |
+| `POST /api/v1/emails/{thread_id}/analysis` | Hermès soumet son analyse structurée |
+| `POST /api/v1/analysis/{analysis_id}/execute` | L'humain valide et le backend exécute |
+
+## Tables
+
+- `email_ai_analysis` : Stocke les propositions Hermès (summary, proposed_actions, raw_llm_response)
+- `email_threads.status` : Cycle de vie géré via l'enum email_processing_status

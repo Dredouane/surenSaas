@@ -873,3 +873,312 @@ async def get_unread_emails(
         })
 
     return {"success": True, "count": len(formatted), "data": formatted}
+
+
+# ============================================================================
+# Endpoints Hermès V2 : ready-for-analysis + analysis + execute
+# ============================================================================
+
+
+@hermes_router.get("/emails/ready-for-analysis")
+async def get_ready_for_analysis(
+    org_id: str = Query(...),
+    company_id: str = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Retourne les threads prêts pour Hermès (status = READY_FOR_AI).
+
+    Hermès récupère les threads avec leur contexte complet :
+    chantier_id, emails, pièces jointes, embeddings RAG.
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    query = sb.table("email_threads").select(
+        "id, subject, detected_chantier_id, hermes_confidence, "
+        "email_count, participant_emails, first_email_at, last_email_at"
+    ).eq("org_id", org_id).eq("status", "READY_FOR_AI").is_("detected_chantier_id", "not", None)
+
+    if company_id:
+        query = query.eq("company_id", company_id)
+
+    threads_resp = query.order("last_email_at", desc=True).limit(limit).execute()
+    threads = threads_resp.data or []
+
+    result = []
+    for t in threads:
+        chantier = None
+        if t.get("detected_chantier_id"):
+            c_resp = sb.table("chantiers").select("id, nom, ref")\
+                .eq("id", t["detected_chantier_id"]).maybe_single().execute()
+            if c_resp.data:
+                chantier = c_resp.data
+
+        emails_resp = sb.table("emails").select(
+            "id, subject, sender_email, sender_name, content_text, sent_at, "
+            "has_attachments, attachments_count"
+        ).eq("gmail_thread_id", t["id"])\
+         .eq("org_id", org_id)\
+         .order("sent_at", desc=False)\
+         .limit(20).execute()
+
+        emails_data = []
+        for e in (emails_resp.data or []):
+            att_resp = sb.table("email_attachments").select(
+                "id, filename, mime_type, file_size_bytes, ocr_text"
+            ).eq("email_id", e["id"]).execute()
+
+            emails_data.append({
+                "id": e["id"],
+                "from": e.get("sender_email", ""),
+                "from_name": e.get("sender_name", ""),
+                "subject": e.get("subject", ""),
+                "body": e.get("content_text", ""),
+                "date": e.get("sent_at", ""),
+                "has_attachments": e.get("has_attachments", False),
+                "attachments": [
+                    {"id": a["id"], "filename": a["filename"],
+                     "mime_type": a["mime_type"], "size": a.get("file_size_bytes"),
+                     "ocr_text": a.get("ocr_text")}
+                    for a in (att_resp.data or [])
+                ],
+            })
+
+        result.append({
+            "thread_id": t["id"],
+            "subject": t.get("subject"),
+            "chantier_id": t.get("detected_chantier_id"),
+            "chantier_nom": chantier.get("nom") if chantier else None,
+            "chantier_ref": chantier.get("ref") if chantier else None,
+            "email_count": t.get("email_count", len(emails_data)),
+            "participants": t.get("participant_emails", []),
+            "first_email_at": t.get("first_email_at"),
+            "last_email_at": t.get("last_email_at"),
+            "emails": emails_data,
+        })
+
+    return {"success": True, "count": len(result), "data": result}
+
+
+class HermesAnalysisRequest(BaseModel):
+    summary: str
+    detected_urgency: str = "MEDIUM"
+    proposed_actions: List[dict] = []
+    raw_llm_response: str = ""
+
+
+@hermes_router.post("/emails/{thread_id}/analysis")
+async def submit_analysis(
+    thread_id: str,
+    body: HermesAnalysisRequest,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Hermès soumet son analyse d'un thread.
+
+    Stocke dans email_ai_analysis et passe le thread en PENDING_VALIDATION.
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    # Vérifier que le thread existe et est bien READY_FOR_AI
+    thread_resp = sb.table("email_threads").select("id, status")\
+        .eq("id", thread_id).eq("org_id", org_id).maybe_single().execute()
+
+    if not thread_resp.data:
+        raise HTTPException(status_code=404, detail="Thread non trouvé")
+
+    if thread_resp.data.get("status") != "READY_FOR_AI":
+        raise HTTPException(status_code=409, detail=f"Statut actuel: {thread_resp.data.get('status')}, attendu: READY_FOR_AI")
+
+    # Valider l'urgence
+    urgency = body.detected_urgency.upper()
+    if urgency not in ("LOW", "MEDIUM", "HIGH"):
+        urgency = "MEDIUM"
+
+    # Insérer l'analyse
+    analysis_resp = sb.table("email_ai_analysis").insert({
+        "email_thread_id": thread_id,
+        "summary": body.summary,
+        "detected_urgency": urgency,
+        "proposed_actions": [json.loads(a) if isinstance(a, str) else a for a in body.proposed_actions],
+        "raw_llm_response": body.raw_llm_response,
+    }).execute()
+
+    if not analysis_resp.data:
+        raise HTTPException(status_code=500, detail="Échec création analyse")
+
+    analysis_id = analysis_resp.data[0]["id"]
+
+    # Passer le thread en PENDING_VALIDATION
+    sb.table("email_threads").update({
+        "status": "PENDING_VALIDATION",
+        "ai_summary": body.summary,
+        "ai_urgency": urgency.lower(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("id", thread_id).execute()
+
+    logger.info(f"[Hermès] Analyse soumise: {analysis_id} pour thread {thread_id}")
+
+    return {
+        "success": True,
+        "analysis_id": analysis_id,
+        "message": "Analyse enregistrée, en attente de validation humaine",
+    }
+
+
+class ExecuteAnalysisRequest(BaseModel):
+    action: str = "accept"  # "accept" ou "reject"
+    rejection_reason: str = ""
+
+
+@hermes_router.post("/analysis/{analysis_id}/execute")
+async def execute_analysis(
+    analysis_id: str,
+    body: ExecuteAnalysisRequest,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    x_user_id: str = Header(None, alias="X-User-Id"),
+):
+    """Validation humaine d'une analyse Hermès.
+
+    action=accept : exécute proposed_actions (dépenses, tâches, notifications)
+    action=reject : marque le thread comme REJECTED
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    # Récupérer l'analyse
+    analysis_resp = sb.table("email_ai_analysis").select(
+        "id, email_thread_id, proposed_actions, summary"
+    ).eq("id", analysis_id).maybe_single().execute()
+
+    if not analysis_resp.data:
+        raise HTTPException(status_code=404, detail="Analyse non trouvée")
+
+    analysis = analysis_resp.data
+    thread_id = analysis["email_thread_id"]
+
+    # Vérifier que le thread est bien en PENDING_VALIDATION
+    thread_resp = sb.table("email_threads").select("id, status, detected_chantier_id, org_id")\
+        .eq("id", thread_id).maybe_single().execute()
+
+    if not thread_resp.data:
+        raise HTTPException(status_code=404, detail="Thread non trouvé")
+
+    if thread_resp.data.get("status") != "PENDING_VALIDATION":
+        raise HTTPException(status_code=409, detail=f"Statut actuel: {thread_resp.data.get('status')}, attendu: PENDING_VALIDATION")
+
+    if body.action == "reject":
+        # Rejet
+        sb.table("email_ai_analysis").update({
+            "validated_at": datetime.utcnow().isoformat(),
+            "validated_by": x_user_id,
+            "rejected_reason": body.rejection_reason,
+        }).eq("id", analysis_id).execute()
+
+        sb.table("email_threads").update({
+            "status": "REJECTED",
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("id", thread_id).execute()
+
+        logger.info(f"[Hermès] Analyse {analysis_id} rejetée: {body.rejection_reason}")
+
+        return {"success": True, "message": "Analyse rejetée"}
+
+    # Acceptation : exécuter les actions
+    proposed_actions = analysis.get("proposed_actions", [])
+    chantier_id = thread_resp.data.get("detected_chantier_id")
+    if not chantier_id:
+        raise HTTPException(status_code=400, detail="Aucun chantier associé à ce thread")
+
+    if not isinstance(proposed_actions, list):
+        proposed_actions = []
+
+    results = {"executed": [], "errors": []}
+
+    for action in proposed_actions:
+        try:
+            action_type = action.get("type")
+            payload = action.get("payload", {})
+
+            if action_type == "CREATE_EXPENSE":
+                from app.agents.tools.depense_tools import _create_depense_internal
+                import asyncio
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: _create_depense_internal(
+                        org_id=org_id,
+                        chantier_id=chantier_id,
+                        description=payload.get("titre") or payload.get("description", ""),
+                        montant=payload.get("montant", 0),
+                        fournisseur=payload.get("fournisseur", "Email"),
+                        categorie=payload.get("categorie", "autre"),
+                    )
+                )
+                results["executed"].append({"type": "expense", "result": result.get("data", {})})
+
+            elif action_type == "CREATE_TASK":
+                from app.api.tools_rest import _manage_taches_internal
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: _manage_taches_internal(
+                        org_id=org_id,
+                        chantier_id=chantier_id,
+                        action="create",
+                        titre=payload.get("titre", "Action depuis email"),
+                        description=payload.get("description", ""),
+                        priorite=payload.get("priorite", "moyenne"),
+                    )
+                )
+                results["executed"].append({"type": "task", "result": result.get("data", {})})
+
+            elif action_type == "SEND_NOTIFICATION":
+                from app.services.telegram.notification_service import NotificationService
+                notif_service = NotificationService(
+                    supabase_client=sb,
+                    telegram_token=_get_telegram_token(),
+                )
+                result = await notif_service.notify_admins(
+                    org_id=org_id,
+                    title=payload.get("titre", "Alerte Hermès"),
+                    message=payload.get("message", ""),
+                    notification_type=f"hermes_{payload.get('urgence', 'info')}",
+                )
+                results["executed"].append({"type": "notification", "result": result})
+
+            else:
+                logger.warning(f"[Hermès] Type d'action inconnu: {action_type}")
+
+        except Exception as e:
+            logger.error(f"[Hermès] Erreur exécution action {action.get('type')}: {e}")
+            results["errors"].append({"type": action.get("type"), "error": str(e)})
+
+    # Marquer comme traité
+    now = datetime.utcnow().isoformat()
+    sb.table("email_ai_analysis").update({
+        "validated_at": now,
+        "validated_by": x_user_id,
+    }).eq("id", analysis_id).execute()
+
+    sb.table("email_threads").update({
+        "status": "PROCESSED",
+        "updated_at": now,
+    }).eq("id", thread_id).execute()
+
+    logger.info(f"[Hermès] Analyse {analysis_id} acceptée et exécutée")
+
+    return {
+        "success": True,
+        "message": f"{len(results['executed'])} action(s) exécutée(s), {len(results['errors'])} erreur(s)",
+        "results": results,
+    }
