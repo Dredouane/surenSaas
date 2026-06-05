@@ -14,6 +14,22 @@ echo -e "${YELLOW}🚀 DEPLOIEMENT BACKEND TEST${NC}"
 echo "=========================================="
 echo ""
 
+# Mode FULL : secrets + cron (par défaut : mode rapide, code uniquement)
+FULL_MODE=false
+for arg in "$@"; do
+    if [ "$arg" = "--full" ]; then
+        FULL_MODE=true
+    fi
+done
+
+if [ "$FULL_MODE" = true ]; then
+    echo -e "${YELLOW}🔧 Mode FULL : secrets + cron mis à jour${NC}"
+else
+    echo -e "${BLUE}⚡ Mode RAPIDE : déploiement code uniquement (--full pour secrets+cron)${NC}"
+fi
+
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
@@ -164,55 +180,53 @@ create_or_update_secret() {
     echo -e "${GREEN}  ✅ $name${NC}"
 }
 
-# Créer/mettre à jour les secrets GCP
-echo -e "${YELLOW}🔐 Configuration des secrets GCP...${NC}"
-create_or_update_secret "supabase-url" "$SUPABASE_URL"
-create_or_update_secret "test-supabase-service-key" "$TEST_SUPABASE_SERVICE_KEY"
-create_or_update_secret "test-jwt-secret" "$TEST_JWT_SECRET"
-
-# Telegram Bot (optionnel)
-# Note: Le token et le username sont des secrets
-if [ "$HAS_TELEGRAM" = true ]; then
-    create_or_update_secret "test-telegram-bot-token" "$SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN"
-    BOT_USERNAME="${SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME:-suren_construction_test_bot}"
-    create_or_update_secret "test-telegram-bot-username" "$BOT_USERNAME"
+# Créer/mettre à jour les secrets GCP (uniquement en mode FULL)
+if [ "$FULL_MODE" = true ]; then
+    echo -e "${YELLOW}🔐 Configuration des secrets GCP...${NC}"
+    create_or_update_secret "supabase-url" "$SUPABASE_URL"
+    create_or_update_secret "test-supabase-service-key" "$TEST_SUPABASE_SERVICE_KEY"
+    create_or_update_secret "test-jwt-secret" "$TEST_JWT_SECRET"
+    
+    # Telegram Bot (optionnel)
+    if [ "$HAS_TELEGRAM" = true ]; then
+        create_or_update_secret "test-telegram-bot-token" "$SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN"
+        BOT_USERNAME="${SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME:-suren_construction_test_bot}"
+        create_or_update_secret "test-telegram-bot-username" "$BOT_USERNAME"
+    fi
+    
+    # Gemini (optionnel)
+    if [ "$HAS_GEMINI" = true ]; then
+        GEMINI_VALUE="${SUREN_GEMINI_API_KEY:-$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64}"
+        create_or_update_secret "test-google-gemini-api-key" "$GEMINI_VALUE"
+    fi
+    
+    # Gmail IMAP
+    GMAIL_IMAP_ADRESS="${SUREN_GMAIL_RECEPTION_IMAP_ADRESS:-REDACTED_EMAIL}"
+    GMAIL_IMAP_MDP="${SUREN_GMAIL_RECEPTION_IMAP_MDP}"
+    if [ ! -z "$GMAIL_IMAP_MDP" ]; then
+        create_or_update_secret "gmail-imap-adress" "$GMAIL_IMAP_ADRESS"
+        create_or_update_secret "gmail-imap-mdp" "$GMAIL_IMAP_MDP"
+        echo -e "${GREEN}✅ Secrets Gmail IMAP créés${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Gmail IMAP non configuré.${NC}"
+    fi
+    
+    # Tools API Key
+    if [ "$HAS_TOOLS_API_KEY" = true ]; then
+        create_or_update_secret "tools-api-key" "$TOOLS_API_KEY"
+    fi
+    
+    # Cloudflare R2
+    if [ "$HAS_R2" = true ]; then
+        create_or_update_secret "r2-endpoint-url" "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
+        create_or_update_secret "r2-access-key-id" "$SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID"
+        create_or_update_secret "r2-secret-access-key" "$SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY"
+        create_or_update_secret "r2-token" "$SUREN_GED_CLOUDFLARE_TOKEN"
+        create_or_update_secret "r2-bucket-name" "$SUREN_GED_CLOUDFLARE_BUCKET_NAME"
+    fi
+    
+    echo ""
 fi
-
-# Gemini (optionnel)
-if [ "$HAS_GEMINI" = true ]; then
-    # Priorité à SUREN_GEMINI_API_KEY, fallback SUREN_GOOGLE_GEMINI_CREDENTIALS_B64
-    GEMINI_VALUE="${SUREN_GEMINI_API_KEY:-$SUREN_GOOGLE_GEMINI_CREDENTIALS_B64}"
-    create_or_update_secret "test-google-gemini-api-key" "$GEMINI_VALUE"
-fi
-
-# Gmail IMAP (obligatoire pour Hermès - mot de passe d'application)
-GMAIL_IMAP_ADRESS="${SUREN_GMAIL_RECEPTION_IMAP_ADRESS:-REDACTED_EMAIL}"
-GMAIL_IMAP_MDP="${SUREN_GMAIL_RECEPTION_IMAP_MDP}"
-
-if [ ! -z "$GMAIL_IMAP_MDP" ]; then
-    create_or_update_secret "gmail-imap-adress" "$GMAIL_IMAP_ADRESS"
-    create_or_update_secret "gmail-imap-mdp" "$GMAIL_IMAP_MDP"
-    echo -e "${GREEN}✅ Secrets Gmail IMAP créés${NC}"
-else
-    echo -e "${YELLOW}⚠️  Gmail IMAP non configuré - le module email ne fonctionnera pas.${NC}"
-    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_RECEPTION_IMAP_ADRESS, SUREN_GMAIL_RECEPTION_IMAP_MDP${NC}"
-fi
-
-# Tools API Key (optionnel - Hermes/agents externes)
-if [ "$HAS_TOOLS_API_KEY" = true ]; then
-    create_or_update_secret "tools-api-key" "$TOOLS_API_KEY"
-fi
-
-# Cloudflare R2 (obligatoire)
-if [ "$HAS_R2" = true ]; then
-    create_or_update_secret "r2-endpoint-url" "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
-    create_or_update_secret "r2-access-key-id" "$SUREN_GED_CLOUDFLARE_ACCESS_KEY_ID"
-    create_or_update_secret "r2-secret-access-key" "$SUREN_GED_CLOUDFLARE_SECRET_ACCESS_KEY"
-    create_or_update_secret "r2-token" "$SUREN_GED_CLOUDFLARE_TOKEN"
-    create_or_update_secret "r2-bucket-name" "$SUREN_GED_CLOUDFLARE_BUCKET_NAME"
-fi
-
-echo ""
 
 # Déploiement
 echo -e "${YELLOW}🚀 Déploiement Backend TEST...${NC}"
@@ -299,11 +313,13 @@ BACK_URL=$(gcloud run services describe $TEST_BACK_SERVICE_NAME \
     --project $GCP_PROJECT_ID \
     --format 'value(status.url)' 2>/dev/null)
 
-echo ""
-echo -e "${YELLOW}🔄 Configuration des Cron Jobs Cloud Scheduler...${NC}"
+# Configuration des Cron Jobs Cloud Scheduler (uniquement en mode FULL)
+if [ "$FULL_MODE" = true ]; then
+    echo ""
+    echo -e "${YELLOW}🔄 Configuration des Cron Jobs Cloud Scheduler...${NC}"
 
-# Fonction pour créer/mettre à jour un job Cloud Scheduler
-setup_scheduler_job() {
+    # Fonction pour créer/mettre à jour un job Cloud Scheduler
+    setup_scheduler_job() {
     local name=$1
     local schedule=$2
     local uri="${BACK_URL}$3"
@@ -338,39 +354,31 @@ setup_scheduler_job() {
     echo -e "${GREEN}  ✅ $name${NC}"
 }
 
-# Job 1 : Sync Gmail (toutes les 5 min - par lots de 10)
-if [ ! -z "$SUREN_GMAIL_RECEPTION_IMAP_MDP" ]; then
-    GMAIL_ACCOUNT_UUID="${GMAIL_ACCOUNT_ID:-8b67f73e-e627-4405-b36f-a8ad481c337a}"
-    SYNC_BODY="{\"account_id\": \"$GMAIL_ACCOUNT_UUID\", \"sync_mode\": \"incremental\", \"max_emails\": 10}"
-    setup_scheduler_job \
-        "hermes-email-sync" \
-        "*/5 * * * *" \
-        "/api/v1/tools/emails/sync" \
-        "POST" \
-        "$SYNC_BODY"
+    # Job 1 : Sync Gmail (toutes les 5 min - par lots de 10)
+    if [ ! -z "$SUREN_GMAIL_RECEPTION_IMAP_MDP" ]; then
+        GMAIL_ACCOUNT_UUID="${GMAIL_ACCOUNT_ID:-8b67f73e-e627-4405-b36f-a8ad481c337a}"
+        SYNC_BODY="{\"account_id\": \"$GMAIL_ACCOUNT_UUID\", \"sync_mode\": \"incremental\", \"max_emails\": 10}"
+        setup_scheduler_job \
+            "hermes-email-sync" \
+            "*/5 * * * *" \
+            "/api/v1/tools/emails/sync" \
+            "POST" \
+            "$SYNC_BODY"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}⏰ Cron jobs Cloud Scheduler configurés:${NC}"
+    echo "   - hermes-email-sync: toutes les 5 min"
+    echo ""
 fi
 
-echo ""
 echo "=========================================="
 echo -e "${GREEN}✅ BACKEND TEST DÉPLOYÉ!${NC}"
 echo "=========================================="
 echo -e "${BLUE}⚙️  URL: $BACK_URL${NC}"
 echo ""
-echo -e "${YELLOW}⏰ Cron jobs Cloud Scheduler configurés:${NC}"
-echo "   - hermes-email-sync: toutes les 5 min"
-echo ""
-echo -e "${YELLOW}💡 Pour lister les jobs:${NC}"
-echo "   gcloud scheduler jobs list --project=$GCP_PROJECT_ID --location=$GCP_REGION"
-echo ""
-echo -e "${YELLOW}📝 Pour le développement local avec backend GCP:${NC}"
-echo "   Si l'URL a changé, mettez à jour dans ~/.bashrc:"
-echo "      export SUREN_TEST_API_BASE_URL=\"$BACK_URL\""
-echo ""
-echo -e "${YELLOW}🚀 Pour déployer le frontend:${NC}"
-echo "   ./scripts/deploy_front_test.sh"
 
 # Nettoyage Artifact Registry
-echo ""
 echo -e "${YELLOW}🧹 Nettoyage Artifact Registry...${NC}"
 REPOSITORY="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/cloud-run-source-deploy/$TEST_BACK_SERVICE_NAME"
 
