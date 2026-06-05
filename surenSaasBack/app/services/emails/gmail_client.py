@@ -296,55 +296,6 @@ class GmailClient:
             logger.error(f"Erreur IMAP download_attachment: {e}")
             raise
 
-    async def list_messages(self, since_uid: Optional[int] = None, query: Optional[str] = None, max_results: int = 100) -> List[Dict[str, Any]]:
-        self._ensure_connected()
-        try:
-            self._imap.select("INBOX", readonly=True)
-
-            search_criteria = "ALL"
-            if isinstance(query, str) and query.strip():
-                # Convertir la query Gmail en IMAP
-                search_criteria = query
-            if since_uid:
-                search_criteria = f"UID {since_uid}:* {search_criteria}"
-
-            status, data = self._imap.search(None, search_criteria)
-            if status != "OK" or not data[0]:
-                return []
-
-            uids = data[0].split()
-            uids = uids[-max_results:] if len(uids) > max_results else uids
-
-            messages = []
-            for uid_str in uids:
-                status, msg_data = self._imap.fetch(uid_str, "(RFC822)")
-                if status != "OK":
-                    continue
-                raw_email = msg_data[0][1]
-                parsed = email.message_from_bytes(raw_email)
-                messages.append(self._msg_to_gmail_dict(int(uid_str), parsed))
-
-            logger.info(f"IMAP: {len(messages)} messages récupérés")
-            return messages
-
-        except imaplib.IMAP4.error as e:
-            logger.error(f"Erreur IMAP list_messages: {e}")
-            raise
-
-    async def get_message(self, message_id: str) -> Dict[str, Any]:
-        self._ensure_connected()
-        try:
-            self._imap.select("INBOX", readonly=True)
-            status, msg_data = self._imap.fetch(message_id, "(RFC822)")
-            if status != "OK":
-                raise RuntimeError(f"Message {message_id} introuvable")
-            raw_email = msg_data[0][1]
-            parsed = email.message_from_bytes(raw_email)
-            return self._msg_to_gmail_dict(int(message_id), parsed)
-        except imaplib.IMAP4.error as e:
-            logger.error(f"Erreur IMAP get_message {message_id}: {e}")
-            raise
-
 
 # Factory
 def create_gmail_client(refresh_token: str) -> GmailClient:

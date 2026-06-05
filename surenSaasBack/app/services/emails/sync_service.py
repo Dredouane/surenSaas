@@ -76,6 +76,7 @@ class SyncService:
             
             # 2. Connecter le client Gmail
             gmail_client = create_gmail_client(refresh_token)
+            await gmail_client.connect()
             
             # 3. Récupérer les messages
             if sync_mode == "historical" and date_range:
