@@ -296,6 +296,23 @@ class GmailClient:
             logger.error(f"Erreur IMAP download_attachment: {e}")
             raise
 
+    async def download_raw_email(self, message_id: str) -> Optional[bytes]:
+        """Télécharge le .eml brut d'un message via IMAP, retourne les bytes RFC822."""
+        self._ensure_connected()
+        try:
+            self._imap.select("INBOX", readonly=True)
+            status, msg_data = self._imap.fetch(message_id, "(RFC822)")
+            if status != "OK" or not msg_data or not msg_data[0]:
+                logger.warning(f"Message {message_id} introuvable pour le téléchargement raw")
+                return None
+            raw_bytes = msg_data[0][1]
+            if isinstance(raw_bytes, str):
+                raw_bytes = raw_bytes.encode("utf-8", errors="replace")
+            return raw_bytes
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP download_raw_email {message_id}: {e}")
+            return None
+
 
 # Factory
 def create_gmail_client(refresh_token: str) -> GmailClient:

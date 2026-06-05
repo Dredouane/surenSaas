@@ -114,23 +114,14 @@ class EmailChainService:
         }
 
     async def _download_raw_eml(self, gmail_client, message_id: str) -> Optional[bytes]:
-        """Télécharge le .eml brut via Gmail API (format=raw)."""
+        """Télécharge le .eml brut via IMAP."""
         try:
-            if not gmail_client.service:
-                await gmail_client.connect()
+            eml_bytes = await gmail_client.download_raw_email(message_id)
 
-            message = gmail_client.service.users().messages().get(
-                userId="me",
-                id=message_id,
-                format="raw",
-            ).execute()
-
-            raw_data = message.get("raw", "")
-            if not raw_data:
+            if not eml_bytes:
                 logger.warning(f"⚠️ Pas de données raw pour {message_id}")
                 return None
 
-            eml_bytes = base64.urlsafe_b64decode(raw_data)
             logger.info(f"📄 .eml téléchargé: {len(eml_bytes)} bytes")
 
             # Sauvegarder dans /tmp pour debug
