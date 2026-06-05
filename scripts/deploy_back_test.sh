@@ -300,13 +300,63 @@ BACK_URL=$(gcloud run services describe $TEST_BACK_SERVICE_NAME \
     --format 'value(status.url)' 2>/dev/null)
 
 echo ""
+echo -e "${YELLOW}🔄 Configuration des Cron Jobs Cloud Scheduler...${NC}"
+
+# Fonction pour créer/mettre à jour un job Cloud Scheduler
+setup_scheduler_job() {
+    local name=$1
+    local schedule=$2
+    local uri="${BACK_URL}$3"
+    local method=$4
+    local body=${5:-""}
+
+    if gcloud scheduler jobs describe "$name" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+        echo -e "${YELLOW}  Mise à jour du job: $name${NC}"
+        gcloud scheduler jobs update http "$name" \
+            --schedule="$schedule" \
+            --uri="$uri" \
+            --http-method="$method" \
+            --oidc-service-account-email="${GCP_SCHEDULER_SA:-suren-saas@appspot.gserviceaccount.com}" \
+            --location="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            ${body:+--message-body="$body"} \
+            --headers="Content-Type=application/json" \
+            > /dev/null 2>&1
+    else
+        echo -e "${BLUE}  Création du job: $name${NC}"
+        gcloud scheduler jobs create http "$name" \
+            --schedule="$schedule" \
+            --uri="$uri" \
+            --http-method="$method" \
+            --oidc-service-account-email="${GCP_SCHEDULER_SA:-suren-saas@appspot.gserviceaccount.com}" \
+            --location="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            ${body:+--message-body="$body"} \
+            --headers="Content-Type=application/json" \
+            > /dev/null 2>&1
+    fi
+    echo -e "${GREEN}  ✅ $name${NC}"
+}
+
+# Job 1 : Sync Gmail (toutes les 5 min)
+if [ ! -z "$SUREN_GMAIL_RECEPTION_IMAP_MDP" ]; then
+    setup_scheduler_job \
+        "hermes-email-sync" \
+        "*/5 * * * *" \
+        "/api/v1/tools/emails/sync?account_id=${GMAIL_ACCOUNT_ID:-8b67f73e-e627-4405-b36f-a8ad481c337a}"
+fi
+
+echo ""
 echo "=========================================="
 echo -e "${GREEN}✅ BACKEND TEST DÉPLOYÉ!${NC}"
 echo "=========================================="
 echo -e "${BLUE}⚙️  URL: $BACK_URL${NC}"
 echo ""
-echo -e "${YELLOW}💡 Informations:${NC}"
-echo "   Le backend est déployé et accessible."
+echo -e "${YELLOW}⏰ Cron jobs Cloud Scheduler configurés:${NC}"
+echo "   - hermes-email-sync: toutes les 5 min"
+echo ""
+echo -e "${YELLOW}💡 Pour lister les jobs:${NC}"
+echo "   gcloud scheduler jobs list --project=$GCP_PROJECT_ID --location=$GCP_REGION"
 echo ""
 echo -e "${YELLOW}📝 Pour le développement local avec backend GCP:${NC}"
 echo "   Si l'URL a changé, mettez à jour dans ~/.bashrc:"
