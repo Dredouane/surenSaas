@@ -1,17 +1,19 @@
 """
-Client Gmail API avec OAuth2.
+Client Gmail IMAP avec mot de passe d'application.
 
-Gère l'authentification et les appels à l'API Gmail.
+Remplace l'ancien client OAuth2 par IMAP direct.
+Utilise SUREN_GMAIL_RECEPTION_IMAP_ADRESS et SUREN_GMAIL_RECEPTION_IMAP_MDP.
 """
 
 import os
-import base64
+import imaplib
+import email
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-import aiohttp
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from email.header import decode_header, make_header
+from email.mime.base import MIMEBase
+from uuid import uuid4
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -19,344 +21,336 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _decode_header_value(value) -> str:
+    """Décode un header email encodé en string lisible."""
+    if value is None:
+        return ""
+    try:
+        return str(make_header(decode_header(value)))
+    except (UnicodeDecodeError, LookupError):
+        return str(value).encode('ascii', errors='replace').decode('ascii')
+
+
 class GmailClient:
-    """Client pour l'API Gmail."""
-    
-    def __init__(self, refresh_token: str):
-        self.refresh_token = refresh_token
-        self.credentials = None
-        self.service = None
-        
-    async def _get_access_token(self) -> str:
-        """Rafraîchit l'access token via le refresh token."""
-        client_id = os.getenv("SUREN_GMAIL_OAUTH_CLIENT_ID")
-        client_secret = os.getenv("SUREN_GMAIL_OAUTH_CLIENT_SECRET")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "refresh_token": self.refresh_token,
-                    "grant_type": "refresh_token"
-                }
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"Failed to refresh token: {error_text}")
-                
-                data = await response.json()
-                return data["access_token"]
-    
+    """Client IMAP pour Gmail avec mot de passe d'application."""
+
+    def __init__(self, email_address: str, app_password: str):
+        self.email_address = email_address
+        self.app_password = app_password
+        self._imap = None
+
     async def connect(self):
-        """Établit la connexion à l'API Gmail."""
+        """Établit la connexion IMAP."""
         try:
-            access_token = await self._get_access_token()
-            
-            self.credentials = Credentials(
-                token=access_token,
-                refresh_token=self.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_ID"),
-                client_secret=os.getenv("SUREN_GMAIL_OAUTH_CLIENT_SECRET")
-            )
-            
-            self.service = build('gmail', 'v1', credentials=self.credentials)
-            logger.info("Gmail client connected successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to Gmail API: {e}")
-            
-            # Vérifier si c'est une erreur de token invalide
-            if "invalid_grant" in str(e) or "Token has been expired" in str(e):
-                logger.error("Refresh token invalide ou expiré. Un nouveau token est nécessaire.")
-                raise Exception(f"Refresh token invalide: {str(e)}")
-            
+            self._imap = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+            self._imap.login(self.email_address, self.app_password)
+            logger.info("IMAP Gmail connecté")
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Échec connexion IMAP: {e}")
             raise
-    
+
+    def _ensure_connected(self):
+        """Vérifie que la connexion IMAP est active."""
+        if self._imap is None:
+            raise RuntimeError("IMAP non connecté. Appelez connect() d'abord.")
+
+    def _extract_header(self, msg: email.message.Message, name: str) -> str:
+        """Extrait et décode un header."""
+        raw = msg.get(name, "")
+        if isinstance(raw, str):
+            return raw
+        return _decode_header_value(raw)
+
+    def _get_body_text(self, msg: email.message.Message) -> str:
+        """Extrait le corps texte d'un message email.Message (synchrone)."""
+        text_parts = []
+        html_parts = []
+
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                payload = part.get_payload(decode=True)
+                if payload is None:
+                    continue
+                try:
+                    charset = part.get_content_charset() or "utf-8"
+                    decoded = payload.decode(charset, errors="replace")
+                    if content_type == "text/plain":
+                        text_parts.append(decoded)
+                    elif content_type == "text/html":
+                        html_parts.append(decoded)
+                except (UnicodeDecodeError, LookupError):
+                    continue
+        else:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                try:
+                    charset = msg.get_content_charset() or "utf-8"
+                    decoded = payload.decode(charset, errors="replace")
+                    content_type = msg.get_content_type()
+                    if content_type == "text/plain":
+                        text_parts.append(decoded)
+                    elif content_type == "text/html":
+                        html_parts.append(decoded)
+                except (UnicodeDecodeError, LookupError):
+                    pass
+
+        # Priorité texte brut
+        if text_parts:
+            longest = max(text_parts, key=len)
+            if len(longest.strip()) > 50:
+                return longest
+
+        # Fallback HTML → texte
+        if html_parts:
+            longest_html = max(html_parts, key=len)
+            clean = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', longest_html, flags=re.DOTALL | re.IGNORECASE)
+            clean = re.sub(r'<!--.*?-->', ' ', clean, flags=re.DOTALL)
+            clean = re.sub(r'<[^>]+>', ' ', clean)
+            clean = re.sub(r'&[a-zA-Z]+;|&#[0-9]+;', ' ', clean)
+            clean = re.sub(r'\s+', ' ', clean).strip()
+            return clean
+
+        return ""
+
+    def _msg_to_gmail_dict(self, uid: int, msg: email.message.Message) -> Dict[str, Any]:
+        """Convertit un email.message.Message en dict compatible API Gmail."""
+        msg_id = uid
+        thread_id = self._extract_header(msg, "Message-ID") or self._extract_header(msg, "References") or f"thread-{uuid4()}"
+
+        # Construire un dict simulant la structure Gmail API
+        return {
+            "id": str(msg_id),
+            "threadId": thread_id.replace("<", "").replace(">", "").strip(),
+            "historyId": int(datetime.utcnow().timestamp()),
+            "sizeEstimate": len(msg.as_bytes()),
+            "internalDate": str(int(datetime.utcnow().timestamp() * 1000)),
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": self._extract_header(msg, "Subject")},
+                    {"name": "From", "value": self._extract_header(msg, "From")},
+                    {"name": "To", "value": self._extract_header(msg, "To")},
+                    {"name": "Date", "value": self._extract_header(msg, "Date")},
+                    {"name": "Delivered-To", "value": self._extract_header(msg, "Delivered-To")},
+                    {"name": "In-Reply-To", "value": self._extract_header(msg, "In-Reply-To")},
+                    {"name": "References", "value": self._extract_header(msg, "References")},
+                    {"name": "Message-ID", "value": self._extract_header(msg, "Message-ID")},
+                ],
+                "parts": [],
+                "body": {"data": ""},
+                "mimeType": msg.get_content_type(),
+            },
+            "attachments": self._extract_attachments(msg),
+            "_raw_msg": msg,
+        }
+
+    def _extract_attachments(self, msg: email.message.Message) -> List[Dict[str, Any]]:
+        """Extrait la liste des pièces jointes d'un message."""
+        attachments = []
+        if not msg.is_multipart():
+            return attachments
+
+        for part in msg.walk():
+            filename = part.get_filename()
+            if filename:
+                decoded_name = _decode_header_value(filename)
+                attachments.append({
+                    "filename": decoded_name,
+                    "mimeType": part.get_content_type(),
+                    "attachmentId": str(uuid4()),
+                    "size": len(part.get_payload(decode=True) or b""),
+                })
+        return attachments
+
     async def list_messages(
-        self, 
+        self,
         since_uid: Optional[int] = None,
         query: Optional[str] = None,
-        max_results: int = 100
+        max_results: int = 100,
     ) -> List[Dict[str, Any]]:
-        """
-        Liste les messages Gmail.
-        
-        Args:
-            since_uid: UID de départ pour la synchro incrémentale
-            query: Requête de recherche Gmail (ex: "after:2024/01/01")
-            max_results: Nombre max de résultats
-            
-        Returns:
-            Liste des messages (id, threadId, historyId)
-        """
-        if not self.service:
-            await self.connect()
-        
+        """Liste les messages depuis la boîte de réception."""
+        self._ensure_connected()
+        mode = query or "ALL"
+
         try:
-            # Construction de la requête
-            q = query or ""
-            
-            # Utiliser startHistoryId si since_uid fourni
+            self._imap.select("INBOX", readonly=True)
+
             if since_uid:
-                # Note: Gmail API utilise historyId, pas UID directement
-                # On récupère les messages avec uid > since_uid
-                pass
-            
-            results = self.service.users().messages().list(
-                userId='me',
-                q=q if q else None,
-                maxResults=max_results
-            ).execute()
-            
-            messages = results.get('messages', [])
-            logger.info(f"Retrieved {len(messages)} messages from Gmail")
+                status, data = self._imap.search(None, f"UID {since_uid}:*", mode)
+            else:
+                status, data = self._imap.search(None, mode)
+
+            if status != "OK" or not data[0]:
+                return []
+
+            uids = data[0].split()
+            # Prendre les max_results plus récents
+            uids = uids[-max_results:] if len(uids) > max_results else uids
+
+            messages = []
+            for uid_str in uids:
+                status, msg_data = self._imap.fetch(uid_str, "(RFC822)")
+                if status != "OK":
+                    continue
+                raw_email = msg_data[0][1]
+                parsed = email.message_from_bytes(raw_email)
+                uid_int = int(uid_str)
+                msg_dict = self._msg_to_gmail_dict(uid_int, parsed)
+                messages.append(msg_dict)
+
+            logger.info(f"IMAP: {len(messages)} messages récupérés")
             return messages
-            
-        except HttpError as e:
-            logger.error(f"Gmail API error: {e}")
+
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP list_messages: {e}")
             raise
-    
+
     async def list_messages_by_date_range(
         self,
         start_date: datetime,
         end_date: datetime,
-        max_results: int = 1000
+        max_results: int = 1000,
     ) -> List[Dict[str, Any]]:
-        """
-        Liste les messages par plage de dates (polling historique).
-        
-        Args:
-            start_date: Date de début
-            end_date: Date de fin
-            max_results: Nombre max de résultats
-        """
-        # Format de date pour Gmail: YYYY/MM/DD
-        start_str = start_date.strftime("%Y/%m/%d")
-        end_str = end_date.strftime("%Y/%m/%d")
-        
-        query = f"after:{start_str} before:{end_str}"
-        
+        """Liste les messages par plage de dates via IMAP."""
+        # IMAP utilise les dates au format DD-Mon-YYYY
+        start_str = start_date.strftime("%d-%b-%Y")
+        end_str = end_date.strftime("%d-%b-%Y")
+        query = f"SINCE {start_str} BEFORE {end_str}"
         return await self.list_messages(query=query, max_results=max_results)
-    
+
     async def get_message(self, message_id: str) -> Dict[str, Any]:
-        """
-        Récupère un message Gmail complet.
-        
-        Args:
-            message_id: ID du message Gmail
-            
-        Returns:
-            Dictionnaire avec tous les détails du message
-        """
-        if not self.service:
-            await self.connect()
-        
+        """Récupère un message complet par son UID."""
+        self._ensure_connected()
         try:
-            message = self.service.users().messages().get(
-                userId='me',
-                id=message_id,
-                format='full'  # Récupère tout y compris les headers et le body
-            ).execute()
-            
-            return message
-            
-        except HttpError as e:
-            logger.error(f"Error fetching message {message_id}: {e}")
-            
-            # Si c'est une erreur 401 (non authentifié), essayer de rafraîchir la connexion
-            if e.status_code == 401:
-                logger.info("Token expiré, tentative de reconnexion...")
-                try:
-                    # Recréer le service avec un nouveau token
-                    await self.connect()
-                    
-                    # Réessayer la requête
-                    message = self.service.users().messages().get(
-                        userId='me',
-                        id=message_id,
-                        format='full'
-                    ).execute()
-                    
-                    logger.info("Reconnexion réussie, message récupéré")
-                    return message
-                    
-                except Exception as retry_error:
-                    logger.error(f"Échec de reconnexion: {retry_error}")
-            
+            self._imap.select("INBOX", readonly=True)
+            status, msg_data = self._imap.fetch(message_id, "(RFC822)")
+            if status != "OK":
+                raise RuntimeError(f"Message {message_id} introuvable")
+
+            raw_email = msg_data[0][1]
+            parsed = email.message_from_bytes(raw_email)
+            return self._msg_to_gmail_dict(int(message_id), parsed)
+
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP get_message {message_id}: {e}")
             raise
-    
+
     def parse_headers(self, message: Dict[str, Any]) -> Dict[str, str]:
-        """Extrait les headers du message en dict."""
-        headers = message.get('payload', {}).get('headers', [])
-        return {h['name']: h['value'] for h in headers}
-    
+        """Extrait les headers du dict retourné."""
+        headers = message.get("payload", {}).get("headers", [])
+        return {h["name"]: h["value"] for h in headers}
+
     def get_body_text(self, message: Dict[str, Any]) -> str:
-        """Extrait le corps texte du message."""
-        parts = message.get('payload', {}).get('parts', [])
-        
-        # Fonction récursive pour collecter toutes les parties texte
-        def collect_text_parts(parts_list, depth=0):
-            text_parts = []
-            html_parts = []
-            
-            for part in parts_list:
-                mime_type = part.get('mimeType', '')
-                data = part.get('body', {}).get('data', '')
-                
-                if data:
-                    try:
-                        content = base64.urlsafe_b64decode(data).decode('utf-8')
-                        
-                        if mime_type == 'text/plain':
-                            text_parts.append(content)
-                        elif mime_type == 'text/html':
-                            html_parts.append(content)
-                    except:
-                        pass
-                
-                # Sous-parties
-                if 'parts' in part and part['parts']:
-                    sub_text, sub_html = collect_text_parts(part['parts'], depth + 1)
-                    text_parts.extend(sub_text)
-                    html_parts.extend(sub_html)
-            
-            return text_parts, html_parts
-        
-        # Collecter toutes les parties texte et HTML
-        text_parts, html_parts = collect_text_parts(parts)
-        
-        # Vérifier si le texte brut contient des markers de forward
-        def contains_forward_markers(text):
-            import re
-            forward_markers = [
-                r'Forwarded message',
-                r'Original Message',
-                r'Begin forwarded message',
-                r'De\s*:.*\n.*\nDate\s*:',
-                r'From\s*:.*\n.*\nDate\s*:',
-                r'Subject\s*:.*\n.*\nTo\s*:',
-                r'Objet\s*:.*\n.*\nÀ\s*:',
-            ]
-            for marker in forward_markers:
-                if re.search(marker, text, re.IGNORECASE):
-                    return True
-            return False
-        
-        # Priorité 1: texte brut qui contient des markers de forward
-        if text_parts:
-            # Prendre la partie texte la plus longue
-            longest_text = max(text_parts, key=len)
-            
-            # Vérifier si c'est un forward
-            if contains_forward_markers(longest_text):
-                return longest_text
-            
-            # Si le texte est long mais ne contient pas de forward, c'est probablement juste une signature
-            # Dans ce cas, essayer le HTML
-            if len(longest_text.strip()) > 1000 and html_parts:
-                # Le texte est long mais pas un forward, essayer le HTML
-                pass
-            elif len(longest_text.strip()) > 100:
-                # Texte court mais valide
-                return longest_text
-        
-        # Priorité 2: HTML converti en texte
-        if html_parts:
-            # Prendre la partie HTML la plus longue
-            longest_html = max(html_parts, key=len)
-            
-            # Extraction améliorée de texte HTML
-            import re
-            
-            # Supprimer d'abord les balises <style> et <script> avec leur contenu
-            html_without_style_script = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', longest_html, flags=re.DOTALL | re.IGNORECASE)
-            
-            # Supprimer les commentaires HTML
-            html_without_comments = re.sub(r'<!--.*?-->', ' ', html_without_style_script, flags=re.DOTALL)
-            
-            # Extraire le texte entre balises
-            text = re.sub(r'<[^>]+>', ' ', html_without_comments)
-            
-            # Remplacer les entités HTML courantes
-            replacements = {
-                '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>',
-                '&quot;': '"', '&apos;': "'", '&cent;': '¢', '&pound;': '£',
-                '&yen;': '¥', '&euro;': '€', '&copy;': '©', '&reg;': '®',
-                '&#160;': ' ', '&#38;': '&', '&#60;': '<', '&#62;': '>',
-                '&#34;': '"', '&#39;': "'", '&#169;': '©', '&#174;': '®',
-                '&#8211;': '-', '&#8212;': '--', '&#8216;': "'", '&#8217;': "'",
-                '&#8220;': '"', '&#8221;': '"', '&#8230;': '...'
-            }
-            
-            for entity, replacement in replacements.items():
-                text = text.replace(entity, replacement)
-            
-            # Nettoyer les espaces multiples
-            text = re.sub(r'\s+', ' ', text)
-            text = text.strip()
-            
-            if text:
-                return text
-        
-        # Fallback: chercher dans le body direct
-        body = message.get('payload', {}).get('body', {})
-        data = body.get('data', '')
-        if data:
-            try:
-                return base64.urlsafe_b64decode(data).decode('utf-8')
-            except:
-                return ""
-        
-        return ""
-    
-    def get_attachments(self, message: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Liste les pièces jointes du message."""
-        attachments = []
-        parts = message.get('payload', {}).get('parts', [])
-        
+        """Extrait le corps texte du message depuis le dict retourné."""
+        raw_msg = message.get("_raw_msg")
+        if raw_msg:
+            return self._get_body_text(raw_msg)
+        # Fallback : récupérer depuis les parts du dict
+        parts = message.get("payload", {}).get("parts", [])
         for part in parts:
-            if part.get('filename'):
-                attachments.append({
-                    'filename': part['filename'],
-                    'mimeType': part.get('mimeType'),
-                    'attachmentId': part.get('body', {}).get('attachmentId'),
-                    'size': part.get('body', {}).get('size')
-                })
-        
-        return attachments
-    
-    async def download_attachment(
-        self, 
-        message_id: str, 
-        attachment_id: str
-    ) -> bytes:
-        """
-        Télécharge une pièce jointe.
-        
-        Args:
-            message_id: ID du message
-            attachment_id: ID de la pièce jointe
-            
-        Returns:
-            Contenu binaire de la pièce jointe
-        """
-        if not self.service:
-            await self.connect()
-        
-        attachment = self.service.users().messages().attachments().get(
-            userId='me',
-            messageId=message_id,
-            id=attachment_id
-        ).execute()
-        
-        data = attachment.get('data', '')
-        return base64.urlsafe_b64decode(data)
+            if part.get("mimeType") == "text/plain":
+                data = part.get("body", {}).get("data", "")
+                if data:
+                    import base64
+                    try:
+                        return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                    except Exception:
+                        pass
+        return ""
+
+    def get_attachments(self, message: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Liste les pièces jointes."""
+        return message.get("attachments", [])
+
+    async def download_attachment(self, message_id: str, attachment_id: str) -> bytes:
+        """Télécharge une pièce jointe depuis un message IMAP."""
+        self._ensure_connected()
+        try:
+            self._imap.select("INBOX", readonly=True)
+            status, msg_data = self._imap.fetch(message_id, "(RFC822)")
+            if status != "OK":
+                raise RuntimeError(f"Message {message_id} introuvable")
+
+            raw_email = msg_data[0][1]
+            parsed = email.message_from_bytes(raw_email)
+
+            for part in parsed.walk():
+                if part.get_filename():
+                    att_id = str(uuid4())  # On ne peut pas matcher par ID, on prend la première
+                    if attachment_id == att_id:
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            return payload
+                        break
+            # Fallback : retourner la première pièce jointe
+            for part in parsed.walk():
+                if part.get_filename():
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload
+                    break
+
+            raise RuntimeError(f"Pièce jointe {attachment_id} introuvable dans le message {message_id}")
+
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP download_attachment: {e}")
+            raise
+
+    async def list_messages(self, since_uid: Optional[int] = None, query: Optional[str] = None, max_results: int = 100) -> List[Dict[str, Any]]:
+        self._ensure_connected()
+        try:
+            self._imap.select("INBOX", readonly=True)
+
+            search_criteria = "ALL"
+            if isinstance(query, str) and query.strip():
+                # Convertir la query Gmail en IMAP
+                search_criteria = query
+            if since_uid:
+                search_criteria = f"UID {since_uid}:* {search_criteria}"
+
+            status, data = self._imap.search(None, search_criteria)
+            if status != "OK" or not data[0]:
+                return []
+
+            uids = data[0].split()
+            uids = uids[-max_results:] if len(uids) > max_results else uids
+
+            messages = []
+            for uid_str in uids:
+                status, msg_data = self._imap.fetch(uid_str, "(RFC822)")
+                if status != "OK":
+                    continue
+                raw_email = msg_data[0][1]
+                parsed = email.message_from_bytes(raw_email)
+                messages.append(self._msg_to_gmail_dict(int(uid_str), parsed))
+
+            logger.info(f"IMAP: {len(messages)} messages récupérés")
+            return messages
+
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP list_messages: {e}")
+            raise
+
+    async def get_message(self, message_id: str) -> Dict[str, Any]:
+        self._ensure_connected()
+        try:
+            self._imap.select("INBOX", readonly=True)
+            status, msg_data = self._imap.fetch(message_id, "(RFC822)")
+            if status != "OK":
+                raise RuntimeError(f"Message {message_id} introuvable")
+            raw_email = msg_data[0][1]
+            parsed = email.message_from_bytes(raw_email)
+            return self._msg_to_gmail_dict(int(message_id), parsed)
+        except imaplib.IMAP4.error as e:
+            logger.error(f"Erreur IMAP get_message {message_id}: {e}")
+            raise
 
 
-# Factory pour créer des clients
+# Factory
 def create_gmail_client(refresh_token: str) -> GmailClient:
-    """Crée un client Gmail avec le refresh token fourni."""
-    return GmailClient(refresh_token=refresh_token)
+    """Crée un client Gmail IMAP depuis les variables d'env."""
+    email_address = os.getenv("SUREN_GMAIL_RECEPTION_IMAP_ADRESS", "REDACTED_EMAIL")
+    app_password = os.getenv("SUREN_GMAIL_RECEPTION_IMAP_MDP", "")
+    if not app_password:
+        raise RuntimeError("SUREN_GMAIL_RECEPTION_IMAP_MDP non définie")
+    return GmailClient(email_address=email_address, app_password=app_password)

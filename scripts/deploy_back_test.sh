@@ -185,20 +185,17 @@ if [ "$HAS_GEMINI" = true ]; then
     create_or_update_secret "test-google-gemini-api-key" "$GEMINI_VALUE"
 fi
 
-# Gmail OAuth2 (obligatoire pour Hermès)
-GMAIL_CLIENT_ID="${SUREN_GMAIL_OAUTH_CLIENT_ID:-$(grep "^GMAIL_OAUTH_CLIENT_ID=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
-GMAIL_CLIENT_SECRET="${SUREN_GMAIL_OAUTH_CLIENT_SECRET:-$(grep "^GMAIL_OAUTH_CLIENT_SECRET=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
-GMAIL_REFRESH_TOKEN="${SUREN_GMAIL_OAUTH_CLIENT_REFRESH_TOKEN:-$(grep "^GMAIL_OAUTH_REFRESH_TOKEN=" "$PROJECT_ROOT/.env.test" 2>/dev/null | cut -d= -f2-)}"
+# Gmail IMAP (obligatoire pour Hermès - mot de passe d'application)
+GMAIL_IMAP_ADRESS="${SUREN_GMAIL_RECEPTION_IMAP_ADRESS:-REDACTED_EMAIL}"
+GMAIL_IMAP_MDP="${SUREN_GMAIL_RECEPTION_IMAP_MDP}"
 
-if [ ! -z "$GMAIL_CLIENT_ID" ] && [ ! -z "$GMAIL_CLIENT_SECRET" ] && [ ! -z "$GMAIL_REFRESH_TOKEN" ]; then
-    create_or_update_secret "gmail-oauth-client-id" "$GMAIL_CLIENT_ID"
-    create_or_update_secret "gmail-oauth-client-secret" "$GMAIL_CLIENT_SECRET"
-    create_or_update_secret "gmail-oauth-refresh-token" "$GMAIL_REFRESH_TOKEN"
-    create_or_update_secret "gmail-account" "REDACTED_EMAIL"
-    echo -e "${GREEN}✅ Secrets Gmail OAuth créés${NC}"
+if [ ! -z "$GMAIL_IMAP_MDP" ]; then
+    create_or_update_secret "gmail-imap-adress" "$GMAIL_IMAP_ADRESS"
+    create_or_update_secret "gmail-imap-mdp" "$GMAIL_IMAP_MDP"
+    echo -e "${GREEN}✅ Secrets Gmail IMAP créés${NC}"
 else
-    echo -e "${YELLOW}⚠️  Gmail OAuth non configuré - les secrets ne sont pas créés.${NC}"
-    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_OAUTH_CLIENT_ID, SUREN_GMAIL_OAUTH_CLIENT_SECRET, SUREN_GMAIL_OAUTH_CLIENT_REFRESH_TOKEN${NC}"
+    echo -e "${YELLOW}⚠️  Gmail IMAP non configuré - le module email ne fonctionnera pas.${NC}"
+    echo -e "${YELLOW}   Définissez dans ~/.bashrc : SUREN_GMAIL_RECEPTION_IMAP_ADRESS, SUREN_GMAIL_RECEPTION_IMAP_MDP${NC}"
 fi
 
 # Tools API Key (optionnel - Hermes/agents externes)
@@ -264,13 +261,13 @@ fi
 if [ "$HAS_GEMINI" = true ]; then
     SECRETS="$SECRETS,GOOGLE_API_KEY=test-google-gemini-api-key:latest"
 fi
-# Gmail OAuth (conditionnel - seulement si les secrets existent)
-HAS_GMAIL_SECRETS=false
-if gcloud secrets describe "gmail-oauth-refresh-token" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
-    HAS_GMAIL_SECRETS=true
+# Gmail IMAP (conditionnel - seulement si les secrets existent)
+HAS_GMAIL_IMAP=false
+if gcloud secrets describe "gmail-imap-mdp" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+    HAS_GMAIL_IMAP=true
 fi
-if [ "$HAS_GMAIL_SECRETS" = true ]; then
-    SECRETS="$SECRETS,SUREN_GMAIL_OAUTH_CLIENT_ID=gmail-oauth-client-id:latest,SUREN_GMAIL_OAUTH_CLIENT_SECRET=gmail-oauth-client-secret:latest,SUREN_GMAIL_OAUTH_REFRESH_TOKEN=gmail-oauth-refresh-token:latest,SUREN_GMAIL_ACCOUNT=gmail-account:latest"
+if [ "$HAS_GMAIL_IMAP" = true ]; then
+    SECRETS="$SECRETS,SUREN_GMAIL_RECEPTION_IMAP_ADRESS=gmail-imap-adress:latest,SUREN_GMAIL_RECEPTION_IMAP_MDP=gmail-imap-mdp:latest"
 fi
 if [ "$HAS_TOOLS_API_KEY" = true ]; then
     SECRETS="$SECRETS,TOOLS_API_KEY=tools-api-key:latest"
