@@ -901,7 +901,7 @@ async def get_ready_for_analysis(
     query = sb.table("email_threads").select(
         "id, subject, detected_chantier_id, hermes_confidence, "
         "email_count, participant_emails, first_email_at, last_email_at"
-    ).eq("org_id", org_id).eq("status", "READY_FOR_AI").is_("detected_chantier_id", "not", None)
+    ).eq("org_id", org_id).eq("status", "READY_FOR_AI").not_.is_("detected_chantier_id", "null")
 
     if company_id:
         query = query.eq("company_id", company_id)
