@@ -192,6 +192,21 @@ class EmbeddingService:
             # 5. Mettre à jour le statut final
             await email_db.update_email_status(email_id, "vectorized")
             
+            # 6. Passer le thread associé en READY_FOR_AI
+            try:
+                from app.api.auth import get_supabase
+                sb = get_supabase()
+                gmail_thread_id = email.get("gmail_thread_id")
+                if gmail_thread_id:
+                    sb.table("email_threads")\
+                      .update({"status": "READY_FOR_AI"})\
+                      .eq("gmail_thread_id", gmail_thread_id)\
+                      .eq("org_id", org_id)\
+                      .execute()
+                    logger.info(f"Thread {gmail_thread_id} passé en READY_FOR_AI")
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible de passer le thread en READY_FOR_AI: {e}")
+            
             logger.info(f"Vectorization completed for email {email_id}")
             
             # 6. Déclencher l'analyse par la Secrétaire IA (asynchrone)
