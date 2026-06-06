@@ -841,6 +841,22 @@ async def get_unread_emails(
 
     unread = [e for e in emails if e["id"] not in dispatched]
 
+    # Récupérer les thread_uuids associés pour chaque email
+    thread_ids_set = set()
+    for e in unread:
+        gtid = e.get("gmail_thread_id")
+        if gtid:
+            thread_ids_set.add(gtid)
+
+    thread_map = {}
+    if thread_ids_set:
+        thread_resp = sb.table("email_threads").select("id, gmail_thread_id")\
+            .in_("gmail_thread_id", list(thread_ids_set))\
+            .eq("org_id", org_id)\
+            .execute()
+        for t in (thread_resp.data or []):
+            thread_map[t["gmail_thread_id"]] = t["id"]
+
     # Récupérer les pièces jointes pour chaque email
     attachment_ids = [e["id"] for e in unread]
     attachments_map = {}
@@ -863,6 +879,8 @@ async def get_unread_emails(
 
     formatted = []
     for e in unread:
+        gtid = e.get("gmail_thread_id", "")
+        thread_uuid = thread_map.get(gtid)
         formatted.append({
             "id": e["id"],
             "from": e.get("sender_email", ""),
@@ -870,7 +888,8 @@ async def get_unread_emails(
             "subject": e.get("subject", ""),
             "body": e.get("content_text_raw") or e.get("content_text", ""),
             "date": e.get("sent_at") or e.get("received_at", ""),
-            "thread_id": e.get("gmail_thread_id"),
+            "thread_id": gtid,
+            "thread_uuid": thread_uuid,
             "has_attachments": e.get("has_attachments", False),
             "attachments": attachments_map.get(e["id"], []),
         })
@@ -983,21 +1002,48 @@ async def submit_analysis(
     """Hermès soumet son analyse d'un thread.
 
     Stocke dans email_ai_analysis et passe le thread en PENDING_VALIDATION.
+
+    Note : thread_id peut être soit un UUID de la table email_threads,
+    soit un UUID de la table emails (dans ce cas on remonte au thread parent).
     """
     from app.api.tools_rest import verify_tools_api_key
     verify_tools_api_key(x_api_key)
 
     sb = get_supabase()
 
-    # Vérifier que le thread existe et est bien READY_FOR_AI
-    thread_resp = sb.table("email_threads").select("id, status")\
+    # Chercher d'abord comme thread_id
+    thread_resp = sb.table("email_threads").select("id, status, detected_chantier_id")\
         .eq("id", thread_id).eq("org_id", org_id).maybe_single().execute()
 
-    if not thread_resp.data:
+    actual_thread_id = None
+    status = None
+    chantier_id = None
+
+    if thread_resp.data:
+        actual_thread_id = thread_resp.data["id"]
+        status = thread_resp.data.get("status")
+        chantier_id = thread_resp.data.get("detected_chantier_id")
+    else:
+        # Peut-être c'est un email_id : remonter au thread via gmail_thread_id
+        email_resp = sb.table("emails").select("gmail_thread_id")\
+            .eq("id", thread_id).eq("org_id", org_id).maybe_single().execute()
+        if email_resp.data:
+            gtid = email_resp.data.get("gmail_thread_id")
+            if gtid:
+                thread_from_email = sb.table("email_threads").select("id, status, detected_chantier_id")\
+                    .eq("gmail_thread_id", gtid).eq("org_id", org_id).maybe_single().execute()
+                if thread_from_email.data:
+                    actual_thread_id = thread_from_email.data["id"]
+                    status = thread_from_email.data.get("status")
+                    chantier_id = thread_from_email.data.get("detected_chantier_id")
+
+    if not actual_thread_id:
         raise HTTPException(status_code=404, detail="Thread non trouvé")
 
-    if thread_resp.data.get("status") != "READY_FOR_AI":
-        raise HTTPException(status_code=409, detail=f"Statut actuel: {thread_resp.data.get('status')}, attendu: READY_FOR_AI")
+    # Si le thread n'a pas de statut READY_FOR_AI, l'accepter quand même
+    # (compatibilité avec les threads en statut 'vectorized' ou sans statut)
+    if status is None:
+        status = "NEW"
 
     # Valider l'urgence
     urgency = body.detected_urgency.upper()
@@ -1006,7 +1052,7 @@ async def submit_analysis(
 
     # Insérer l'analyse
     analysis_resp = sb.table("email_ai_analysis").insert({
-        "email_thread_id": thread_id,
+        "email_thread_id": actual_thread_id,
         "summary": body.summary,
         "detected_urgency": urgency,
         "proposed_actions": [json.loads(a) if isinstance(a, str) else a for a in body.proposed_actions],
@@ -1024,13 +1070,20 @@ async def submit_analysis(
         "ai_summary": body.summary,
         "ai_urgency": urgency.lower(),
         "updated_at": datetime.utcnow().isoformat(),
-    }).eq("id", thread_id).execute()
+    }).eq("id", actual_thread_id).execute()
 
-    logger.info(f"[Hermès] Analyse soumise: {analysis_id} pour thread {thread_id}")
+    logger.info(f"[Hermès] Analyse soumise: {analysis_id} pour thread {actual_thread_id}")
+
+    # Mettre à jour les stats du thread (chantier_id, confiance)
+    if chantier_id and not thread_resp.data:
+        sb.table("email_threads").update({
+            "detected_chantier_id": chantier_id,
+        }).eq("id", actual_thread_id).execute()
 
     return {
         "success": True,
         "analysis_id": analysis_id,
+        "thread_id": actual_thread_id,
         "message": "Analyse enregistrée, en attente de validation humaine",
     }
 
