@@ -192,18 +192,58 @@ class EmbeddingService:
             # 5. Mettre à jour le statut final
             await email_db.update_email_status(email_id, "vectorized")
             
-            # 6. Passer le thread associé en READY_FOR_AI
+            # 6. Passer le thread associé en READY_FOR_AI + router le chantier
             try:
                 from app.api.auth import get_supabase
                 sb = get_supabase()
                 gmail_thread_id = email.get("gmail_thread_id")
                 if gmail_thread_id:
-                    sb.table("email_threads")\
-                      .update({"status": "READY_FOR_AI"})\
-                      .eq("gmail_thread_id", gmail_thread_id)\
-                      .eq("org_id", org_id)\
-                      .execute()
-                    logger.info(f"Thread {gmail_thread_id} passé en READY_FOR_AI")
+                    # Récupérer le thread
+                    thread_resp = sb.table("email_threads").select("id, detected_chantier_id, status")\
+                        .eq("gmail_thread_id", gmail_thread_id)\
+                        .eq("org_id", org_id)\
+                        .maybe_single().execute()
+
+                    if thread_resp.data:
+                        thread = thread_resp.data
+                        update_data = {"status": "READY_FOR_AI"}
+
+                        # Si le thread n'a pas encore de chantier, tenter le routage
+                        if not thread.get("detected_chantier_id"):
+                            try:
+                                from app.services.emails.chantier_router import chantier_router
+                                subject = email.get("subject", "")
+                                body = email.get("content_text_raw") or email.get("content_text", "")
+                                sender = email.get("sender_email", "")
+
+                                routing = await chantier_router.route(
+                                    org_id=org_id,
+                                    subject=subject,
+                                    body=body[:2000],
+                                    sender_email=sender,
+                                )
+
+                                if routing and routing.chantier_id:
+                                    update_data["detected_chantier_id"] = routing.chantier_id
+                                    update_data["hermes_confidence"] = routing.confidence
+                                    logger.info(
+                                        f"[ChantierRouter] Thread {gmail_thread_id} → "
+                                        f"chantier {routing.chantier_id} (méthode: {routing.method})"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"[ChantierRouter] Thread {gmail_thread_id} : "
+                                        f"aucun chantier trouvé ({routing.reason})"
+                                    )
+                            except Exception as router_err:
+                                logger.warning(f"⚠️ Erreur ChantierRouter: {router_err}")
+
+                        # Mettre à jour le thread
+                        sb.table("email_threads")\
+                          .update(update_data)\
+                          .eq("id", thread["id"])\
+                          .execute()
+                        logger.info(f"Thread {gmail_thread_id} passé en READY_FOR_AI")
             except Exception as e:
                 logger.warning(f"⚠️ Impossible de passer le thread en READY_FOR_AI: {e}")
             

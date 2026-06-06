@@ -1201,6 +1201,55 @@ async def get_thread_conversation(
     )
 
 
+class AssignChantierRequest(BaseModel):
+    chantier_id: str
+
+
+@hermes_router.post("/emails/{thread_uuid}/assign-chantier")
+async def assign_chantier_to_thread(
+    thread_uuid: str,
+    body: AssignChantierRequest,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Associe un thread à un chantier (assignation manuelle par Hermès).
+
+    Utile quand le ChantierRouter n'a pas trouvé le chantier automatiquement.
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    # Vérifier que le thread existe
+    thread_resp = sb.table("email_threads").select("id, detected_chantier_id")\
+        .eq("id", thread_uuid).eq("org_id", org_id).maybe_single().execute()
+
+    if not thread_resp.data:
+        raise HTTPException(status_code=404, detail="Thread non trouvé")
+
+    # Vérifier que le chantier existe
+    chantier_resp = sb.table("chantiers").select("id, nom")\
+        .eq("id", body.chantier_id).eq("org_id", org_id).maybe_single().execute()
+
+    if not chantier_resp.data:
+        raise HTTPException(status_code=404, detail="Chantier non trouvé")
+
+    # Assigner
+    sb.table("email_threads").update({
+        "detected_chantier_id": body.chantier_id,
+        "hermes_confidence": 0.95,
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("id", thread_uuid).execute()
+
+    logger.info(f"[Hermès] Chantier {body.chantier_id} assigné au thread {thread_uuid}")
+
+    return {
+        "success": True,
+        "message": f"Chantier '{chantier_resp.data['nom']}' assigné au thread",
+    }
+
+
 class HermesAnalysisRequest(BaseModel):
     summary: str
     detected_urgency: str = "MEDIUM"
