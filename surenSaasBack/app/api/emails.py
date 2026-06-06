@@ -810,7 +810,10 @@ async def get_unread_emails(
     x_api_key: str = Header(None, alias="X-API-Key"),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """Retourne les emails vectorisés non encore dispatchés par Hermès.
+    """Retourne les emails vectorisés non encore analysés par Hermès.
+
+    Exclut les emails déjà dispatchés (hermes_dispatch_log) et ceux
+    dont le thread est déjà en PENDING_VALIDATION, PROCESSED ou REJECTED.
 
     Format attendu par Hermès :
     [{ "id": "...", "from": "...", "subject": "...", "body": "...", "date": "...", "attachments": [...] }]
@@ -829,7 +832,7 @@ async def get_unread_emails(
 
     emails = result.data or []
 
-    # Filtrer ceux qui ont déjà un log dans hermes_dispatch_log
+    # 1. Filtrer ceux qui ont déjà un log dans hermes_dispatch_log
     email_ids = [e["id"] for e in emails]
     dispatched = set()
     if email_ids:
@@ -839,23 +842,40 @@ async def get_unread_emails(
             .execute()
         dispatched = {r["email_id"] for r in (log_resp.data or [])}
 
-    unread = [e for e in emails if e["id"] not in dispatched]
+    # 2. Récupérer les threads associés pour filtrer ceux déjà en PENDING_VALIDATION+
+    gmail_thread_ids = list({e.get("gmail_thread_id") for e in emails if e.get("gmail_thread_id")})
+    thread_status_map = {}
+    if gmail_thread_ids:
+        t_resp = sb.table("email_threads")\
+            .select("gmail_thread_id, status")\
+            .in_("gmail_thread_id", gmail_thread_ids)\
+            .eq("org_id", org_id)\
+            .execute()
+        for t in (t_resp.data or []):
+            thread_status_map[t["gmail_thread_id"]] = t.get("status")
 
-    # Récupérer les thread_uuids associés pour chaque email
-    thread_ids_set = set()
-    for e in unread:
+    # Statuts à exclure : déjà en cours de validation ou traité
+    EXCLUDED_STATUSES = {"PENDING_VALIDATION", "PROCESSED", "REJECTED"}
+
+    unread = []
+    for e in emails:
+        if e["id"] in dispatched:
+            continue
         gtid = e.get("gmail_thread_id")
-        if gtid:
-            thread_ids_set.add(gtid)
+        if gtid and thread_status_map.get(gtid) in EXCLUDED_STATUSES:
+            continue
+        unread.append(e)
 
+    # 3. Récupérer les thread_uuids
+    thread_ids_set = {e.get("gmail_thread_id") for e in unread if e.get("gmail_thread_id")}
     thread_map = {}
     if thread_ids_set:
-        thread_resp = sb.table("email_threads").select("id, gmail_thread_id")\
+        thread_resp = sb.table("email_threads").select("id, gmail_thread_id, status")\
             .in_("gmail_thread_id", list(thread_ids_set))\
             .eq("org_id", org_id)\
             .execute()
         for t in (thread_resp.data or []):
-            thread_map[t["gmail_thread_id"]] = t["id"]
+            thread_map[t["gmail_thread_id"]] = {"id": t["id"], "status": t.get("status")}
 
     # Récupérer les pièces jointes pour chaque email
     attachment_ids = [e["id"] for e in unread]
@@ -880,7 +900,9 @@ async def get_unread_emails(
     formatted = []
     for e in unread:
         gtid = e.get("gmail_thread_id", "")
-        thread_uuid = thread_map.get(gtid)
+        thread_info = thread_map.get(gtid, {})
+        thread_uuid = thread_info.get("id") if isinstance(thread_info, dict) else thread_info
+        thread_status = thread_info.get("status") if isinstance(thread_info, dict) else None
         formatted.append({
             "id": e["id"],
             "from": e.get("sender_email", ""),
@@ -890,6 +912,7 @@ async def get_unread_emails(
             "date": e.get("sent_at") or e.get("received_at", ""),
             "thread_id": gtid,
             "thread_uuid": thread_uuid,
+            "thread_status": thread_status,
             "has_attachments": e.get("has_attachments", False),
             "attachments": attachments_map.get(e["id"], []),
         })
