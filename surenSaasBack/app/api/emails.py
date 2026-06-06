@@ -1008,6 +1008,199 @@ async def get_ready_for_analysis(
     return {"success": True, "count": len(result), "data": result}
 
 
+# ============================================================================
+# Endpoints GET Hermès : consultation des analyses
+# ============================================================================
+
+
+@hermes_router.get("/emails/{thread_uuid}")
+async def get_thread_with_analysis(
+    thread_uuid: str,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Charge un thread complet avec son analyse Hermès si existante.
+
+    Retourne le thread, ses emails, et l'analyse associée.
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    # Chercher le thread
+    thread_resp = sb.table("email_threads").select("*")\
+        .eq("id", thread_uuid).eq("org_id", org_id).maybe_single().execute()
+
+    if not thread_resp.data:
+        raise HTTPException(status_code=404, detail="Thread non trouvé")
+
+    thread = thread_resp.data
+
+    # Récupérer les emails du thread
+    emails_resp = sb.table("emails").select(
+        "id, subject, sender_email, sender_name, content_text, sent_at, "
+        "has_attachments, attachments_count"
+    ).eq("gmail_thread_id", thread.get("gmail_thread_id"))\
+     .eq("org_id", org_id)\
+     .order("sent_at", desc=False)\
+     .limit(50).execute()
+
+    emails_data = []
+    for e in (emails_resp.data or []):
+        att_resp = sb.table("email_attachments").select(
+            "id, filename, mime_type, file_size_bytes, ocr_text"
+        ).eq("email_id", e["id"]).execute()
+        emails_data.append({
+            "id": e["id"],
+            "from": e.get("sender_email", ""),
+            "from_name": e.get("sender_name", ""),
+            "subject": e.get("subject", ""),
+            "body": e.get("content_text", ""),
+            "date": e.get("sent_at", ""),
+            "has_attachments": e.get("has_attachments", False),
+            "attachments": [
+                {"id": a["id"], "filename": a["filename"],
+                 "mime_type": a["mime_type"], "size": a.get("file_size_bytes")}
+                for a in (att_resp.data or [])
+            ],
+        })
+
+    # Récupérer la dernière analyse du thread
+    analysis = None
+    analysis_resp = sb.table("email_ai_analysis").select("*")\
+        .eq("email_thread_id", thread_uuid)\
+        .order("analyzed_at", desc=True)\
+        .limit(1).execute()
+
+    if analysis_resp.data:
+        a = analysis_resp.data[0]
+        analysis = {
+            "id": a["id"],
+            "summary": a.get("summary"),
+            "detected_urgency": a.get("detected_urgency"),
+            "proposed_actions": a.get("proposed_actions", []),
+            "raw_llm_response": a.get("raw_llm_response"),
+            "analyzed_at": a.get("analyzed_at"),
+            "validated_at": a.get("validated_at"),
+            "rejected_reason": a.get("rejected_reason"),
+        }
+
+    return {
+        "success": True,
+        "data": {
+            "thread_uuid": thread["id"],
+            "gmail_thread_id": thread.get("gmail_thread_id"),
+            "subject": thread.get("subject"),
+            "status": thread.get("status"),
+            "chantier_id": thread.get("detected_chantier_id"),
+            "participants": thread.get("participant_emails", []),
+            "email_count": len(emails_data),
+            "first_email_at": thread.get("first_email_at"),
+            "last_email_at": thread.get("last_email_at"),
+            "emails": emails_data,
+            "analysis": analysis,
+        },
+    }
+
+
+@hermes_router.get("/emails")
+async def list_emails_analyses(
+    org_id: str = Query(...),
+    chantier_id: str = Query(None),
+    status: str = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Liste paginée des threads avec analyses, filtrable par chantier et/ou statut."""
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    query = sb.table("email_threads").select("id, subject, status, detected_chantier_id, "
+        "email_count, participant_emails, first_email_at, last_email_at, "
+        "hermes_confidence",
+        count="exact")\
+        .eq("org_id", org_id)
+
+    if chantier_id:
+        query = query.eq("detected_chantier_id", chantier_id)
+    if status:
+        query = query.eq("status", status)
+
+    threads_resp = query.order("last_email_at", desc=True)\
+        .range(offset, offset + limit - 1).execute()
+
+    threads = threads_resp.data or []
+    total = threads_resp.count if hasattr(threads_resp, 'count') else 0
+
+    result = []
+    for t in threads:
+        chantier = None
+        if t.get("detected_chantier_id"):
+            c_resp = sb.table("chantiers").select("id, nom, ref")\
+                .eq("id", t["detected_chantier_id"]).maybe_single().execute()
+            if c_resp.data:
+                chantier = c_resp.data
+
+        analysis_resp = sb.table("email_ai_analysis").select("id, summary, detected_urgency, analyzed_at")\
+            .eq("email_thread_id", t["id"])\
+            .order("analyzed_at", desc=True).limit(1).execute()
+
+        analysis_data = None
+        if analysis_resp.data:
+            a = analysis_resp.data[0]
+            analysis_data = {
+                "id": a["id"],
+                "summary": a.get("summary"),
+                "detected_urgency": a.get("detected_urgency"),
+                "analyzed_at": a.get("analyzed_at"),
+            }
+
+        result.append({
+            "thread_uuid": t["id"],
+            "subject": t.get("subject"),
+            "status": t.get("status"),
+            "chantier_id": t.get("detected_chantier_id"),
+            "chantier_nom": chantier.get("nom") if chantier else None,
+            "chantier_ref": chantier.get("ref") if chantier else None,
+            "email_count": t.get("email_count"),
+            "participants": t.get("participant_emails", []),
+            "last_email_at": t.get("last_email_at"),
+            "analysis": analysis_data,
+        })
+
+    return {
+        "success": True,
+        "count": len(result),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "data": result,
+    }
+
+
+@hermes_router.get("/threads/{thread_uuid}")
+async def get_thread_conversation(
+    thread_uuid: str,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Fil de conversation complet + analyse consolidée pour un thread.
+
+    Retourne tous les emails du thread triés par date,
+    avec l'analyse Hermès la plus récente.
+    """
+    # Réutilisation de l'endpoint existant : retourne le même format enrichi
+    return await get_thread_with_analysis(
+        thread_uuid=thread_uuid,
+        org_id=org_id,
+        x_api_key=x_api_key,
+    )
+
+
 class HermesAnalysisRequest(BaseModel):
     summary: str
     detected_urgency: str = "MEDIUM"
