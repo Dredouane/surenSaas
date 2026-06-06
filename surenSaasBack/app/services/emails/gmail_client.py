@@ -167,45 +167,57 @@ class GmailClient:
         since_uid: Optional[int] = None,
         query: Optional[str] = None,
         max_results: int = 10,
+        max_days: int = 1,
     ) -> List[Dict[str, Any]]:
         """Liste les messages depuis la boîte de réception.
 
-        Retourne les messages les PLUS ANCIENS en premier (ceux pas encore traités).
-        Le sync_service utilise le last_uid pour avancer progressivement.
+        Utilise une recherche par date (SINCE) plutôt que par UID pour
+        éviter les scans longs sur les gros comptes Gmail.
+
+        Args:
+            since_uid: UID minimum (gardé pour compatibilité, mais la recherche se fait par date)
+            query: Requête IMAP personnalisée (ex: "SINCE 01-May-2026")
+            max_results: Nombre max de messages à retourner
+            max_days: Nombre de jours en arrière pour le scan (défaut: 1 jour)
         """
         self._ensure_connected()
 
         try:
             self._imap.select("INBOX", readonly=True)
 
+            # Construire la recherche : soit query personnalisée, soit SINCE last N days
             search_criteria = "ALL"
             if query and isinstance(query, str) and query.strip():
                 search_criteria = query
+            elif since_uid:
+                # Utiliser une recherche par date : derniers N jours
+                # Beaucoup plus rapide que UID *:* ALL sur les gros comptes
+                from datetime import datetime, timedelta
+                since_date = (datetime.utcnow() - timedelta(days=max_days)).strftime("%d-%b-%Y")
+                search_criteria = f"SINCE {since_date}"
+                logger.info(f"IMAP recherche: {search_criteria} (max_days={max_days})")
 
             status, data = self._imap.search(None, search_criteria)
             if status != "OK" or not data[0]:
+                logger.info(f"IMAP: 0 messages (recherche: {search_criteria})")
                 return []
 
             all_uids = data[0].split()
+            total_found = len(all_uids)
 
-            # Si since_uid fourni, ne prendre que les UIDs plus grands
-            uids_to_process = []
-            if since_uid:
-                for uid_str in all_uids:
-                    if int(uid_str) > since_uid:
-                        uids_to_process.append(uid_str)
-            else:
-                uids_to_process = all_uids
+            # Prendre les PLUS RÉCENTS en priorité
+            uids = all_uids[-max_results:]
 
-            total_remaining = len(uids_to_process)
+            logger.info(f"IMAP: {len(uids)}/{total_found} messages (recherche: {search_criteria})")
 
-            # Prendre les PLUS ANCIENS en priorité (début de la liste)
-            batch = uids_to_process[:max_results]
-
-            logger.info(f"IMAP: {len(batch)} messages sur {total_remaining} restants (since_uid={since_uid})")
+            # Filtrer par alias : ne garder que les emails reçus via l'alias cible
+            target_alias = os.getenv("SUREN_GMAIL_RECEPTION_IMAP_ADRESS", "@gmail.com")
+            if "@" in target_alias:
+                local_part = target_alias.split("@")[0]
+                target_prefix = f"+{local_part.split('+', 1)[1]}" if "+" in local_part else ""
 
             messages = []
-            for uid_str in batch:
+            for uid_str in uids:
                 status, msg_data = self._imap.fetch(uid_str, "(RFC822)")
                 if status != "OK":
                     continue
@@ -213,18 +225,35 @@ class GmailClient:
                 parsed = email.message_from_bytes(raw_email)
                 uid_int = int(uid_str)
                 msg_dict = self._msg_to_gmail_dict(uid_int, parsed)
-                msg_dict["_has_more"] = total_remaining > max_results
-                msg_dict["_total_remaining"] = total_remaining
+
+                # Filtrer par adresse de réception (Delivered-To)
+                headers = self.parse_headers(msg_dict)
+                delivered_to = headers.get("Delivered-To", "")
+                # Ne garder que les emails dont le Delivered-To correspond à l'alias cible
+                # Format attendu : REDACTED_EMAIL
+                if delivered_to and target_alias and delivered_to != target_alias:
+                    if "+" in local_part and target_prefix:
+                        # Vérifier que le Delivered-To contient le même préfixe d'alias
+                        if target_prefix not in delivered_to:
+                            logger.debug(f"Filtré (mauvais alias): {delivered_to}")
+                            continue
+
                 messages.append(msg_dict)
 
-            # Ajouter les métadonnées de pagination au premier élément
+            logger.info(f"IMAP: {len(messages)}/{len(uids)} messages après filtre alias")
+
+            # Métadonnées de pagination
             if messages:
+                has_more = total_found > max_results
+                oldest_uid = int(uids[0]) if uids else 0
+                newest_uid = int(uids[-1]) if uids else 0
                 messages[0]["_batch_info"] = {
-                    "batch_size": len(batch),
-                    "total_remaining": total_remaining,
-                    "has_more": total_remaining > max_results,
-                    "oldest_uid": int(batch[0]),
-                    "newest_uid": int(batch[-1]) if batch else None,
+                    "batch_size": len(uids),
+                    "total_found": total_found,
+                    "has_more": has_more,
+                    "oldest_uid": oldest_uid,
+                    "newest_uid": newest_uid,
+                    "search_criteria": search_criteria,
                 }
 
             return messages
