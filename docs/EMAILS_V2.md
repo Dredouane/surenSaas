@@ -166,6 +166,88 @@ Validation humaine.
 }
 ```
 
+## Interface de Validation (Frontend / Telegram)
+
+### Données à afficher
+
+Chaque analyse en attente (`PENDING_VALIDATION`) expose ces informations :
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `thread.subject` | string | Sujet du fil de discussion |
+| `thread.participants` | string[] | Expéditeurs du thread |
+| `thread.email_count` | int | Nombre d'emails dans le thread |
+| `thread.last_email_at` | datetime | Date du dernier email |
+| `analysis.summary` | string | Résumé IA de l'analyse |
+| `analysis.detected_urgency` | string | `LOW`, `MEDIUM` ou `HIGH` |
+| `analysis.analyzed_at` | datetime | Date de l'analyse |
+| `analysis.proposed_actions` | array | Liste des actions proposées |
+
+### Endpoint pour récupérer les validations en attente
+
+```http
+GET /api/v1/{org}/email-threads?status=PENDING_VALIDATION
+```
+
+Retourne la liste des threads avec leur analyse via la jointure avec `email_ai_analysis`.
+
+### Structure des actions proposées
+
+Types possibles actuellement observés dans la production :
+
+| Type | Payload | Exemple réel |
+|------|---------|-------------|
+| `CREATE_TACHE` | `{"titre", "priorite", "description", "date_echeance"}` | Clôturer levée de réserve pignon 169 |
+| `CREATE_OPERATION` | `{"description", "type", "date_echeance"}` | Réception façade cour lift |
+| `IGNORE` | `{}` | Aucune action nécessaire |
+
+Chaque action a un champ `confidence` (0.0 à 1.0) indiquant la certitude d'Hermès.
+
+### Recommandations design pour page "Validations Hermès"
+
+```
+┌──────────────────────────────────────────────────────┐
+│ 🔔 Validations en attente (2)                         │
+│                                                      │
+│ ┌─────────────────────────────────────────────────┐  │
+│ │ 🔴 HAUTE   TR: CR RC 10/03 - P14 Porte d'Orl. │  │
+│ │ 14 emails · Enzo CAROFF, REDACTED_CONTACT      │  │
+│ │                                                 │  │
+│ │ Compte-rendu de coordination listant des        │  │
+│ │ retards et réceptions à venir.                  │  │
+│ │                                                 │  │
+│ │ Actions proposées (10) :                        │  │
+│ │ ☑ Clôturer levée de réserve pignon 169      90% │  │
+│ │ ☑ Clôturer levée de réserve façade 134 rue  90% │  │
+│ │ ☑ Préparer façade 134/133 côté cour          85% │  │
+│ │ ☐ Rappel : ne pas surcharger zones           80% │  │
+│ │ ...                                              │  │
+│ │                                                 │  │
+│ │           [❌ Rejeter]    [✅ Valider (3/10)]     │  │
+│ └─────────────────────────────────────────────────┘  │
+│                                                      │
+│ ┌─────────────────────────────────────────────────┐  │
+│ │ 🟡 MOYENNE  TR: CR RC 03/03 - P14 Porte d'Or.   │  │
+│ │ 13 emails · Enzo CAROFF, REDACTED_CONTACT       │  │
+│ │                                                 │  │
+│ │ Aucune action spécifique détectée.              │  │
+│ │                                                 │  │
+│ │           [❌ Rejeter]    [✅ Archiver]          │  │
+│ └─────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────┘
+```
+
+**Comportement attendu :**
+- **"Valider"** → `POST /analysis/{id}/execute` avec `action: "accept"` → exécute les actions sélectionnées → thread passe en `PROCESSED`
+- **"Rejeter"** → `POST /analysis/{id}/execute` avec `action: "reject"` + `rejection_reason` → thread passe en `REJECTED`
+- Les actions créées (tâches, opérations) doivent être visibles dans les pages existantes du chantier concerné
+
+### État actuel de la production (juin 2026)
+
+- **36 threads** en `READY_FOR_AI` — analysés par Hermès au prochain cycle
+- **2 threads** en `PENDING_VALIDATION` — en attente de validation humaine
+- **0 threads** validés ou rejetés — aucune interface de validation n'est encore déployée
+
 ## Règles métier
 
 1. **Backend = plomberie uniquement** : stockage, vectorisation, endpoints. Pas de décision LLM.
