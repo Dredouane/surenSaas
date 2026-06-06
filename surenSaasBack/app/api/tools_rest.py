@@ -778,3 +778,51 @@ async def get_chantier_budget(
             "marge_brute": marge_brute,
         },
     }
+
+
+# ============================================================================
+# Endpoint de re-vectorisation manuelle
+# ============================================================================
+
+
+class VectorizePendingRequest(BaseModel):
+    org_id: str
+    limit: int = 50
+
+
+@router.post("/emails/vectorize-pending", dependencies=[Depends(verify_tools_api_key)])
+async def vectorize_pending_emails(req: VectorizePendingRequest):
+    """Vectorise les emails en statut 'pending' pour une organisation.
+
+    Utile après un sync historique ou une remise à zéro des statuts.
+    Déclenche le ChantierRouter et le passage en READY_FOR_AI.
+    """
+    import asyncio
+    sb = get_supabase()
+    from app.services.emails.embedding_service import embedding_service
+
+    # Récupérer les emails en pending
+    result = sb.table("emails")\
+        .select("id, subject")\
+        .eq("org_id", req.org_id)\
+        .eq("processing_status", "pending")\
+        .limit(req.limit)\
+        .execute()
+
+    email_ids = [e["id"] for e in (result.data or [])]
+    if not email_ids:
+        return {"success": True, "vectorized": 0, "message": "Aucun email en attente"}
+
+    # Lancer la vectorisation en arrière-plan pour chaque email
+    task_count = 0
+    for eid in email_ids:
+        asyncio.create_task(embedding_service.vectorize_email_async(eid))
+        task_count += 1
+
+    logger.info(f"[VectorizePending] {task_count} tâche(s) de vectorisation lancée(s)")
+
+    return {
+        "success": True,
+        "vectorized": task_count,
+        "message": f"{task_count} email(s) en cours de vectorisation",
+    }
