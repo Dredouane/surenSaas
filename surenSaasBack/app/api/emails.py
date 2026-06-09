@@ -10,6 +10,7 @@ Routes:
 
 import os
 import json
+import asyncio
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
@@ -129,7 +130,6 @@ async def sync_emails(
         
         # Lancer la synchro en arrière-plan, ne pas attendre
         async def _run_sync_and_log():
-            import asyncio
             try:
                 result = await sync_service.sync_account(
                     account_id=request.account_id,
