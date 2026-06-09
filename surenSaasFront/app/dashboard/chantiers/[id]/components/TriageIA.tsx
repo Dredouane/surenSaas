@@ -19,6 +19,7 @@ interface ProposedAction {
   type: string;
   payload: Record<string, unknown>;
   confidence?: number;
+  titre?: string;
 }
 
 interface Analysis {
@@ -219,7 +220,7 @@ export default function TriageIA({ chantierId, orgId }: Props) {
                       <li key={idx} className="flex items-center gap-2 text-muted-foreground">
                         <span className="h-1 w-1 rounded-full bg-muted-foreground" />
                         {actionLabels[action.type] || action.type}
-                        {action.payload?.titre && ` — ${action.payload.titre}`}
+                        {(action.payload?.titre as string) && <span>{` — ${String(action.payload.titre)}`}</span>}
                         {action.confidence && (
                           <span className="text-[10px] opacity-60">
                             ({Math.round(action.confidence * 100)}%)
