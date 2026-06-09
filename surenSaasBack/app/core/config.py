@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # Clé API pour les endpoints REST tools (Hermes / autres agents)
     tools_api_key: str = ""
 
+    # Hermès Agent API (OpenAI-compatible sur VPS)
+    hermes_api_url: str = "http://REDACTED:8642/v1"
+    hermes_api_key: str = ""
+
     # Cloudflare R2 Configuration (S3-Compatible)
     # Mêmes credentials pour test et prod (isolation par folder)
     r2_endpoint_url: str = ""       # SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT
@@ -189,6 +193,12 @@ class Settings(BaseSettings):
             ("deepseek_api_key", [
                 "DEEPSEEK_API_KEY",
                 "SUREN_DEEP_SEEK_API_KEY",
+            ]),
+            ("hermes_api_url", [
+                "HERMES_API_URL",
+            ]),
+            ("hermes_api_key", [
+                "HERMES_API_KEY",
             ]),
         ]
         

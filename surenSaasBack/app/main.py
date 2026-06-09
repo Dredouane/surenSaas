@@ -20,6 +20,7 @@ from app.api.admin import router as admin_router
 from app.api.telegram_core import router as telegram_webhooks_router
 from app.api.emails import router as emails_router, hermes_router
 from app.api.hermes_kb import router as hermes_kb_router
+from app.api.hermes_routes import router as hermes_proxy_router
 from app.api.email_threads import router as email_threads_router
 from app.api.dossiers import router as dossiers_router
 from app.api.ao import router as ao_router
@@ -229,6 +230,7 @@ app.include_router(audit_router, prefix="/api/v1")
 app.include_router(tools_rest_router)
 app.include_router(hermes_router)
 app.include_router(hermes_kb_router)
+app.include_router(hermes_proxy_router)
 
 @app.on_event("startup")
 async def startup_event():

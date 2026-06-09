@@ -216,6 +216,14 @@ if [ "$FULL_MODE" = true ]; then
         create_or_update_secret "tools-api-key" "$TOOLS_API_KEY"
     fi
     
+    # Hermès Agent API (VPS)
+    if [ "$FULL_MODE" = true ]; then
+        HERMES_API_KEY="${HERMES_AREV_TRAVAUX_API_KEY}"
+        create_or_update_secret "hermes-api-url" "${HERMES_API_URL:-http://REDACTED:8642/v1}"
+        create_or_update_secret "hermes-api-key" "$HERMES_API_KEY"
+        echo -e "${GREEN}✅ Secrets Hermès API créés${NC}"
+    fi
+    
     # Cloudflare R2
     if [ "$HAS_R2" = true ]; then
         create_or_update_secret "r2-endpoint-url" "$SUREN_GED_CLOUDFLARE_S3_EU_ENDPOINT"
@@ -289,6 +297,14 @@ fi
 
 if [ "$HAS_R2" = true ]; then
     SECRETS="$SECRETS,R2_ENDPOINT_URL=r2-endpoint-url:latest,R2_ACCESS_KEY_ID=r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=r2-secret-access-key:latest,R2_TOKEN=r2-token:latest,R2_BUCKET_NAME=r2-bucket-name:latest"
+fi
+# Hermès API (conditionnel - seulement si les secrets existent)
+HAS_HERMES_API=false
+if gcloud secrets describe "hermes-api-key" --project="$GCP_PROJECT_ID" > /dev/null 2>&1; then
+    HAS_HERMES_API=true
+fi
+if [ "$HAS_HERMES_API" = true ]; then
+    SECRETS="$SECRETS,HERMES_API_URL=hermes-api-url:latest,HERMES_API_KEY=hermes-api-key:latest"
 fi
 
 gcloud run deploy $TEST_BACK_SERVICE_NAME \
