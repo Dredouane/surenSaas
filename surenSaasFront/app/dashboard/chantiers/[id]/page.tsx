@@ -29,6 +29,8 @@ import {
   Bell,
   ClipboardCheck,
   Target,
+  Brain,
+  MessageSquare,
 } from 'lucide-react';
 import SituationsTable from './components/SituationsTable';
 import DepensesTable from './components/DepensesTable';
@@ -39,6 +41,8 @@ import TachesList from './components/TachesList';
 import PointagesList from './components/PointagesList';
 import NotificationsPanel from './components/NotificationsPanel';
 import ValidationProduction from './components/ValidationProduction';
+import TriageIA from './components/TriageIA';
+import SideChat from './components/SideChat';
 import type { ChantierWithDetails, Situation, Depense, Operation, Reception, Tache, Pointage, Notification } from '@/types/chantier';
 
 const DEFAULT_ORG_ID = process.env.NEXT_PUBLIC_ORG_ID;
@@ -394,6 +398,20 @@ export default function ChantierDetailPage() {
             <History className="h-4 w-4" />
             <span>Audit</span>
           </button>
+          <button
+            onClick={() => setActiveTab('triage')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-all ${activeTab === 'triage' ? 'bg-white border border-b-0 border-gray-200 text-blue-600 font-medium' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+          >
+            <Brain className="h-4 w-4" />
+            <span>Triage IA</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('assistant')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-all ${activeTab === 'assistant' ? 'bg-white border border-b-0 border-gray-200 text-blue-600 font-medium' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+          >
+            <MessageSquare className="h-4 w-4" />
+            <span>Assistant</span>
+          </button>
         </div>
       </div>
 
@@ -597,6 +615,17 @@ export default function ChantierDetailPage() {
             </CardContent>
           </Card>
         )}
+        
+        {activeTab === 'triage' && (
+          <TriageIA chantierId={chantierId} orgId={orgId} />
+        )}
+        
+        {activeTab === 'assistant' && (
+          <div className="p-4 text-center text-muted-foreground">
+            <p className="mb-4">L'assistant Hermès est disponible via le bouton flottant en bas à droite.</p>
+            <SideChat chantierId={chantierId} orgId={orgId} />
+          </div>
+        )}
       </div>
 
       {/* Note de bas de page */}
@@ -605,6 +634,11 @@ export default function ChantierDetailPage() {
           <strong>Note:</strong> Données chargées depuis l'API.
         </p>
       </div>
+
+      {/* Side Chat flottant — présent sur toutes les pages sauf l'onglet assistant */}
+      {activeTab !== 'assistant' && (
+        <SideChat chantierId={chantierId} orgId={orgId} />
+      )}
     </div>
   );
 }
