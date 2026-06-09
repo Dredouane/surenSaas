@@ -80,7 +80,7 @@ class SyncService:
             gmail_client = create_gmail_client(refresh_token)
             await gmail_client.connect()
             
-            # 3. Récupérer les messages (lot de max_emails)
+            # 3. Récupérer les messages (lot de max_emails, scan des derniers jours)
             if sync_mode == "historical" and date_range:
                 from datetime import datetime as dt
                 start = dt.strptime(date_range["start_date"], "%Y-%m-%d")
@@ -90,6 +90,7 @@ class SyncService:
                 messages = await gmail_client.list_messages(
                     since_uid=last_sync_uid if last_sync_uid > 0 else None,
                     max_results=max_emails,
+                    max_days=1,
                 )
             
             # Extraire les métadonnées de pagination
@@ -204,6 +205,16 @@ class SyncService:
         existing = await email_db.get_email_by_message_id(message_id)
         
         if existing:
+            # Si l'email existe et est en erreur, on le retraite (repasse en pending)
+            if existing.get("processing_status") == "error":
+                logger.info(f"Message {message_id} en error, re-traitement...")
+                # Repasser en pending pour forcer la re-vectorisation
+                await email_db.update_email_status(existing["id"], "pending")
+                # Lancer la vectorisation directement
+                from app.services.emails.embedding_service import embedding_service
+                asyncio.create_task(embedding_service.vectorize_email_async(existing["id"]))
+                return {"stored": True, "email_id": existing["id"], "retried": True}
+            
             logger.info(f"Message {message_id} already exists, skipping")
             return {"stored": True, "email_id": existing["id"]}
         

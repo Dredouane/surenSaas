@@ -2,6 +2,8 @@
 Service de vectorisation avec Vertex AI.
 
 Génère les embeddings avec text-embedding-004 et stratégie Matryoshka.
+Rate limiting : 200ms entre chaque appel (max 5 req/s).
+Backoff exponentiel : 5s, 10s, 20s sur erreur 429.
 """
 
 import os
@@ -24,6 +26,13 @@ except ImportError:
     VERTEX_AI_AVAILABLE = False
     logger.warning("Vertex AI not available, embeddings will fail")
 
+# Rate limiting : délai minimum entre chaque appel Vertex AI
+VERTEX_RATE_LIMIT_DELAY = float(os.getenv("VERTEX_RATE_LIMIT_DELAY", "0.2"))
+
+# Backoff : nombre max de tentatives et délais
+VERTEX_MAX_RETRIES = int(os.getenv("VERTEX_MAX_RETRIES", "4"))
+VERTEX_RETRY_DELAYS = [5, 10, 20]  # secondes
+
 
 class EmbeddingService:
     """Service de génération d'embeddings avec Vertex AI."""
@@ -33,6 +42,7 @@ class EmbeddingService:
         self.chunk_size = int(os.getenv("EMBEDDING_CHUNK_SIZE", 500))
         self.chunk_overlap = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", 50))
         self.embedding_size = int(os.getenv("EMBEDDING_SIZE", 768))
+        self._last_call_time = 0.0  # Pour le rate limiting
         
         # Initialisation lazy du modèle
         self._initialized = False
@@ -66,31 +76,35 @@ class EmbeddingService:
         Returns:
             Liste de chunks
         """
-        # Tokenization simple (approximation par mots)
-        # Pour une tokenization plus précise, utiliser tiktoken ou autre
         words = text.split()
         
         chunks = []
         start = 0
         
         while start < len(words):
-            # Extraire chunk
             end = min(start + self.chunk_size, len(words))
             chunk = " ".join(words[start:end])
             chunks.append(chunk)
             
-            # Avancer avec overlap
             start += self.chunk_size - self.chunk_overlap
             
-            # Éviter les chunks vides à la fin
             if start >= len(words):
                 break
         
         return chunks
     
+    async def _rate_limit(self):
+        """Respecte le rate limiting : attend si nécessaire avant le prochain appel."""
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self._last_call_time
+        if elapsed < VERTEX_RATE_LIMIT_DELAY:
+            wait = VERTEX_RATE_LIMIT_DELAY - elapsed
+            await asyncio.sleep(wait)
+        self._last_call_time = asyncio.get_event_loop().time()
+    
     async def generate_embedding(self, text: str) -> List[float]:
         """
-        Génère l'embedding pour un texte.
+        Génère l'embedding pour un texte avec rate limiting et retry backoff.
         
         Args:
             text: Texte à vectoriser
@@ -103,20 +117,47 @@ class EmbeddingService:
         
         self._init_vertex_ai()
         
-        # Vertex AI n'est pas async nativement, on wrap dans un thread
-        loop = asyncio.get_event_loop()
+        last_error = None
+        for attempt in range(VERTEX_MAX_RETRIES):
+            try:
+                # Rate limiting avant chaque appel
+                await self._rate_limit()
+                
+                # Vertex AI n'est pas async nativement, on wrap dans un thread
+                loop = asyncio.get_event_loop()
+                
+                def _embed():
+                    embeddings = self.model.get_embeddings([text])
+                    return embeddings[0].values
+                
+                vector = await loop.run_in_executor(None, _embed)
+                
+                # Matryoshka slicing
+                if self.embedding_size < len(vector):
+                    vector = vector[:self.embedding_size]
+                
+                return vector
+                
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                
+                # Retry uniquement sur 429 (RESOURCE_EXHAUSTED)
+                if "429" not in err_str and "RESOURCE_EXHAUSTED" not in err_str:
+                    raise  # Autre erreur, on abandonne immédiatement
+                
+                if attempt < len(VERTEX_RETRY_DELAYS):
+                    wait = VERTEX_RETRY_DELAYS[attempt]
+                    logger.warning(
+                        f"Vertex AI 429 (tentative {attempt+1}/{VERTEX_MAX_RETRIES}), "
+                        f"retry dans {wait}s..."
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"Vertex AI 429: toutes les tentatives épuisées")
+                    raise
         
-        def _embed():
-            embeddings = self.model.get_embeddings([text])
-            return embeddings[0].values
-        
-        vector = await loop.run_in_executor(None, _embed)
-        
-        # Matryoshka slicing (si on veut réduire, mais 768 est déjà optimal)
-        if self.embedding_size < len(vector):
-            vector = vector[:self.embedding_size]
-        
-        return vector
+        raise last_error  # ne devrait pas arriver
     
     async def vectorize_email_async(self, email_id: str):
         """

@@ -118,11 +118,22 @@ Documentation centrale du nouveau flux d'ingestion et d'analyse des emails.
 
 ### Gestion des quotas Vertex AI (429)
 
-Si Vertex AI retourne `429 RESOURCE_EXHAUSTED` :
-- L'email passe en `processing_status = 'error'`
-- Il **n'est pas retenté automatiquement** au prochain sync (car déjà en base)
-- Solution : lancer manuellement `POST /api/v1/tools/emails/vectorize-pending`
-- Future amélioration : retry avec backoff exponentiel intégré
+**Mécanismes de résilience implémentés (juin 2026) :**
+
+| Mécanisme | Description | Délais |
+|-----------|-------------|--------|
+| **Rate limiting** | 200ms entre chaque appel Vertex AI (max 5 req/s) | 0.2s |
+| **Backoff exponentiel** | Retry automatique sur 429, 3 tentatives max | 5s, 10s, 20s |
+| **Reprise des erreurs** | Au prochain `/sync`, les emails en `error` sont retentés | Automatique |
+
+Ces mécanismes évitent le 429 tout en garantissant qu'aucun email ne reste bloqué en `error` indéfiniment.
+
+### Configuration via variables d'environnement
+
+```bash
+VERTEX_RATE_LIMIT_DELAY=0.2       # Délai min entre appels (secondes)
+VERTEX_MAX_RETRIES=4              # Nombre max de tentatives
+```
 
 ## Tables
 
