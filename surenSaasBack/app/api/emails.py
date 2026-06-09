@@ -1116,6 +1116,90 @@ async def get_thread_with_analysis(
     }
 
 
+@hermes_router.get("/threads")
+async def list_threads_analyses(
+    org_id: str = Query(...),
+    chantier_id: str = Query(None),
+    status: str = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
+    """Liste paginée des threads avec analyses, filtrable par chantier et/ou statut.
+
+    Accessible via X-API-Key pour le frontend SaaS et Hermès.
+    """
+    from app.api.tools_rest import verify_tools_api_key
+    verify_tools_api_key(x_api_key)
+
+    sb = get_supabase()
+
+    query = sb.table("email_threads").select(
+        "id, subject, status, detected_chantier_id, "
+        "email_count, participant_emails, first_email_at, last_email_at, "
+        "hermes_confidence",
+        count="exact"
+    ).eq("org_id", org_id)
+
+    if chantier_id:
+        query = query.eq("detected_chantier_id", chantier_id)
+    if status:
+        query = query.eq("status", status)
+
+    threads_resp = query.order("last_email_at", desc=True)\
+        .range(offset, offset + limit - 1).execute()
+
+    threads = threads_resp.data or []
+    total = threads_resp.count if hasattr(threads_resp, 'count') else 0
+
+    result = []
+    for t in threads:
+        chantier = None
+        if t.get("detected_chantier_id"):
+            c_resp = sb.table("chantiers").select("id, nom, ref")\
+                .eq("id", t["detected_chantier_id"]).maybe_single().execute()
+            if c_resp.data:
+                chantier = c_resp.data
+
+        analysis_resp = sb.table("email_ai_analysis").select(
+            "id, summary, detected_urgency, analyzed_at, proposed_actions"
+        ).eq("email_thread_id", t["id"])\
+         .order("analyzed_at", desc=True).limit(1).execute()
+
+        analysis_data = None
+        if analysis_resp.data:
+            a = analysis_resp.data[0]
+            analysis_data = {
+                "id": a["id"],
+                "summary": a.get("summary"),
+                "detected_urgency": a.get("detected_urgency"),
+                "proposed_actions": a.get("proposed_actions", []),
+                "analyzed_at": a.get("analyzed_at"),
+            }
+
+        result.append({
+            "thread_uuid": t["id"],
+            "subject": t.get("subject"),
+            "status": t.get("status"),
+            "chantier_id": t.get("detected_chantier_id"),
+            "chantier_nom": chantier.get("nom") if chantier else None,
+            "chantier_ref": chantier.get("ref") if chantier else None,
+            "email_count": t.get("email_count"),
+            "participants": t.get("participant_emails", []),
+            "last_email_at": t.get("last_email_at"),
+            "analysis": analysis_data,
+        })
+
+    return {
+        "success": True,
+        "count": len(result),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "data": result,
+    }
+
+
 @hermes_router.get("/emails/threads/{thread_uuid}/incremental")
 async def get_thread_incremental(
     thread_uuid: str,

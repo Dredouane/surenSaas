@@ -57,7 +57,7 @@ export default function TriageIA({ chantierId, orgId }: Props) {
     try {
       setLoading(true);
       const response = await fetch(
-        `/api/v1/emails?org_id=${orgId}&chantier_id=${chantierId}&status=PENDING_VALIDATION&limit=50`,
+        `/api/v1/threads?org_id=${orgId}&chantier_id=${chantierId}&status=PENDING_VALIDATION&limit=50`,
         { credentials: 'include', headers: { 'Content-Type': 'application/json' } }
       );
       if (!response.ok) throw new Error('Erreur de chargement');
