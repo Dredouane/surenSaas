@@ -81,6 +81,49 @@ Documentation centrale du nouveau flux d'ingestion et d'analyse des emails.
      └──────────┘ └──────────┘
 ```
 
+## Pipeline de Traitement des Emails
+
+### Schéma de Principe (Déduplication + Appels Vertex AI)
+
+```
+[ GMAIL INTERNE CLIENT ]
+         │ (Forward manuel ou règle de transfert)
+         ▼
+[ GMAIL ALIASÉ AREV ] ➔ (Relevé toutes les X minutes via IMAP)
+         │
+         ▼
+[ ÉTAPE 1 : Déduplication Globale ]
+   ├── Si `gmail_message_id` existe déjà en DB ➔ 🛑 SKIP (Rien n'est fait)
+   └── Si nouveau `gmail_message_id` ➔ 🟢 CONTINUE
+         │
+         ▼
+[ ÉTAPE 2 : Traitement Chirurgical de l'E-mail ]
+   ├── CAS A : E-mail simple ➔ [Nettoyage] ➔ 🧠 1 Call Vertex AI (Corps) ➔ Stockage
+   │
+   └── CAS B : E-mail avec fichier `.eml` attaché (Le piège des transferts)
+               ├── Le parser extrait la chaîne (ex: 14 sous-emails historiques)
+               └── Pour CHAQUE sous-email :
+                     ├── Vérification dédup hash / sous-id
+                     └── Si nouveau : 🧠 1 Call Vertex AI distinct
+```
+
+### Appels Vertex AI par type d'email
+
+| Type d'email | Appels Vertex AI | Détail |
+|-------------|-----------------|--------|
+| Email simple | **1** | 1 embedding du corps texte |
+| Email avec PJ (PDF) | **3** | 1 embedding corps + 1 OCR Gemini + 1 embedding OCR |
+| Chaîne `.eml` (14 sous-emails) | **14** | 1 embedding par sous-email (si tous nouveaux) |
+| Email déjà en base | **0** | Skip total (message_id ou hash connu) |
+
+### Gestion des quotas Vertex AI (429)
+
+Si Vertex AI retourne `429 RESOURCE_EXHAUSTED` :
+- L'email passe en `processing_status = 'error'`
+- Il **n'est pas retenté automatiquement** au prochain sync (car déjà en base)
+- Solution : lancer manuellement `POST /api/v1/tools/emails/vectorize-pending`
+- Future amélioration : retry avec backoff exponentiel intégré
+
 ## Tables
 
 ### `email_threads` — Statut étendu
