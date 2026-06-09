@@ -129,6 +129,7 @@ async def sync_emails(
         
         # Lancer la synchro en arrière-plan, ne pas attendre
         async def _run_sync_and_log():
+            import asyncio
             try:
                 result = await sync_service.sync_account(
                     account_id=request.account_id,

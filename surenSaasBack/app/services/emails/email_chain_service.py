@@ -107,6 +107,18 @@ class EmailChainService:
                 logger.warning(f"⚠️ Erreur mise à jour thread: {e}", exc_info=True)
 
         logger.info(f"✅ Chaîne traitée: {len(email_ids)}/{len(chain_emails)} emails stockés")
+        
+        # Nettoyer le fichier .eml temporaire
+        if hasattr(self, '_tmp_eml_path') and self._tmp_eml_path:
+            try:
+                import os
+                if os.path.exists(self._tmp_eml_path):
+                    os.remove(self._tmp_eml_path)
+                    logger.debug(f"🧹 .eml supprimé: {self._tmp_eml_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur nettoyage .eml: {e}")
+            self._tmp_eml_path = None
+        
         return {
             "stored": len(email_ids) > 0,
             "email_ids": email_ids,
@@ -124,11 +136,14 @@ class EmailChainService:
 
             logger.info(f"📄 .eml téléchargé: {len(eml_bytes)} bytes")
 
-            # Sauvegarder dans /tmp pour debug
+            # Sauvegarder dans /tmp pour debug (supprimé après parsing)
             tmp_path = f"/tmp/{message_id}.eml"
             with open(tmp_path, "wb") as f:
                 f.write(eml_bytes)
             logger.debug(f"💾 .eml sauvegardé: {tmp_path}")
+            
+            # Nettoyer le fichier temporaire après usage
+            self._tmp_eml_path = tmp_path
 
             return eml_bytes
 
