@@ -242,9 +242,24 @@ class SyncService:
         if "TR:" in raw_subject.upper():
             logger.info(f"🔧 Sujet contient 'TR:' (Transmis)")
         
-        # Si c'est une chaîne, utiliser le parsing .eml
+        # Si c'est une chaîne, vérifier si le thread est déjà connu avant de télécharger
         if is_chain:
-            logger.info(f"🔗 Utilisation du parsing .eml pour la chaîne {message_id}")
+            gmail_thread_id = message.get("threadId")
+            # Fast-skip : si le thread existe déjà avec des emails, ignorer le téléchargement
+            if gmail_thread_id:
+                try:
+                    from app.services.email_database_service import email_db as _edb
+                    existing_emails = await _edb.get_emails_by_thread(gmail_thread_id, str(routing.org_id))
+                    if existing_emails and len(existing_emails) > 0:
+                        logger.info(
+                            f"⏩ Thread {gmail_thread_id} déjà connu "
+                            f"({len(existing_emails)} email(s)), SKIP téléchargement .eml"
+                        )
+                        return {"stored": True, "email_id": existing_emails[0]["id"], "fast_skip": True}
+                except Exception as skip_err:
+                    logger.warning(f"⚠️ Fast-skip check failed: {skip_err}")
+
+            logger.info(f"🔗 Téléchargement .eml pour la chaîne {message_id}")
             from app.services.emails.email_chain_service import email_chain_service
 
             return await email_chain_service.process_chain(

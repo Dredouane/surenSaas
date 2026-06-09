@@ -119,28 +119,39 @@ async def sync_emails(
     current_user: dict = Depends(require_capability("emails:sync"))
 ):
     """
-    Déclenche la synchronisation des emails.
+    Déclenche la synchronisation des emails (Fire & Forget).
     
-    Lance le polling synchrone Gmail jusqu'à la vectorisation complète.
-    Traitement incrémental (depuis last_uid) ou historique par période.
+    Retourne immédiatement un 200 OK. La synchro lourde (téléchargement
+    .eml, parsing, vectorisation) se fait en arrière-plan.
     """
     try:
-        logger.info(f"Starting email sync for account {request.account_id}")
+        logger.info(f"Starting email sync (fire & forget) for account {request.account_id}")
         
-        result = await sync_service.sync_account(
-            account_id=request.account_id,
-            sync_mode=request.sync_mode,
-            date_range=request.date_range,
-            max_emails=request.max_emails
-        )
+        # Lancer la synchro en arrière-plan, ne pas attendre
+        async def _run_sync_and_log():
+            try:
+                result = await sync_service.sync_account(
+                    account_id=request.account_id,
+                    sync_mode=request.sync_mode,
+                    date_range=request.date_range,
+                    max_emails=request.max_emails
+                )
+                logger.info(f"Email sync background completed: {result.get('synced', 0)} synced, "
+                           f"{result.get('ignored', 0)} ignored, "
+                           f"{result.get('duration_seconds', 0)}s")
+            except Exception as e:
+                logger.error(f"Email sync background failed: {e}")
         
-        result["completed_at"] = datetime.utcnow()
+        asyncio.create_task(_run_sync_and_log())
         
-        logger.info(f"Email sync completed: {result}")
-        return result
+        return {
+            "success": True,
+            "message": "Sync lancé en arrière-plan",
+            "account_id": request.account_id,
+        }
         
     except Exception as e:
-        logger.error(f"Email sync failed: {e}")
+        logger.error(f"Email sync trigger failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
