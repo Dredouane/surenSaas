@@ -19,7 +19,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MODEL = "Arev_Chantiers_Assist"
+MODEL = "hermes-agent"
 DEFAULT_TIMEOUT = 30.0
 MAX_RETRIES = 2
 RETRY_DELAY = 2.0

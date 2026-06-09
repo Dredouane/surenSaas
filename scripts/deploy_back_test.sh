@@ -218,8 +218,9 @@ if [ "$FULL_MODE" = true ]; then
     
     # Hermès Agent API (VPS)
     if [ "$FULL_MODE" = true ]; then
+        HERMES_API_URL="${HERMES_API_URL:-http://REDACTED/hermes-api/v1}"
         HERMES_API_KEY="${HERMES_AREV_TRAVAUX_API_KEY}"
-        create_or_update_secret "hermes-api-url" "${HERMES_API_URL:-http://REDACTED:8642/v1}"
+        create_or_update_secret "hermes-api-url" "$HERMES_API_URL"
         create_or_update_secret "hermes-api-key" "$HERMES_API_KEY"
         echo -e "${GREEN}✅ Secrets Hermès API créés${NC}"
     fi

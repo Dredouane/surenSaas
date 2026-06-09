@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     tools_api_key: str = ""
 
     # Hermès Agent API (OpenAI-compatible sur VPS)
-    hermes_api_url: str = "http://REDACTED:8642/v1"
+    hermes_api_url: str = "http://REDACTED/hermes-api/v1"
     hermes_api_key: str = ""
 
     # Cloudflare R2 Configuration (S3-Compatible)
