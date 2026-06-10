@@ -397,18 +397,40 @@ export default function TriageIA({ chantierId, orgId }: Props) {
                             </div>
 
                             {/* Titre toujours visible */}
-                            <p className="text-sm font-medium">
+                            <p className="text-sm font-medium flex items-center gap-2">
                               {isEditing ? (
                                 <Input
                                   value={edits.titre || ''}
                                   onChange={(e) => setActionEdits(prev => ({
                                     ...prev, [key]: { ...prev[key], titre: e.target.value }
                                   }))}
-                                  className="h-7 text-sm"
+                                  className="h-7 text-sm flex-1"
                                   placeholder="Titre de l'action"
                                 />
                               ) : (
-                                String(action.payload?.titre || action.payload?.description || 'Sans titre')
+                                <>
+                                  <span className="flex-1">
+                                    {String(action.payload?.titre || action.payload?.description || 'Sans titre')}
+                                  </span>
+                                  {/* Badge priorité visible même non déplié */}
+                                  {isPending && action.payload?.priorite && (
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${
+                                      String(action.payload.priorite) === 'haute'
+                                        ? 'bg-red-100 text-red-700'
+                                        : String(action.payload.priorite) === 'basse'
+                                        ? 'bg-gray-100 text-gray-600'
+                                        : 'bg-yellow-100 text-yellow-700'
+                                    }`}>
+                                      {String(action.payload.priorite).toUpperCase()}
+                                    </span>
+                                  )}
+                                  {/* Montant pour dépenses visible non déplié */}
+                                  {action.type === 'CREATE_EXPENSE' && !isEditing && (
+                                    <span className="text-xs font-medium text-green-700 whitespace-nowrap">
+                                      {Number(action.payload?.montant || 0).toFixed(0)} €
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </p>
 
