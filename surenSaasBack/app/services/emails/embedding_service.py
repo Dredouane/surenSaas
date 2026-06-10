@@ -247,7 +247,17 @@ class EmbeddingService:
 
                     if thread_resp.data:
                         thread = thread_resp.data
-                        update_data = {"status": "READY_FOR_AI"}
+                        # Sécurité : ne JAMAIS mettre en PENDING_VALIDATION automatiquement
+                        # Seul Hermès via POST /analysis peut passer ce statut
+                        current_status = thread.get("status")
+                        if current_status == "PENDING_VALIDATION":
+                            logger.warning(
+                                f"⚠️ Thread {gmail_thread_id} en PENDING_VALIDATION sans analyse, "
+                                f"forcé en READY_FOR_AI"
+                            )
+                            update_data = {"status": "READY_FOR_AI"}
+                        else:
+                            update_data = {"status": "READY_FOR_AI"}
 
                         # Si le thread n'a pas encore de chantier, tenter le routage
                         if not thread.get("detected_chantier_id"):
