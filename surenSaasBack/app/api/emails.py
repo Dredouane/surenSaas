@@ -1523,165 +1523,263 @@ async def submit_analysis(
     }
 
 
-class ExecuteAnalysisRequest(BaseModel):
-    action: str = "accept"  # "accept" ou "reject"
-    rejection_reason: str = ""
+class ValidateActionRequest(BaseModel):
+    modifications: Optional[dict] = None
 
 
-@hermes_router.post("/analysis/{analysis_id}/execute")
-async def execute_analysis(
+class RejectActionRequest(BaseModel):
+    reason: str = ""
+
+
+@hermes_router.post("/analysis/{analysis_id}/actions/{action_index}/validate")
+async def validate_action(
     analysis_id: str,
-    body: ExecuteAnalysisRequest,
+    action_index: int,
+    body: ValidateActionRequest,
     org_id: str = Query(...),
     x_api_key: str = Header(None, alias="X-API-Key"),
-    x_user_id: str = Header(None, alias="X-User-Id"),
     request: Request = None,
 ):
-    """Validation humaine d'une analyse Hermès.
+    """Valide et exécute UNE action spécifique d'une analyse Hermès.
 
-    action=accept : exécute proposed_actions (dépenses, tâches, notifications)
-    action=reject : marque le thread comme REJECTED
-
-    Authentification : X-API-Key (Hermès) ou cookie JWT (frontend SaaS).
+    Vérifie que toutes les données requises sont présentes avant d'appeler le CRUD.
+    Persiste les modifications dans l'analyse.
     """
-    # Dual auth
+    from app.api.tools_rest import verify_tools_api_key
     if x_api_key:
-        from app.api.tools_rest import verify_tools_api_key
         verify_tools_api_key(x_api_key)
     elif request:
         from app.api.auth import get_current_user_from_cookie
-        user = get_current_user_from_cookie(request)
-        if user.get("org_id") != org_id:
-            raise HTTPException(status_code=403, detail="Accès non autorisé")
+        get_current_user_from_cookie(request)
     else:
         raise HTTPException(status_code=401, detail="Authentification requise")
 
     sb = get_supabase()
 
-    # Récupérer l'analyse
     analysis_resp = sb.table("email_ai_analysis").select(
-        "id, email_thread_id, proposed_actions, summary"
+        "id, email_thread_id, proposed_actions"
     ).eq("id", analysis_id).maybe_single().execute()
-
     if not analysis_resp.data:
         raise HTTPException(status_code=404, detail="Analyse non trouvée")
 
-    analysis = analysis_resp.data
-    thread_id = analysis["email_thread_id"]
+    proposed_actions = analysis_resp.data.get("proposed_actions", [])
+    if not isinstance(proposed_actions, list) or action_index >= len(proposed_actions):
+        raise HTTPException(status_code=400, detail="Index d'action invalide")
 
-    # Vérifier que le thread est bien en PENDING_VALIDATION
-    thread_resp = sb.table("email_threads").select("id, status, detected_chantier_id, org_id")\
+    action = dict(proposed_actions[action_index])
+    action_type = action.get("type", "")
+    payload = action.get("payload", {})
+    if not isinstance(payload, dict):
+        payload = {}
+
+    # Appliquer les modifications utilisateur
+    mods = body.modifications or {}
+    for key, value in mods.items():
+        if key in ("titre", "description", "priorite", "date_echeance", "montant", "fournisseur", "message", "urgence"):
+            payload[key] = value
+
+    # Vérifier les champs requis selon le type d'action
+    missing = []
+    if action_type == "CREATE_TACHE" or action_type == "CREATE_TASK":
+        if not payload.get("titre"):
+            missing.append("titre")
+        action_type = "CREATE_TASK"
+    elif action_type == "CREATE_EXPENSE":
+        if not payload.get("fournisseur"):
+            missing.append("fournisseur")
+        if not payload.get("montant"):
+            missing.append("montant")
+    elif action_type == "CREATE_OPERATION":
+        if not payload.get("description"):
+            missing.append("description")
+    elif action_type == "SEND_NOTIFICATION":
+        if not payload.get("message"):
+            missing.append("message")
+    elif action_type == "IGNORE":
+        pass
+    else:
+        missing.append(f"type_inconnu: {action_type}")
+
+    if missing:
+        return {
+            "success": False,
+            "message": f"Champs requis manquants : {', '.join(missing)}",
+            "missing_fields": missing,
+        }
+
+    # Récupérer le thread pour le chantier_id
+    thread_id = analysis_resp.data["email_thread_id"]
+    thread_resp = sb.table("email_threads").select("id, detected_chantier_id")\
         .eq("id", thread_id).maybe_single().execute()
+    chantier_id = thread_resp.data.get("detected_chantier_id") if thread_resp.data else None
 
-    if not thread_resp.data:
-        raise HTTPException(status_code=404, detail="Thread non trouvé")
+    result = None
+    error_msg = None
 
-    if thread_resp.data.get("status") != "PENDING_VALIDATION":
-        raise HTTPException(status_code=409, detail=f"Statut actuel: {thread_resp.data.get('status')}, attendu: PENDING_VALIDATION")
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
 
-    if body.action == "reject":
-        # Rejet
-        sb.table("email_ai_analysis").update({
-            "validated_at": datetime.utcnow().isoformat(),
-            "validated_by": x_user_id,
-            "rejected_reason": body.rejection_reason,
-        }).eq("id", analysis_id).execute()
+        if action_type == "CREATE_TASK":
+            from app.api.tools_rest import _manage_taches_internal
+            if not chantier_id:
+                raise ValueError("Aucun chantier associé à ce thread")
+            result = await loop.run_in_executor(
+                None,
+                lambda: _manage_taches_internal(
+                    org_id=org_id,
+                    chantier_id=chantier_id,
+                    action="create",
+                    titre=payload.get("titre", ""),
+                    description=payload.get("description", ""),
+                    priorite=payload.get("priorite", "moyenne"),
+                    date_echeance=payload.get("date_echeance"),
+                )
+            )
+            if result and result.get("success"):
+                action["status"] = "executed"
+                action["created_id"] = result["data"].get("id") if result.get("data") else None
+            else:
+                raise Exception(result.get("error", "Création tâche échouée"))
 
+        elif action_type == "CREATE_EXPENSE":
+            from app.agents.tools.depense_tools import _create_depense_internal
+            if not chantier_id:
+                raise ValueError("Aucun chantier associé à ce thread")
+            result = await loop.run_in_executor(
+                None,
+                lambda: _create_depense_internal(
+                    org_id=org_id,
+                    chantier_id=chantier_id,
+                    description=payload.get("description", payload.get("titre", "")),
+                    montant=float(payload.get("montant", 0)),
+                    fournisseur=payload.get("fournisseur", "Email"),
+                    categorie=payload.get("categorie", "autre"),
+                )
+            )
+            if result and result.get("success"):
+                action["status"] = "executed"
+                action["created_id"] = result["data"].get("id") if result.get("data") else None
+            else:
+                raise Exception(result.get("error", "Création dépense échouée"))
+
+        elif action_type == "CREATE_OPERATION":
+            from app.api.tools_rest import _create_operation_internal
+            if not chantier_id:
+                raise ValueError("Aucun chantier associé à ce thread")
+            result = await loop.run_in_executor(
+                None,
+                lambda: _create_operation_internal(
+                    org_id=org_id,
+                    chantier_id=chantier_id,
+                    description=payload.get("description", ""),
+                    op_type=payload.get("type", "autre"),
+                )
+            )
+            if result and result.get("success"):
+                action["status"] = "executed"
+                action["created_id"] = result["data"].get("id") if result.get("data") else None
+            else:
+                raise Exception(result.get("error", "Création opération échouée"))
+
+        elif action_type == "SEND_NOTIFICATION":
+            from app.services.telegram.notification_service import NotificationService
+            notif_service = NotificationService(
+                supabase_client=sb,
+                telegram_token=_get_telegram_token(),
+            )
+            result = await notif_service.notify_admins(
+                org_id=org_id,
+                title=payload.get("titre", "Alerte Hermès"),
+                message=payload.get("message", ""),
+                notification_type=f"hermes_{payload.get('urgence', 'info')}",
+            )
+            action["status"] = "executed"
+            action["created_id"] = result.get("sent", 0)
+
+        elif action_type == "IGNORE":
+            action["status"] = "accepted"
+            result = {"success": True, "message": "Ignoré"}
+
+    except Exception as e:
+        error_msg = str(e)
+        action["status"] = "error"
+        action["error_message"] = error_msg
+        logger.error(f"[Action] Erreur exécution {action_type}: {e}")
+
+    # Persister les modifications dans proposed_actions
+    action["executed_at"] = datetime.utcnow().isoformat()
+    action["modified_payload"] = mods if mods else None
+    proposed_actions[action_index] = action
+    sb.table("email_ai_analysis").update({
+        "proposed_actions": proposed_actions,
+    }).eq("id", analysis_id).execute()
+
+    # Vérifier si toutes les actions sont traitées → passer le thread en PROCESSED
+    all_statuses = [a.get("status", "pending") for a in proposed_actions if isinstance(a, dict)]
+    all_done = all(s in ("executed", "accepted", "rejected", "error") for s in all_statuses)
+    if all_done:
         sb.table("email_threads").update({
-            "status": "REJECTED",
+            "status": "PROCESSED",
             "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", thread_id).execute()
 
-        logger.info(f"[Hermès] Analyse {analysis_id} rejetée: {body.rejection_reason}")
+    return {
+        "success": not error_msg,
+        "message": error_msg or f"Action '{action_type}' exécutée avec succès",
+        "action_status": action.get("status"),
+        "created_id": action.get("created_id"),
+    }
 
-        return {"success": True, "message": "Analyse rejetée"}
 
-    # Acceptation : exécuter les actions
-    proposed_actions = analysis.get("proposed_actions", [])
-    chantier_id = thread_resp.data.get("detected_chantier_id")
-    if not chantier_id:
-        raise HTTPException(status_code=400, detail="Aucun chantier associé à ce thread")
+@hermes_router.post("/analysis/{analysis_id}/actions/{action_index}/reject")
+async def reject_action(
+    analysis_id: str,
+    action_index: int,
+    body: RejectActionRequest,
+    org_id: str = Query(...),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    request: Request = None,
+):
+    """Rejette UNE action spécifique d'une analyse Hermès."""
+    if x_api_key:
+        from app.api.tools_rest import verify_tools_api_key
+        verify_tools_api_key(x_api_key)
+    elif request:
+        from app.api.auth import get_current_user_from_cookie
+        get_current_user_from_cookie(request)
+    else:
+        raise HTTPException(status_code=401, detail="Authentification requise")
 
-    if not isinstance(proposed_actions, list):
-        proposed_actions = []
+    sb = get_supabase()
 
-    results = {"executed": [], "errors": []}
+    analysis_resp = sb.table("email_ai_analysis").select(
+        "id, email_thread_id, proposed_actions"
+    ).eq("id", analysis_id).maybe_single().execute()
+    if not analysis_resp.data:
+        raise HTTPException(status_code=404, detail="Analyse non trouvée")
 
-    for action in proposed_actions:
-        try:
-            action_type = action.get("type")
-            payload = action.get("payload", {})
+    proposed_actions = analysis_resp.data.get("proposed_actions", [])
+    if not isinstance(proposed_actions, list) or action_index >= len(proposed_actions):
+        raise HTTPException(status_code=400, detail="Index d'action invalide")
 
-            if action_type == "CREATE_EXPENSE":
-                from app.agents.tools.depense_tools import _create_depense_internal
-                import asyncio
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: _create_depense_internal(
-                        org_id=org_id,
-                        chantier_id=chantier_id,
-                        description=payload.get("titre") or payload.get("description", ""),
-                        montant=payload.get("montant", 0),
-                        fournisseur=payload.get("fournisseur", "Email"),
-                        categorie=payload.get("categorie", "autre"),
-                    )
-                )
-                results["executed"].append({"type": "expense", "result": result.get("data", {})})
+    action = dict(proposed_actions[action_index])
+    action["status"] = "rejected"
+    action["rejected_reason"] = body.reason
+    action["executed_at"] = datetime.utcnow().isoformat()
+    proposed_actions[action_index] = action
 
-            elif action_type == "CREATE_TASK":
-                from app.api.tools_rest import _manage_taches_internal
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: _manage_taches_internal(
-                        org_id=org_id,
-                        chantier_id=chantier_id,
-                        action="create",
-                        titre=payload.get("titre", "Action depuis email"),
-                        description=payload.get("description", ""),
-                        priorite=payload.get("priorite", "moyenne"),
-                    )
-                )
-                results["executed"].append({"type": "task", "result": result.get("data", {})})
-
-            elif action_type == "SEND_NOTIFICATION":
-                from app.services.telegram.notification_service import NotificationService
-                notif_service = NotificationService(
-                    supabase_client=sb,
-                    telegram_token=_get_telegram_token(),
-                )
-                result = await notif_service.notify_admins(
-                    org_id=org_id,
-                    title=payload.get("titre", "Alerte Hermès"),
-                    message=payload.get("message", ""),
-                    notification_type=f"hermes_{payload.get('urgence', 'info')}",
-                )
-                results["executed"].append({"type": "notification", "result": result})
-
-            else:
-                logger.warning(f"[Hermès] Type d'action inconnu: {action_type}")
-
-        except Exception as e:
-            logger.error(f"[Hermès] Erreur exécution action {action.get('type')}: {e}")
-            results["errors"].append({"type": action.get("type"), "error": str(e)})
-
-    # Marquer comme traité
-    now = datetime.utcnow().isoformat()
     sb.table("email_ai_analysis").update({
-        "validated_at": now,
-        "validated_by": x_user_id,
+        "proposed_actions": proposed_actions,
     }).eq("id", analysis_id).execute()
 
-    sb.table("email_threads").update({
-        "status": "PROCESSED",
-        "updated_at": now,
-    }).eq("id", thread_id).execute()
+    thread_id = analysis_resp.data["email_thread_id"]
+    all_statuses = [a.get("status", "pending") for a in proposed_actions if isinstance(a, dict)]
+    all_done = all(s in ("executed", "accepted", "rejected", "error") for s in all_statuses)
+    if all_done:
+        sb.table("email_threads").update({
+            "status": "PROCESSED",
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("id", thread_id).execute()
 
-    logger.info(f"[Hermès] Analyse {analysis_id} acceptée et exécutée")
-
-    return {
-        "success": True,
-        "message": f"{len(results['executed'])} action(s) exécutée(s), {len(results['errors'])} erreur(s)",
-        "results": results,
-    }
+    return {"success": True, "message": "Action rejetée"}
