@@ -7,7 +7,7 @@ Relie le Frontend SaaS à l'API Hermès (OpenAI-compatible) sur le VPS.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -39,14 +39,24 @@ def _get_hermes_client():
 async def hermes_chat(
     body: ChatRequest,
     x_api_key: str = Header(None, alias="X-API-Key"),
+    request: Request = None,
 ):
     """Proxy de chat intelligent vers Hermès.
 
     Reçoit les messages du Front SaaS, ajoute le contexte (chantier_id,
     user_role), et transmet à l'API Hermès sur le VPS.
+
+    Authentification : X-API-Key (Hermès) ou cookie JWT (frontend SaaS).
     """
-    from app.api.tools_rest import verify_tools_api_key
-    verify_tools_api_key(x_api_key)
+    # Dual auth
+    if x_api_key:
+        from app.api.tools_rest import verify_tools_api_key
+        verify_tools_api_key(x_api_key)
+    elif request:
+        from app.api.auth import get_current_user_from_cookie
+        get_current_user_from_cookie(request)
+    else:
+        raise HTTPException(status_code=401, detail="Authentification requise")
 
     if not body.messages:
         raise HTTPException(status_code=400, detail="messages requis")

@@ -1498,14 +1498,26 @@ async def execute_analysis(
     org_id: str = Query(...),
     x_api_key: str = Header(None, alias="X-API-Key"),
     x_user_id: str = Header(None, alias="X-User-Id"),
+    request: Request = None,
 ):
     """Validation humaine d'une analyse Hermès.
 
     action=accept : exécute proposed_actions (dépenses, tâches, notifications)
     action=reject : marque le thread comme REJECTED
+
+    Authentification : X-API-Key (Hermès) ou cookie JWT (frontend SaaS).
     """
-    from app.api.tools_rest import verify_tools_api_key
-    verify_tools_api_key(x_api_key)
+    # Dual auth
+    if x_api_key:
+        from app.api.tools_rest import verify_tools_api_key
+        verify_tools_api_key(x_api_key)
+    elif request:
+        from app.api.auth import get_current_user_from_cookie
+        user = get_current_user_from_cookie(request)
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Accès non autorisé")
+    else:
+        raise HTTPException(status_code=401, detail="Authentification requise")
 
     sb = get_supabase()
 
