@@ -1186,7 +1186,7 @@ async def list_threads_analyses(
 
         analysis_resp = sb.table("email_ai_analysis").select(
             "id, summary, detected_urgency, analyzed_at, proposed_actions"
-        ).eq("email_thread_id", t["id"])\
+        ).eq("email_thread_id", str(t["id"]))\
          .order("analyzed_at", desc=True).limit(1).execute()
 
         analysis_data = None
