@@ -42,7 +42,13 @@ CREATE TABLE IF NOT EXISTS email_ai_analysis (
 CREATE INDEX IF NOT EXISTS idx_email_ai_analysis_thread ON email_ai_analysis(email_thread_id);
 CREATE INDEX IF NOT EXISTS idx_email_ai_analysis_analyzed ON email_ai_analysis(analyzed_at);
 
--- 4. Migration des statuts existants (email.processing_status → email_threads.status)
+-- 4. Ajout colonne email_id pour analyse par email (évite écrasement par thread_uuid)
+ALTER TABLE email_ai_analysis
+  ADD COLUMN IF NOT EXISTS email_id UUID REFERENCES emails(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_email_ai_analysis_email ON email_ai_analysis(email_id);
+
+-- 5. Migration des statuts existants (email.processing_status → email_threads.status)
 -- Les emails en 'vectorized' deviennent 'READY_FOR_AI' si le chantier est trouvé
 UPDATE email_threads et
 SET status = 'READY_FOR_AI',

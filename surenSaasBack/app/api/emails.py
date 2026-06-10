@@ -1379,6 +1379,7 @@ class HermesAnalysisRequest(BaseModel):
     detected_urgency: str = "MEDIUM"
     proposed_actions: List[dict] = []
     raw_llm_response: str = ""
+    email_id: Optional[str] = None
 
 
 @hermes_router.post("/emails/{thread_id}/analysis")
@@ -1448,19 +1449,55 @@ async def submit_analysis(
     if urgency not in ("LOW", "MEDIUM", "HIGH"):
         urgency = "MEDIUM"
 
-    # Insérer l'analyse
-    analysis_resp = sb.table("email_ai_analysis").insert({
-        "email_thread_id": actual_thread_id,
-        "summary": body.summary,
-        "detected_urgency": urgency,
-        "proposed_actions": [json.loads(a) if isinstance(a, str) else a for a in body.proposed_actions],
-        "raw_llm_response": body.raw_llm_response,
-    }).execute()
+    # Déterminer si thread_id est un email_id (UUID de la table emails)
+    is_email_id = False
+    raw_id = thread_id
+    email_id_check = sb.table("emails").select("id")\
+        .eq("id", thread_id).eq("org_id", org_id).maybe_single().execute()
+    if email_id_check and email_id_check.data:
+        is_email_id = True
 
-    if not analysis_resp.data:
-        raise HTTPException(status_code=500, detail="Échec création analyse")
+    # Vérifier si une analyse existe déjà pour ce couple (email_thread_id, email_id)
+    existing_analysis = None
+    if is_email_id:
+        existing = sb.table("email_ai_analysis").select("id")\
+            .eq("email_thread_id", actual_thread_id)\
+            .eq("email_id", thread_id)\
+            .maybe_single().execute()
+        if existing and existing.data:
+            existing_analysis = existing.data["id"]
 
-    analysis_id = analysis_resp.data[0]["id"]
+    if existing_analysis:
+        # Mettre à jour l'analyse existante au lieu d'en créer une nouvelle
+        analysis_data = {
+            "summary": body.summary,
+            "detected_urgency": urgency,
+            "proposed_actions": [json.loads(a) if isinstance(a, str) else a for a in body.proposed_actions],
+            "raw_llm_response": body.raw_llm_response,
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
+        sb.table("email_ai_analysis").update(analysis_data)\
+            .eq("id", existing_analysis).execute()
+        analysis_id = existing_analysis
+        logger.info(f"[Hermès] Analyse mise à jour: {analysis_id} pour email {thread_id}")
+    else:
+        # Insérer une nouvelle analyse avec email_id si disponible
+        insert_data = {
+            "email_thread_id": actual_thread_id,
+            "summary": body.summary,
+            "detected_urgency": urgency,
+            "proposed_actions": [json.loads(a) if isinstance(a, str) else a for a in body.proposed_actions],
+            "raw_llm_response": body.raw_llm_response,
+        }
+        if is_email_id:
+            insert_data["email_id"] = thread_id  # Stocker l'email_id unique
+
+        analysis_resp = sb.table("email_ai_analysis").insert(insert_data).execute()
+
+        if not analysis_resp.data:
+            raise HTTPException(status_code=500, detail="Échec création analyse")
+        analysis_id = analysis_resp.data[0]["id"]
+        logger.info(f"[Hermès] Analyse créée: {analysis_id} pour email {thread_id} (thread {actual_thread_id})")
 
     # Passer le thread en PENDING_VALIDATION
     sb.table("email_threads").update({
