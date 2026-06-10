@@ -1499,21 +1499,24 @@ async def submit_analysis(
         analysis_id = analysis_resp.data[0]["id"]
         logger.info(f"[Hermès] Analyse créée: {analysis_id} pour email {thread_id} (thread {actual_thread_id})")
 
-    # Passer le thread en PENDING_VALIDATION
-    sb.table("email_threads").update({
-        "status": "PENDING_VALIDATION",
-        "ai_summary": body.summary,
-        "ai_urgency": urgency.lower(),
-        "updated_at": datetime.utcnow().isoformat(),
-    }).eq("id", actual_thread_id).execute()
-
-    logger.info(f"[Hermès] Analyse soumise: {analysis_id} pour thread {actual_thread_id}")
-
-    # Mettre à jour les stats du thread (chantier_id, confiance)
-    if chantier_id and not thread_resp.data:
+    # Sécurité : s'assurer que actual_thread_id est valide avant update
+    if actual_thread_id:
         sb.table("email_threads").update({
-            "detected_chantier_id": chantier_id,
+            "status": "PENDING_VALIDATION",
+            "ai_summary": body.summary,
+            "ai_urgency": urgency.lower(),
+            "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", actual_thread_id).execute()
+
+        logger.info(f"[Hermès] Analyse soumise: {analysis_id} pour thread {actual_thread_id}")
+
+        # Mettre à jour detected_chantier_id si Hermès en a trouvé un via son analyse
+        if chantier_id:
+            sb.table("email_threads").update({
+                "detected_chantier_id": chantier_id,
+            }).eq("id", actual_thread_id).execute()
+    else:
+        logger.warning(f"[Hermès] Analyse {analysis_id} créée sans thread_id valide")
 
     return {
         "success": True,
