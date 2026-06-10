@@ -2,13 +2,14 @@
 Client API Hermès — compatible OpenAI SDK.
 
 Utilise le SDK Python `openai` officiel avec un base_url personnalisé
-pointant vers l'instance Hermès (http://REDACTED:8642/v1).
+pointant vers l'instance Hermès (http://REDACTED/hermes-api/v1).
 
-Timeout : 30s. Retry : 2 tentatives avec backoff.
+Timeout : 180s (configurable via HERMES_TIMEOUT). Retry : 2 tentatives avec backoff.
 """
 
 import asyncio
 import logging
+import os
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
 
@@ -20,7 +21,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 MODEL = "hermes-agent"
-DEFAULT_TIMEOUT = 30.0
+DEFAULT_TIMEOUT = float(os.getenv("HERMES_TIMEOUT", "180.0"))
 MAX_RETRIES = 2
 RETRY_DELAY = 2.0
 
