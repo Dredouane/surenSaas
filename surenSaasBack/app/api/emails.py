@@ -1044,10 +1044,20 @@ async def get_thread_with_analysis(
     thread_resp = sb.table("email_threads").select("*")\
         .eq("id", thread_uuid).eq("org_id", org_id).maybe_single().execute()
 
-    if not thread_resp.data:
-        raise HTTPException(status_code=404, detail="Thread non trouvé")
-
-    thread = thread_resp.data
+    if not thread_resp or not thread_resp.data:
+        # Si thread_uuid ressemble à un gmail_thread_id (contient @), essayer par ce champ
+        if "@" in thread_uuid or thread_uuid.startswith("thread-"):
+            thread_by_gid = sb.table("email_threads").select("*")\
+                .eq("gmail_thread_id", thread_uuid).eq("org_id", org_id).maybe_single().execute()
+            if thread_by_gid and thread_by_gid.data:
+                thread = thread_by_gid.data
+                thread_resp = thread_by_gid
+            else:
+                raise HTTPException(status_code=404, detail="Thread non trouvé")
+        else:
+            raise HTTPException(status_code=404, detail="Thread non trouvé")
+    else:
+        thread = thread_resp.data
 
     # Récupérer les emails du thread
     emails_resp = sb.table("emails").select(
@@ -1398,7 +1408,8 @@ async def submit_analysis(
     status = None
     chantier_id = None
 
-    if thread_resp.data:
+    # Chercher d'abord par UUID du thread
+    if thread_resp and thread_resp.data:
         actual_thread_id = thread_resp.data["id"]
         status = thread_resp.data.get("status")
         chantier_id = thread_resp.data.get("detected_chantier_id")
@@ -1406,18 +1417,26 @@ async def submit_analysis(
         # Peut-être c'est un email_id : remonter au thread via gmail_thread_id
         email_resp = sb.table("emails").select("gmail_thread_id")\
             .eq("id", thread_id).eq("org_id", org_id).maybe_single().execute()
-        if email_resp.data:
+        if email_resp and email_resp.data:
             gtid = email_resp.data.get("gmail_thread_id")
             if gtid:
                 thread_from_email = sb.table("email_threads").select("id, status, detected_chantier_id")\
                     .eq("gmail_thread_id", gtid).eq("org_id", org_id).maybe_single().execute()
-                if thread_from_email.data:
+                if thread_from_email and thread_from_email.data:
                     actual_thread_id = thread_from_email.data["id"]
                     status = thread_from_email.data.get("status")
                     chantier_id = thread_from_email.data.get("detected_chantier_id")
 
     if not actual_thread_id:
-        raise HTTPException(status_code=404, detail="Thread non trouvé")
+        # Dernier fallback : essayer par gmail_thread_id (Hermès peut passer un Outlook ID)
+        thread_by_gid = sb.table("email_threads").select("id, status, detected_chantier_id")\
+            .eq("gmail_thread_id", thread_id).eq("org_id", org_id).maybe_single().execute()
+        if thread_by_gid and thread_by_gid.data:
+            actual_thread_id = thread_by_gid.data["id"]
+            status = thread_by_gid.data.get("status")
+            chantier_id = thread_by_gid.data.get("detected_chantier_id")
+        else:
+            raise HTTPException(status_code=404, detail="Thread non trouvé")
 
     # Si le thread n'a pas de statut READY_FOR_AI, l'accepter quand même
     # (compatibilité avec les threads en statut 'vectorized' ou sans statut)
