@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from pydantic import BaseModel, Field
 
 from app.services.email_database_service import email_db
@@ -1124,13 +1124,26 @@ async def list_threads_analyses(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     x_api_key: str = Header(None, alias="X-API-Key"),
+    request: Request = None,
 ):
     """Liste paginée des threads avec analyses, filtrable par chantier et/ou statut.
 
-    Accessible via X-API-Key pour le frontend SaaS et Hermès.
+    Deux modes d'authentification :
+    - X-API-Key : pour Hermès (agent externe)
+    - Cookie JWT : pour le frontend SaaS (utilisateur connecté)
     """
-    from app.api.tools_rest import verify_tools_api_key
-    verify_tools_api_key(x_api_key)
+    # 1. Essayer l'auth par X-API-Key (Hermès)
+    if x_api_key:
+        from app.api.tools_rest import verify_tools_api_key
+        verify_tools_api_key(x_api_key)
+    # 2. Fallback : cookie JWT (frontend SaaS)
+    elif request:
+        from app.api.auth import get_current_user_from_cookie
+        user = get_current_user_from_cookie(request)
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Accès non autorisé")
+    else:
+        raise HTTPException(status_code=401, detail="Authentification requise")
 
     sb = get_supabase()
 
