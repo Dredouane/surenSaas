@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
+import ReactMarkdown from 'react-markdown';
 import {
   Bot,
   User,
@@ -120,7 +120,7 @@ export default function SideChat({ chantierId, orgId }: Props) {
       </CardHeader>
 
       <CardContent className="p-0">
-        <div className="h-80 overflow-y-auto p-4 space-y-3">
+        <div className="h-96 md:h-[32rem] overflow-y-auto p-4 space-y-3">
           {messages.map((msg, idx) => (
             <div
               key={idx}
@@ -145,10 +145,14 @@ export default function SideChat({ chantierId, orgId }: Props) {
                 className={`rounded-lg px-3 py-2 text-sm max-w-[80%] ${
                   msg.role === 'user'
                     ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted'
+                    : 'bg-muted prose prose-sm prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 prose-strong:text-foreground'
                 }`}
               >
-                {msg.content}
+                {msg.role === 'user' ? (
+                  msg.content
+                ) : (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                )}
               </div>
             </div>
           ))}
