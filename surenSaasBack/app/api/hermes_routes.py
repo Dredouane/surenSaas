@@ -46,18 +46,9 @@ async def hermes_chat(
     Reçoit les messages du Front SaaS, ajoute le contexte (chantier_id,
     user_role), et transmet à l'API Hermès sur le VPS.
 
-    Authentification : X-API-Key (Hermès) ou cookie JWT (frontend SaaS).
+    L'authentification est gérée par le proxy Next.js (cookie JWT).
+    Ce endpoint est accessible uniquement depuis le frontend SaaS.
     """
-    # Dual auth
-    if x_api_key:
-        from app.api.tools_rest import verify_tools_api_key
-        verify_tools_api_key(x_api_key)
-    elif request:
-        from app.api.auth import get_current_user_from_cookie
-        get_current_user_from_cookie(request)
-    else:
-        raise HTTPException(status_code=401, detail="Authentification requise")
-
     if not body.messages:
         raise HTTPException(status_code=400, detail="messages requis")
 
