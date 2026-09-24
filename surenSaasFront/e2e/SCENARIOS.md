@@ -1,113 +1,113 @@
-# 🌳 Scénarios E2E - Structure Arborescente
+# 🌳 E2E Scenarios - Tree Structure
 
-## Organisation des Folders
+## Folder Organization
 
 ```
 e2e/
-├── _setup/                    # Configuration partagée
-│   ├── auth.setup.ts         # Pré-authentification pour tous les tests
-│   ├── fixtures.ts           # Données de test réutilisables
-│   └── helpers.ts            # Fonctions utilitaires
+├── _setup/                    # Shared configuration
+│   ├── auth.setup.ts         # Pre-authentication for all tests
+│   ├── fixtures.ts           # Reusable test data
+│   └── helpers.ts            # Utility functions
 │
-├── 🚪 01-auth/               # AUTHENTIFICATION (racine)
-│   ├── login.spec.ts         # Connexion
-│   ├── signup.spec.ts        # Inscription
-│   ├── logout.spec.ts        # Déconnexion
+├── 🚪 01-auth/               # AUTHENTICATION (root)
+│   ├── login.spec.ts         # Login
+│   ├── signup.spec.ts        # Sign up
+│   ├── logout.spec.ts        # Logout
 │   └── _flows/
-│       └── complete-auth-flow.spec.ts  # Flux complet
+│       └── complete-auth-flow.spec.ts  # Full flow
 │
-├── 📊 02-dashboard/          # DASHBOARD (accueil)
-│   ├── dashboard.spec.ts     # Vue d'ensemble
+├── 📊 02-dashboard/          # DASHBOARD (home)
+│   ├── dashboard.spec.ts     # Overview
 │   └── _flows/
-│       └── navigation.spec.ts # Navigation principale
+│       └── navigation.spec.ts # Main navigation
 │
-├── 📄 03-invoices/           # FACTURATION (fonctionnalité clé)
-│   ├── list.spec.ts          # Liste des factures
-│   ├── create.spec.ts        # Création facture
-│   ├── detail.spec.ts        # Détail facture
-│   ├── edit.spec.ts          # Modification facture
+├── 📄 03-invoices/           # INVOICING (key feature)
+│   ├── list.spec.ts          # Invoice list
+│   ├── create.spec.ts        # Invoice creation
+│   ├── detail.spec.ts        # Invoice detail
+│   ├── edit.spec.ts          # Invoice editing
 │   └── _flows/
-│       ├── create-and-validate.spec.ts    # Créer + valider
-│       ├── upload-via-bot.spec.ts         # Upload Telegram
-│       └── full-lifecycle.spec.ts         # Cycle complet
+│       ├── create-and-validate.spec.ts    # Create + validate
+│       ├── upload-via-bot.spec.ts         # Telegram upload
+│       └── full-lifecycle.spec.ts         # Full cycle
 │
-├── 👥 04-clients/            # GESTION CLIENTS
+├── 👥 04-clients/            # CLIENT MANAGEMENT
 │   ├── list.spec.ts
 │   ├── create.spec.ts
 │   └── _flows/
 │       └── client-with-invoices.spec.ts
 │
-├── 🤖 05-telegram/           # INTEGRATION TELEGRAM
+├── 🤖 05-telegram/           # TELEGRAM INTEGRATION
 │   ├── bot-connection.spec.ts
 │   └── _flows/
 │       └── invoice-upload-flow.spec.ts
 │
-├── ⚙️ 06-settings/           # PARAMÈTRES
+├── ⚙️ 06-settings/           # SETTINGS
 │   └── profile.spec.ts
 │
-└── 🔄 99-end-to-end/         # SCÉNARIOS COMPLEXES
-    ├── conducteur-journey.spec.ts      # Parcours conducteur
-    ├── gerant-validation.spec.ts       # Parcours gérant
-    └── comptable-workflow.spec.ts      # Parcours comptable
+└── 🔄 99-end-to-end/         # COMPLEX SCENARIOS
+    ├── conducteur-journey.spec.ts      # Driver journey
+    ├── gerant-validation.spec.ts       # Manager journey
+    └── comptable-workflow.spec.ts      # Accountant journey
 ```
 
-## Convention de Nommage
+## Naming Convention
 
-### Fichiers
+### Files
 ```
-[action]-[objet].spec.ts           # ex: create-invoice.spec.ts
-[action]-[objet]-[context].spec.ts # ex: create-invoice-error.spec.ts
+[action]-[object].spec.ts           # e.g.: create-invoice.spec.ts
+[action]-[object]-[context].spec.ts # e.g.: create-invoice-error.spec.ts
 ```
 
 ### Tests (describe/it)
 ```typescript
-// Structure hiérarchique
+// Hierarchical structure
 describe('🚪 Auth - Login', () => {           // Module + Feature
-  describe('Formulaire', () => {              // Sous-section
-    test('✅ Valide avec email correct', () => {});  // Cas positif
-    test('❌ Refuse email invalide', () => {});      // Cas erreur
-    test('⚡ Soumission rapide', () => {});          // Cas perf
+  describe('Form', () => {              // Subsection
+    test('✅ Valid with correct email', () => {});  // Positive case
+    test('❌ Rejects invalid email', () => {});      // Error case
+    test('⚡ Quick submission', () => {});          // Perf case
   });
 });
 ```
 
-### Emojis (système visuel)
-- 🚪 Auth (Authentification)
-- 📊 Dashboard (Tableau de bord)
-- 📄 Invoices (Factures)
+### Emojis (visual system)
+- 🚪 Auth (Authentication)
+- 📊 Dashboard (Dashboard)
+- 📄 Invoices (Invoices)
 - 👥 Clients (Clients)
 - 🤖 Telegram (Bot)
-- ⚙️ Settings (Paramètres)
-- 🔄 End-to-end (Scénarios complets)
-- ✅ Succès
-- ❌ Erreur
+- ⚙️ Settings (Settings)
+- 🔄 End-to-end (Full scenarios)
+- ✅ Success
+- ❌ Error
 - ⚠️ Warning
-- ✨ Nouveau
+- ✨ New
 - 🧹 Cleanup
 
-## Principe d'Évolution
+## Evolution Principle
 
-### Ajouter une nouvelle branche
+### Add a new branch
 ```
-📁 07-[nouveau-module]/
+📁 07-[new-module]/
   ├── [feature].spec.ts
   └── _flows/
-      └── [scenario-complexe].spec.ts
+      └── [complex-scenario].spec.ts
 ```
 
-### Ajouter un sous-scénario
+### Add a sub-scenario
 ```
 📁 03-invoices/
   └── _flows/
-      └── nouveau-flux.spec.ts   # ← Ajouter ici
+      └── new-flow.spec.ts   # ← Add here
 ```
 
-### Niveaux de granularité
-1. **Unitaire** (`*.spec.ts`) : Teste une action isolée
-2. **Flow** (`_flows/*.spec.ts`) : Chaîne 2-3 actions
-3. **Journey** (`99-end-to-end/*.spec.ts`) : Parcours complet métier
+### Granularity levels
+1. **Unit** (`*.spec.ts`): Tests an isolated action
+2. **Flow** (`_flows/*.spec.ts`): Chain of 2-3 actions
+3. **Journey** (`99-end-to-end/*.spec.ts`): Complete business journey
 
-## Données de Test (Fixtures)
+## Test Data (Fixtures)
 
 ```typescript
 // e2e/_setup/fixtures.ts
@@ -118,69 +118,69 @@ export const TEST_DATA = {
     gerant: { email: 'gerant@suren.com', password: '***' },
   },
   invoices: {
-    draft: { supplier: 'Test Fournisseur', amount: 1000 },
-    pending: { supplier: 'Fournisseur A', amount: 2000 },
+    draft: { supplier: 'Test Supplier', amount: 1000 },
+    pending: { supplier: 'Supplier A', amount: 2000 },
   }
 };
 ```
 
-## Scénarios Prioritaires (MVP)
+## Priority Scenarios (MVP)
 
-### Phase 1 - Core (maintenant)
-1. 🚪 Auth : Login / Signup / Logout
-2. 📄 Invoices : Liste / Créer / Voir détail
-3. 🤖 Telegram : Upload facture via bot
+### Phase 1 - Core (now)
+1. 🚪 Auth: Login / Signup / Logout
+2. 📄 Invoices: List / Create / View detail
+3. 🤖 Telegram: Upload invoice via bot
 
-### Phase 2 - Métier (semaine prochaine)
-4. 🔄 Validation workflow (gérant valide facture)
-5. 📄 Cycle complet facture (création → validation → archivage)
+### Phase 2 - Business (next week)
+4. 🔄 Validation workflow (manager validates invoice)
+5. 📄 Complete invoice cycle (creation → validation → archiving)
 
-### Phase 3 - Avancé (plus tard)
-6. 👥 Gestion clients liée aux factures
-7. 📊 Dashboard avec stats
-8. ⚙️ Paramètres utilisateur
+### Phase 3 - Advanced (later)
+6. 👥 Client management linked to invoices
+7. 📊 Dashboard with stats
+8. ⚙️ User settings
 
-## Exemple de Structure d'un Test
+## Example Test Structure
 
 ```typescript
 // e2e/03-invoices/_flows/create-and-validate.spec.ts
 import { test, expect } from '@playwright/test';
 import { loginAs } from '../../_setup/helpers';
 
-test.describe('📄 Factures - Flux Créer + Valider', () => {
+test.describe('📄 Invoices - Create + Validate Flow', () => {
   
-  test('✅ Conducteur crée, Gérant valide', async ({ page }) => {
-    // Étape 1: Login conducteur
+  test('✅ Driver creates, Manager validates', async ({ page }) => {
+    // Step 1: Driver login
     await loginAs(page, 'conducteur');
     
-    // Étape 2: Créer facture
+    // Step 2: Create invoice
     await page.goto('/dashboard/invoices/create');
-    await page.fill('[name=supplier]', 'Fournisseur Test');
-    await page.click('button:has-text("Créer")');
+    await page.fill('[name=supplier]', 'Test Supplier');
+    await page.click('button:has-text("Create")');
     
-    // Étape 3: Vérifier statut "en attente"
-    await expect(page.locator('.status')).toHaveText('En attente');
+    // Step 3: Verify "pending" status
+    await expect(page.locator('.status')).toHaveText('Pending');
     
-    // Étape 4: Logout
-    await page.click('button:has-text("Déconnexion")');
+    // Step 4: Logout
+    await page.click('button:has-text("Logout")');
     
-    // Étape 5: Login gérant
+    // Step 5: Manager login
     await loginAs(page, 'gerant');
     
-    // Étape 6: Valider facture
+    // Step 6: Validate invoice
     await page.goto('/dashboard/invoices');
-    await page.click('text=Fournisseur Test');
-    await page.click('button:has-text("Valider")');
+    await page.click('text=Test Supplier');
+    await page.click('button:has-text("Validate")');
     
-    // Étape 7: Vérifier statut "validée"
-    await expect(page.locator('.status')).toHaveText('Validée');
+    // Step 7: Verify "validated" status
+    await expect(page.locator('.status')).toHaveText('Validated');
   });
 });
 ```
 
-Cette structure permet de :
-- ✅ Trouver rapidement un scénario (numérotation + emoji)
-- ✅ Ajouter facilement de nouveaux modules (07-XX)
-- ✅ Comprendre la granularité (fichier vs _flows vs 99-end-to-end)
-- ✅ Réutiliser les helpers et fixtures
-- ✅ Maintenir la cohérence sur le long terme
+This structure allows to:
+- ✅ Quickly find a scenario (numbering + emoji)
+- ✅ Easily add new modules (07-XX)
+- ✅ Understand granularity (file vs _flows vs 99-end-to-end)
+- ✅ Reuse helpers and fixtures
+- ✅ Maintain consistency over the long term

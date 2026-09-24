@@ -4,54 +4,54 @@
 ```
 surenSaasBack/
 ├── app/
-│   ├── api/                  # Généré depuis OpenAPI
+│   ├── api/                  # Generated from OpenAPI
 │   │   └── v1/
-│   │       ├── [org]/        # Mirror routing front
-│   │       └── auth/         # Routes auth non-générées
-│   ├── services/             # Logique métier (persiste)
+│   │       ├── [org]/        # Front mirror routing
+│   │       └── auth/         # Non-generated auth routes
+│   ├── services/             # Business logic (persists)
 │   ├── models/               # SQLAlchemy/Pydantic
-│   ├── agents/               # Workers IA async
+│   ├── agents/               # Async AI workers
 │   ├── core/
-│   │   ├── config.py         # Settings Pydantic
+│   │   ├── config.py         # Pydantic Settings
 │   │   ├── security.py       # JWT + auth
-│   │   ├── rate_limit.py     # Rate limiting (mémoire)
-│   │   └── supabase.py       # Client Supabase
+│   │   ├── rate_limit.py     # Rate limiting (memory)
+│   │   └── supabase.py       # Supabase client
 │   └── main.py               # Entry point
 ├── openapi/
-│   └── api.yaml              # Contract principal (depuis racine projet)
+│   └── api.yaml              # Main contract (from project root)
 ├── scripts/
-│   └── generate_api.py       # Génère code depuis OpenAPI
+│   └── generate_api.py       # Generates code from OpenAPI
 └── tests/
 ```
 
 ## Contract-first workflow
-1. Modifier `/openapi/api.yaml` (à la racine du projet)
-2. Lancer `python scripts/generate_api.py` (depuis dossier backend)
-3. Le script génère :
-   - `app/api/v1/[org]/*.py` (contrôleurs)
+1. Modify `/openapi/api.yaml` (at the project root)
+2. Run `python scripts/generate_api.py` (from the backend folder)
+3. The script generates:
+   - `app/api/v1/[org]/*.py` (controllers)
    - `app/models/schemas.py` (DTOs)
-4. Implémenter la logique dans `app/services/`
-5. Ne JAMAIS modifier le code généré manuellement
+4. Implement the logic in `app/services/`
+5. NEVER manually modify the generated code
 
-## Génération code
+## Code generation
 ```python
 # scripts/generate_api.py
-# Utilise openapi-generator-cli
-# Source : ../../openapi/api.yaml
-# Output : ./generated/
-# Puis copie vers app/api/v1/
+# Uses openapi-generator-cli
+# Source: ../../openapi/api.yaml
+# Output: ./generated/
+# Then copies to app/api/v1/
 ```
 
-## Auth Routes (non générées)
+## Auth Routes (not generated)
 
 ### POST /api/v1/auth/check-email
 ```python
 @app.post("/api/v1/auth/check-email")
 @rate_limit(max_requests=10, window=60)
 async def check_email(request: EmailCheckRequest):
-    # Vérifie pre_authorized_emails
-    # Vérifie si user existe déjà dans auth.users
-    # Retourne authorized, exists, org_id, org_slug, role
+    # Checks pre_authorized_emails
+    # Checks whether the user already exists in auth.users
+    # Returns authorized, exists, org_id, org_slug, role
 ```
 
 ### POST /api/v1/auth/signup
@@ -59,10 +59,10 @@ async def check_email(request: EmailCheckRequest):
 @app.post("/api/v1/auth/signup")
 @rate_limit(max_requests=5, window=60)
 async def signup(request: SignupRequest):
-    # 1. Vérifier email dans pre_authorized_emails
-    # 2. Créer user via Supabase Admin API
-    # 3. Trigger SQL crée membership
-    # 4. Set cookie httpOnly
+    # 1. Check email in pre_authorized_emails
+    # 2. Create user via the Supabase Admin API
+    # 3. SQL trigger creates membership
+    # 4. Set httpOnly cookie
 ```
 
 ### POST /api/v1/auth/login
@@ -70,32 +70,32 @@ async def signup(request: SignupRequest):
 @app.post("/api/v1/auth/login")
 @rate_limit(max_requests=5, window=60)
 async def login(request: LoginRequest):
-    # Login standard Supabase
-    # Vérifie membership existe
-    # Set cookie httpOnly + JWT
+    # Standard Supabase login
+    # Checks membership exists
+    # Set httpOnly cookie + JWT
 ```
 
 ### GET /api/v1/auth/session
 ```python
 @app.get("/api/v1/auth/session")
 async def check_session(request: Request):
-    # Vérifie cookie session_token
-    # Retourne user info (pour middleware Next.js)
+    # Checks the session_token cookie
+    # Returns user info (for the Next.js middleware)
 ```
 
-## Authentification
+## Authentication
 ```python
-# Dépendance FastAPI
+# FastAPI dependency
 async def get_current_user(
-    request: Request  # Lit cookie session_token
+    request: Request  # Reads the session_token cookie
 ) -> User:
-    # 1. Valider JWT depuis cookie
-    # 2. Vérifier membership pour org_id
-    # 3. Retourner User avec contexte org
+    # 1. Validate JWT from cookie
+    # 2. Check membership for org_id
+    # 3. Return User with org context
 ```
 
 ## Rate Limiting
-Stockage **en mémoire** (pas Redis).
+Storage **in memory** (not Redis).
 
 ```python
 # core/rate_limit.py
@@ -108,23 +108,23 @@ def rate_limit(max_requests: int, window: int):
     def decorator(func):
         @wraps(func)
         async def wrapper(request: Request, *args, **kwargs):
-            # Clé = hash(IP + User-Agent)
+            # Key = hash(IP + User-Agent)
             key = f"ratelimit:{func.__name__}:{hash_client(request)}"
             
             now = time.time()
             
-            # Nettoyer anciennes entrées
+            # Clean up old entries
             if key in _memory_store:
                 _memory_store[key] = [
                     ts for ts in _memory_store[key] 
                     if now - ts < window
                 ]
             
-            # Vérifier limite
+            # Check limit
             if len(_memory_store.get(key, [])) >= max_requests:
-                raise HTTPException(429, "Trop de requêtes")
+                raise HTTPException(429, "Too many requests")
             
-            # Ajouter timestamp
+            # Add timestamp
             _memory_store.setdefault(key, []).append(now)
             
             return await func(request, *args, **kwargs)
@@ -132,13 +132,13 @@ def rate_limit(max_requests: int, window: int):
     return decorator
 ```
 
-**Limites** :
-- Login : 5 tentatives/minute
-- Check-email : 10 requêtes/minute
-- Reset-password : 3 tentatives/5min
+**Limits**:
+- Login: 5 attempts/minute
+- Check-email: 10 requests/minute
+- Reset-password: 3 attempts/5min
 
-## Communication async
-**À déterminer ultérieurement.**
+## Async communication
+**To be determined later.**
 
 ## Configuration
 ```python
@@ -146,29 +146,29 @@ def rate_limit(max_requests: int, window: int):
 class Settings(BaseSettings):
     supabase_url: str
     supabase_service_key: str
-    jwt_secret: str                    # Pour signer les sessions
+    jwt_secret: str                    # To sign sessions
     allowed_origins: list[str]
     
     class Config:
         env_file = ".env"
 ```
 
-## Endpoints standard
+## Standard endpoints
 ```
-GET    /api/v1/{org}/users/me       # Profil connecté
-GET    /api/v1/{org}/projects       # Liste projets
-POST   /api/v1/{org}/projects       # Créer projet
-GET    /api/v1/{org}/projects/{id}  # Détail projet
-PUT    /api/v1/{org}/projects/{id}  # Modifier
-DELETE /api/v1/{org}/projects/{id}  # Supprimer
+GET    /api/v1/{org}/users/me       # Connected user's profile
+GET    /api/v1/{org}/projects       # Project list
+POST   /api/v1/{org}/projects       # Create project
+GET    /api/v1/{org}/projects/{id}  # Project detail
+PUT    /api/v1/{org}/projects/{id}  # Update
+DELETE /api/v1/{org}/projects/{id}  # Delete
 ```
 
 ## Scripts
 ```bash
-# Génération API (depuis surenSaasBack/)
+# API generation (from surenSaasBack/)
 python scripts/generate_api.py
 
-# Développement
+# Development
 uvicorn app.main:app --reload
 
 # Tests
@@ -178,10 +178,10 @@ pytest tests/
 docker-compose up backend
 ```
 
-## Règles d'or
-- Toujours valider org_id dans JWT vs URL
-- Toujours utiliser Supabase avec RLS (service key = bypass)
-- Jamais de logique métier dans les contrôleurs générés
-- Toujours typer avec Pydantic
-- Rate limit sur toutes les routes auth
-- Pas de Redis - stockage mémoire uniquement
+## Golden rules
+- Always validate org_id in JWT vs URL
+- Always use Supabase with RLS (service key = bypass)
+- Never put business logic in the generated controllers
+- Always type with Pydantic
+- Rate limit on all auth routes
+- No Redis - in-memory storage only

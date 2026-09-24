@@ -1,150 +1,150 @@
-# Bot Telegram Construction - Documentation
+# Construction Telegram Bot - Documentation
 
-## Vue d'ensemble
+## Overview
 
-Le bot Telegram Construction permet aux utilisateurs (conducteurs de travaux) d'envoyer des factures (photos ou PDF) directement depuis Telegram. L'OCR avec **Google Gemini Flash 1.5** extrait automatiquement les données et crée une facture en statut "brouillon".
+The Construction Telegram bot allows users (site supervisors) to send invoices (photos or PDFs) directly from Telegram. OCR with **Google Gemini Flash 1.5** automatically extracts the data and creates an invoice in "draft" status.
 
-### Flux End-to-End
+### End-to-End Flow
 
 ```
-Conducteur Telegram
+Telegram site supervisor
         ↓
-📎 Envoi Photo/PDF
+📎 Photo/PDF submission
         ↓
 Webhook (/api/v1/{org_id}/telegram/webhook/{token})
         ↓
-📥 Téléchargement fichier → /tmp
+📥 File download → /tmp
         ↓
 🔍 OCR Gemini Flash 1.5
         ↓
-💾 Création Facture (status: brouillon)
+💾 Invoice Creation (status: draft)
         ↓
-📋 Affichage données extraites + boutons
-   [✅ Valider] [✏️ Modifier] [❌ Annuler]
+📋 Display of extracted data + buttons
+   [✅ Validate] [✏️ Edit] [❌ Cancel]
         ↓
-Si ✅ Validé:
+If ✅ Validated:
    → Status: en_attente_validation
-   → 📧 Notification aux gérants
+   → 📧 Notification to managers
         ↓
-Gérants (Web App)
-   → Validation finale ✅/❌
-   → 📧 Notification au conducteur
+Managers (Web App)
+   → Final validation ✅/❌
+   → 📧 Notification to the site supervisor
 ```
 
 ## Architecture
 
-### Structure des fichiers (Structure Multi-Bot)
+### File structure (Multi-Bot Structure)
 
 ```
 surenSaasBack/app/api/
-├── telegram_core.py              # Router générique + Helpers API (~200 lignes)
-├── bot_construction.py           # Handler spécifique Construction (~300 lignes)
-├── bot_construction_commands.py  # Commandes Construction (~150 lignes)
-├── telegram_invitation_service.py # Génération liens d'invitation (existant)
-└── [bot_livraison.py]            # ⬅️ Futur bot (facile à ajouter !)
+├── telegram_core.py              # Generic router + API Helpers (~200 lines)
+├── bot_construction.py           # Construction-specific handler (~300 lines)
+├── bot_construction_commands.py  # Construction commands (~150 lines)
+├── telegram_invitation_service.py # Invitation link generation (existing)
+└── [bot_livraison.py]            # ⬅️ Future bot (easy to add!)
 
 app/services/telegram/
 ├── upload_invoice/
-│   └── service.py                # Workflow upload + OCR Gemini (~180 lignes)
-├── notification_service.py       # Notifications aux utilisateurs (~230 lignes)
-└── audit_service.py              # Audit trail (~280 lignes)
+│   └── service.py                # Upload + Gemini OCR workflow (~180 lines)
+├── notification_service.py       # Notifications to users (~230 lines)
+└── audit_service.py              # Audit trail (~280 lines)
 
 app/agents/
-├── generic_extractor.py          # Extracteur Gemini (point d'entrée)
-├── base/gemini_client.py         # Client Vertex AI
-├── processors/file_processor.py  # Traitement fichiers
-└── prompts/extraction_prompts.py # Prompts système
+├── generic_extractor.py          # Gemini extractor (entry point)
+├── base/gemini_client.py         # Vertex AI client
+├── processors/file_processor.py  # File processing
+└── prompts/extraction_prompts.py # System prompts
 ```
 
-**Pourquoi cette structure ?**
-- ✅ **Code générique** dans `telegram_core.py` (réutilisable)
-- ✅ **Un fichier = un bot** (`bot_construction.py`, `bot_livraison.py`, etc.)
-- ✅ Facile d'ajouter un nouveau bot (copier/coller + adapter)
-- ✅ Séparation claire entre générique et spécifique
+**Why this structure?**
+- ✅ **Generic code** in `telegram_core.py` (reusable)
+- ✅ **One file = one bot** (`bot_construction.py`, `bot_livraison.py`, etc.)
+- ✅ Easy to add a new bot (copy/paste + adapt)
+- ✅ Clear separation between generic and specific
 
-### Code Générique vs Spécifique
+### Generic vs Specific Code
 
-| Générique (`telegram_core.py`) | Spécifique (`bot_construction.py`) |
+| Generic (`telegram_core.py`) | Specific (`bot_construction.py`) |
 |-------------------------------|-----------------------------------|
-| Router webhook | Handler messages/fichiers |
-| Dispatch selon `bot_slug` | Workflow métier (factures) |
-| Helpers API Telegram | Commandes spécifiques |
-| Authentification | Références `slug='construction'` |
-| Envoi messages | Callbacks personnalisés |
+| Webhook router | Message/file handler |
+| Dispatch by `bot_slug` | Business workflow (invoices) |
+| Telegram API helpers | Specific commands |
+| Authentication | References `slug='construction'` |
+| Message sending | Custom callbacks |
 
-### Description des fichiers
+### File descriptions
 
-#### `telegram_core.py` - Core Générique
+#### `telegram_core.py` - Generic Core
 - **Route**: `POST /api/v1/{org_id}/telegram/webhook/{token}`
-- **Fonctions génériques**:
-  - `handle_telegram_webhook()` - Point d'entrée
-  - `_dispatch_message()` - Route vers le bon bot
-  - `_dispatch_callback()` - Route les callbacks
-  - `get_bot_token()` - Récupération token
-  - `send_simple_message()` - Envoi message
-  - `send_message_with_keyboard()` - Message + boutons
-  - `answer_callback()` - Accusé réception
+- **Generic functions**:
+  - `handle_telegram_webhook()` - Entry point
+  - `_dispatch_message()` - Route to the right bot
+  - `_dispatch_callback()` - Route the callbacks
+  - `get_bot_token()` - Token retrieval
+  - `send_simple_message()` - Message sending
+  - `send_message_with_keyboard()` - Message + buttons
+  - `answer_callback()` - Acknowledgment
 
-#### `bot_construction.py` - Bot Construction
-- **Fonctions spécifiques**:
-  - `handle_construction_message()` - Dispatcher construction
-  - `handle_invoice_upload()` - Workflow upload facture
-  - `_download_telegram_file()` - Téléchargement fichier
-  - `_send_extraction_result()` - Affichage résultat OCR
-  - `handle_invoice_validation()` - Validation facture
-  - `handle_invoice_cancellation()` - Annulation facture
+#### `bot_construction.py` - Construction Bot
+- **Specific functions**:
+  - `handle_construction_message()` - Construction dispatcher
+  - `handle_invoice_upload()` - Invoice upload workflow
+  - `_download_telegram_file()` - File download
+  - `_send_extraction_result()` - OCR result display
+  - `handle_invoice_validation()` - Invoice validation
+  - `handle_invoice_cancellation()` - Invoice cancellation
 
-#### `bot_construction_commands.py` - Commandes Construction
-- **Fonctions**:
-  - `handle_construction_callback()` - Dispatcher callbacks
+#### `bot_construction_commands.py` - Construction Commands
+- **Functions**:
+  - `handle_construction_callback()` - Callback dispatcher
   - `handle_start_command()` - Onboarding
-  - `handle_service_callback()` - Boutons menu
-  - `send_menu_message()` - Menu principal
-  - `_send_welcome_message()` - Bienvenue
+  - `handle_service_callback()` - Menu buttons
+  - `send_menu_message()` - Main menu
+  - `_send_welcome_message()` - Welcome
 
-### Ajouter un nouveau bot (ex: Bot Livraison)
+### Adding a new bot (e.g.: Delivery Bot)
 
-Pour ajouter un nouveau bot en 3 étapes :
+To add a new bot in 3 steps:
 
-**1. Créer les fichiers**:
+**1. Create the files**:
 ```bash
 touch app/api/bot_livraison.py
 touch app/api/bot_livraison_commands.py
 ```
 
-**2. Implémenter les handlers**:
+**2. Implement the handlers**:
 ```python
 # bot_livraison.py
 async def handle_livraison_message(message, bot_config, supabase, org_id):
-    # Votre logique métier ici
+    # Your business logic here
     pass
 
 # bot_livraison_commands.py  
 async def handle_livraison_callback(callback_query, ...):
-    # Vos callbacks ici
+    # Your callbacks here
     pass
 ```
 
-**3. Ajouter au dispatcher** (`telegram_core.py`):
+**3. Add to the dispatcher** (`telegram_core.py`):
 ```python
 async def _dispatch_message(..., bot_slug):
     if bot_slug == 'construction':
         from app.api.bot_construction import handle_construction_message
         return await handle_construction_message(...)
-    elif bot_slug == 'livraison':  # ⬅️ NOUVEAU
+    elif bot_slug == 'livraison':  # ⬅️ NEW
         from app.api.bot_livraison import handle_livraison_message
         return await handle_livraison_message(...)
 ```
 
-Et voilà ! Le nouveau bot est fonctionnel.
+And there you go! The new bot is functional.
 
 ## Configuration
 
-### Variables d'environnement requises
+### Required environment variables
 
 ```bash
-# Bot Telegram Construction
-SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN="votre_token_bot_father"
+# Construction Telegram Bot
+SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN="your_bot_father_token"
 SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME="suren_construction_test_bot"
 
 # Production
@@ -153,183 +153,177 @@ SUREN_PROD_TELEGRAM_CONSTRUCTION_BOT_USERNAME="suren_construction_bot"
 
 # Gemini API (OCR)
 SUREN_TEST_GOOGLE_GEMINI_CREDENTIALS_B64="base64_api_key"
-# ou
+# or
 SUREN_PROD_GOOGLE_GEMINI_CREDENTIALS_B64="base64_api_key"
 
-# Secrets (optionnels)
-TELEGRAM_INVITATION_SECRET="secret_long_pour_signer_invitations"
-TELEGRAM_WEBHOOK_SECRET_TEST="secret_webhook"
+# Secrets (optional)
+TELEGRAM_INVITATION_SECRET="long_secret_for_signing_invitations"
+TELEGRAM_WEBHOOK_SECRET_TEST="webhook_secret"
 ```
 
-### Setup Webhook Telegram
+### Telegram Webhook Setup
 
 ```bash
-# 1. Récupérer les variables
-export BOT_TOKEN="votre_token"
-export WEBHOOK_URL="https://api-test.votredomaine.com/api/v1/{org_id}/telegram/webhook/{token}"
+# 1. Get the variables
+export BOT_TOKEN="your_token"
+export WEBHOOK_URL="https://api-test.yourdomain.com/api/v1/{org_id}/telegram/webhook/{token}"
 
-# 2. Configurer le webhook
+# 2. Configure the webhook
 curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
   -d "{
     \"url\": \"${WEBHOOK_URL}\",
-    \"secret_token\": \"votre_secret_webhook\"
+    \"secret_token\": \"your_webhook_secret\"
   }"
 
-# 3. Vérifier
+# 3. Verify
 curl "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 ```
 
-## Workflow détaillé
+## Detailed workflow
 
-### 1. Onboarding utilisateur
+### 1. User onboarding
 
-**Dans l'application web (Admin > Utilisateurs):**
-1. Admin clique "Inviter sur Telegram" 
-2. Génération lien: `https://t.me/bot?start={user_uuid}`
-3. Utilisateur clique le lien → ouvre Telegram
-4. Bot exécute `/start {user_uuid}`
-5. Liaison automatique compte Telegram ↔ User
+**In the web app (Admin > Users):**
+1. Admin clicks "Invite to Telegram"
+2. Link generation: `https://t.me/bot?start={user_uuid}`
+3. User opens the link in Telegram
+4. User sends `/start`
+5. Bot links the Telegram account to the app account
 
-**Fichiers concernés:**
-- `telegram_invitation_service.py` - Génération liens
-- `telegram_commands.py::handle_start_command()` - Liaison compte
+**Technical steps:**
 
-### 2. Envoi de facture
-
-**Étapes techniques:**
-
-#### A. Réception webhook (`telegram_main.py`)
+#### A. Webhook reception (`telegram_main.py`)
 ```python
 @router.post("/api/v1/{org_id}/telegram/webhook/{webhook_token}")
 async def handle_telegram_webhook(...)
-    # Authentification bot
-    # Dispatch vers handlers selon type
+    # Bot authentication
+    # Dispatch to handlers by type
 ```
 
-#### B. Téléchargement fichier (`telegram_invoice.py`)
+#### B. File download (`telegram_invoice.py`)
 ```python
 async def _download_telegram_file(message, bot_token):
-    # 1. getFile pour obtenir file_path
-    # 2. Téléchargement depuis Telegram CDN  
-    # 3. Stockage dans /tmp (fichier temporaire)
+    # 1. getFile to get file_path
+    # 2. Download from Telegram CDN  
+    # 3. Store in /tmp (temporary file)
     return "/tmp/tmp_xxx.pdf"
 ```
 
-#### C. OCR avec Gemini (`upload_invoice/service.py`)
+#### C. OCR with Gemini (`upload_invoice/service.py`)
 ```python
 extractor = create_invoice_extractor()  # Gemini Flash 1.5
 result = await extractor.extract(file_path, file_type='pdf'|'image')
 ```
 
-**Données extraites:**
-- Fournisseur (nom, adresse, SIRET)
-- Facture (numéro, date, échéance)
-- Montants (HT, TTC, TVA, taux)
-- Description/articles
-- Score de confiance
+**Extracted data:**
+- Supplier (name, address, SIRET)
+- Invoice (number, date, due date)
+- Amounts (HT, TTC, VAT, rate)
+- Description/items
+- Confidence score
 
-#### D. Création facture
+#### D. Invoice creation
 ```python
-# Status: brouillon
-# ocr_data: Résultat brut Gemini
+# Status: draft
+# ocr_data: Raw Gemini result
 # metadata: audit_log_id, confidence_score, etc.
 ```
 
-#### E. Interaction utilisateur (`telegram_invoice.py::_send_extraction_result`)
-Le bot affiche:
+#### E. User interaction (`telegram_invoice.py::_send_extraction_result`)
+The bot displays:
 ```
-✅ Facture analysée avec succès !
+✅ Invoice successfully analyzed!
 
-📋 Détails extraits :
-• Fournisseur: Matériaux Pro SARL
-• N° Facture: FAC-2024-001
+📋 Extracted details:
+• Supplier: Matériaux Pro SARL
+• Invoice No.: FAC-2024-001
 • Date: 2024-01-15
-• Montant HT: 1000.00€
-• Montant TTC: 1200.00€
-• TVA: 200.00€ (20%)
+• HT amount: 1000.00€
+• TTC amount: 1200.00€
+• VAT: 200.00€ (20%)
 
-[✅ Valider] [✏️ Modifier] [❌ Annuler]
+[✅ Validate] [✏️ Edit] [❌ Cancel]
 ```
 
 **Callbacks:**
 - `invoice:validate:{invoice_id}` → `handle_invoice_validation()`
-- `invoice:edit:{invoice_id}` → Message "à venir"
+- `invoice:edit:{invoice_id}` → "coming soon" message
 - `invoice:cancel:{invoice_id}` → `handle_invoice_cancellation()`
 
-### 3. Validation par les gérants
+### 2. Validation by the managers
 
 **Web App:**
-- Dashboard factures avec filtre "en_attente_validation"
-- Vue détail avec boutons Valider/Rejeter
-- Commentaire obligatoire si rejet
+- Invoice dashboard with "en_attente_validation" filter
+- Detail view with Validate/Reject buttons
+- Comment required if rejected
 
 **Notifications:**
-- Gérants reçoivent notification Telegram
-- Conducteur notifié du résultat
+- Managers receive a Telegram notification
+- Site supervisor notified of the result
 
-## Stockage fichiers
+## File storage
 
-**Actuel:** Fichiers stockés temporairement dans `/tmp`
+**Current:** Files temporarily stored in `/tmp`
 
 ```python
-# Stockage dans la DB
-original_file_url: "/tmp/tmp_xxx.pdf"  # TEMPORAIRE
+# Storage in the DB
+original_file_url: "/tmp/tmp_xxx.pdf"  # TEMPORARY
 
-# TODO: Migrer vers S3 quand service choisi
-# original_file_url: "s3://bucket/invoices/{org_id}/{invoice_id}/facture.pdf"
+# TODO: Migrate to S3 when service is chosen
+# original_file_url: "s3://bucket/invoices/{org_id}/{invoice_id}/invoice.pdf"
 ```
 
-**Prochaines étapes stockage:**
-1. Choisir service S3 (AWS, GCP, etc.)
-2. Upload fichier vers S3 après OCR
-3. Mettre à jour `original_file_url` avec URL publique/presignée
-4. Nettoyer /tmp après upload réussi
+**Next storage steps:**
+1. Choose an S3 service (AWS, GCP, etc.)
+2. Upload file to S3 after OCR
+3. Update `original_file_url` with a public/presigned URL
+4. Clean /tmp after successful upload
 
-## Points d'attention
+## Points of attention
 
-### Sécurité
-- ✅ Tokens Telegram en variables d'environnement (pas en DB)
-- ✅ Vérification webhook secret
-- ✅ RLS policies sur toutes les tables
+### Security
+- ✅ Telegram tokens in environment variables (not in DB)
+- ✅ Webhook secret verification
+- ✅ RLS policies on all tables
 - ✅ Capability checks (`construction:facturation:write`)
-- ✅ Fichiers temporaires dans /tmp avec noms uniques
+- ✅ Temporary files in /tmp with unique names
 
 ### Performance
-- Téléchargement Telegram: ~1-5s selon taille
-- OCR Gemini: ~3-10s selon complexité
-- Timeout total: 60s max
+- Telegram download: ~1-5s depending on size
+- Gemini OCR: ~3-10s depending on complexity
+- Total timeout: 60s max
 
-### Limitations Gemini
-- Max 20 MB par fichier
-- Max 5 pages pour PDF
+### Gemini limitations
+- Max 20 MB per file
+- Max 5 pages for PDF
 - Images: max 4096x4096 pixels
 
 ## Monitoring
 
-### Logs importants
+### Important logs
 ```
-📨 Webhook Telegram reçu
-📎 Upload de facture reçu
-✅ Fichier téléchargé: {n} bytes
-🔍 Démarrage OCR
-✅ OCR terminé - Fournisseur: {name}, Confiance: {score}
-📋 Facture créée: {invoice_id}
-🔘 Callback reçu: invoice:validate:{id}
+📨 Telegram webhook received
+📎 Invoice upload received
+✅ File downloaded: {n} bytes
+🔍 Starting OCR
+✅ OCR finished - Supplier: {name}, Confidence: {score}
+📋 Invoice created: {invoice_id}
+🔘 Callback received: invoice:validate:{id}
 ```
 
-### Tables d'audit
-- `telegram_audit` - Logs toutes les interactions
-- `invoice_status_history` - Historique changements status
+### Audit tables
+- `telegram_audit` - Logs of all interactions
+- `invoice_status_history` - History of status changes
 
-**Note sur les enums:**
-L'enum `telegram_interaction_type` contient les valeurs suivantes:
+**Note on enums:**
+The `telegram_interaction_type` enum contains the following values:
 - `message_received`, `command_received`, `button_clicked`
-- `file_received` ← Utilisé pour les uploads de factures
+- `file_received` ← Used for invoice uploads
 - `workflow_started`, `workflow_step`, `workflow_completed`, `workflow_failed`
 - `notification_sent`, `error`
 
-Pour ajouter `invoice_upload` à l'enum, exécutez la migration:
+To add `invoice_upload` to the enum, run the migration:
 ```bash
 # 017_add_invoice_upload_to_enum.sql
 ALTER TYPE telegram_interaction_type ADD VALUE 'invoice_upload';
@@ -337,91 +331,91 @@ ALTER TYPE telegram_interaction_type ADD VALUE 'invoice_upload';
 
 ## Tests
 
-### Scénarios de test
+### Test scenarios
 
 1. **Onboarding:**
-   - Lien invitation → /start → Compte lié ✅
+   - Invitation link → /start → Account linked ✅
 
-2. **Upload photo:**
-   - Photo JPG → OCR → Facture créée → Validation ✅
+2. **Photo upload:**
+   - JPG photo → OCR → Invoice created → Validation ✅
 
-3. **Upload PDF:**
-   - PDF multi-pages → OCR → Extraction données ✅
+3. **PDF upload:**
+   - Multi-page PDF → OCR → Data extraction ✅
 
 4. **Callbacks:**
-   - Valider → Status changé + Notif gérants ✅
-   - Annuler → Suppression facture ✅
+   - Validate → Status changed + Managers notified ✅
+   - Cancel → Invoice deleted ✅
 
-5. **Erreurs:**
-   - User non autorisé → Message d'erreur ✅
-   - Fichier trop gros → Erreur ✅
-   - OCR échoue → Message utilisateur ✅
+5. **Errors:**
+   - Unauthorized user → Error message ✅
+   - File too big → Error ✅
+   - OCR fails → User message ✅
 
-## Migration depuis l'ancienne structure
+## Migration from the old structure
 
-**Ancienne structure (monolithique):**
+**Old structure (monolithic):**
 ```
-app/api/telegram_webhooks.py  # 1 fichier de 800+ lignes
-```
-
-**Structure intermédiaire:**
-```
-app/api/telegram_main.py      # Router principal
-app/api/telegram_invoice.py   # Gestion factures
-app/api/telegram_commands.py  # Commandes
-app/api/telegram_helpers.py   # Helpers API
+app/api/telegram_webhooks.py  # Single 800+ line file
 ```
 
-**Nouvelle structure (multi-bot):**
+**Intermediate structure:**
 ```
-app/api/telegram_core.py              # Core générique (router + helpers)
-app/api/bot_construction.py           # Bot Construction
-app/api/bot_construction_commands.py  # Commandes Construction
+app/api/telegram_main.py   # Main router
+app/api/telegram_invoice.py   # Invoice handling
+app/api/telegram_commands.py  # Commands
+app/api/telegram_helpers.py   # API helpers
 ```
 
-**Changements récents:**
-- ✅ Router et helpers fusionnés dans `telegram_core.py`
-- ✅ Fichiers renommés avec préfixe `bot_`
-- ✅ Import mis à jour dans `main.py`
-- ✅ Dispatch dynamique selon `bot_slug`
-- ✅ URLs webhook inchangées
+**New structure (multi-bot):**
+```
+app/api/telegram_core.py              # Generic core (router + helpers)
+app/api/bot_construction.py           # Construction Bot
+app/api/bot_construction_commands.py  # Construction Commands
+```
+
+**Recent changes:**
+- ✅ Router and helpers merged into `telegram_core.py`
+- ✅ Files renamed with `bot_` prefix
+- ✅ Import updated in `main.py`
+- ✅ Dynamic dispatch by `bot_slug`
+- ✅ Webhook URLs unchanged
 
 ## Support & Debugging
 
-### Problèmes courants
+### Common problems
 
-**"Token non trouvé"**
-→ Vérifier variables d'environnement `SUREN_{ENV}_TELEGRAM_*`
+**"Token not found"**
+→ Check the `SUREN_{ENV}_TELEGRAM_*` environment variables
 
-**"OCR échoue"**
-→ Vérifier `SUREN_{ENV}_GOOGLE_GEMINI_CREDENTIALS_B64`
-→ Vérifier quotas API Google Cloud
+**"OCR fails"**
+→ Check `SUREN_{ENV}_GOOGLE_GEMINI_CREDENTIALS_B64`
+→ Check Google Cloud API quotas
 
-**"Fichier trop gros"**
-→ Limite Telegram: 20 MB
-→ Limite Gemini: 20 MB
+**"File too big"**
+→ Telegram limit: 20 MB
+→ Gemini limit: 20 MB
 
-**"User non trouvé"**
-→ Vérifier que user a bien lié son compte via /start
+**"User not found"**
+→ Verify the user has linked their account via /start
 
 **"invalid input value for enum telegram_interaction_type"**
-→ Exécutez la migration `017_add_invoice_upload_to_enum.sql`
-→ Ou utilisez `file_received` au lieu de `invoice_upload`
+→ Run the migration `017_add_invoice_upload_to_enum.sql`
+→ Or use `file_received` instead of `invoice_upload`
 
-**"No module named 'telegram_invoice'" (ou autre module)**
-→ Vérifiez que les imports utilisent le format absolu : `from app.api.xxx import ...`
-→ Évitez les imports relatifs : `from xxx import ...`
-→ Le déploiement Cloud Run nécessite des imports absolus complets
+**"No module named 'telegram_invoice'" (or other module)**
+→ Check the imports use the absolute format: `from app.api.xxx import ...`
+→ Avoid relative imports: `from xxx import ...`
+→ The Cloud Run deployment requires fully qualified absolute imports
 
-### Commandes utiles
+### Useful commands
 
 ```bash
-# Vérifier logs Cloud Run
+# Check Cloud Run logs
 gcloud logs read "resource.type=cloud_run_revision" \
   --limit=50 \
   --format="value(textPayload)"
 
-# Tester webhook localement
+# Test the webhook locally
 curl -X POST http://localhost:8000/api/v1/{org}/telegram/webhook/{token} \
   -H "Content-Type: application/json" \
   -d @test_webhook_payload.json
@@ -429,14 +423,14 @@ curl -X POST http://localhost:8000/api/v1/{org}/telegram/webhook/{token} \
 
 ## Roadmap
 
-- [ ] Upload S3 (à implémenter quand service choisi)
-- [ ] Modification facture (édition inline Telegram)
-- [ ] Support multi-pages PDF amélioré
-- [ ] Cache OCR (éviter re-extraction)
-- [ ] Métriques: temps moyen traitement, taux succès OCR
+- [ ] S3 upload (to implement when service is chosen)
+- [ ] Invoice editing (inline Telegram editing)
+- [ ] Improved multi-page PDF support
+- [ ] OCR cache (avoid re-extraction)
+- [ ] Metrics: average processing time, OCR success rate
 
 ---
 
-**Dernière mise à jour:** 2024
-**Structure:** Plate (4 fichiers dans app/api/)
-**Statut:** ✅ End-to-End fonctionnel avec Gemini Flash 1.5
+**Last update:** 2024
+**Structure:** Flat (4 files in app/api/)
+**Status:** ✅ End-to-End working with Gemini Flash 1.5

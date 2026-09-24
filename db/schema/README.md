@@ -1,85 +1,85 @@
-# Migrations SQL - Documentation
+# SQL Migrations - Documentation
 
-## Ordre d'exécution des migrations
+## Migration execution order
 
-Les migrations doivent être exécutées dans l'ordre numérique. Voici la séquence complète :
+Migrations must be executed in numerical order. Here is the full sequence:
 
-### Phase 1 : Structure de base (001-007)
-1. `001_organizations.sql` - Table des organisations
-2. `002_users.sql` - Table des utilisateurs avec org_id et role
-3. `003_pre_authorized_emails.sql` - Emails pré-autorisés
-4. `004_user_org_membership.sql` - Table de liaison (DEPRECATED après 999)
-5. `005_auth_triggers.sql` - Triggers pour auth.users
-6. `006_companies.sql` - Table des entreprises
-7. `007_pre_authorized_emails_unique.sql` - Contrainte unique sur emails
+### Phase 1 : Base structure (001-007)
+1. `001_organizations.sql` - Organizations table
+2. `002_users.sql` - Users table with org_id and role
+3. `003_pre_authorized_emails.sql` - Pre-authorized emails
+4. `004_user_org_membership.sql` - Link table (DEPRECATED after 999)
+5. `005_auth_triggers.sql` - Triggers for auth.users
+6. `006_companies.sql` - Companies table
+7. `007_pre_authorized_emails_unique.sql` - Unique constraint on emails
 
-### Phase 2 : Métier (008-014)
-8. `008_invoices.sql` - Table des factures + RLS initiales
-9. `009_invoices_amount_precision.sql` - Précision des montants
-10. `010_invoices_add_metadata.sql` - Colonnes metadata
-11. `011_telegram_bots.sql` - Configuration Telegram
-12. `012_invoice_status_history.sql` - Historique des statuts
-13. `013_invoices_add_company_id.sql` - Lien vers companies
-14. `014_add_clients_and_update_invoices.sql` - Table clients + colonne client_id
+### Phase 2 : Business (008-014)
+8. `008_invoices.sql` - Invoices table + initial RLS
+9. `009_invoices_amount_precision.sql` - Amount precision
+10. `010_invoices_add_metadata.sql` - Metadata columns
+11. `011_telegram_bots.sql` - Telegram configuration
+12. `012_invoice_status_history.sql` - Status history
+13. `013_invoices_add_company_id.sql` - Link to companies
+14. `014_add_clients_and_update_invoices.sql` - Clients table + client_id column
 
-### Phase 3 : Corrections critiques (015-016)
-15. **`015_fix_rls_policies.sql`** - ⚠️ **IMPORTANT** - Correction des politiques RLS (v1)
-    - Corrige les policies pour `invoices`, `clients`, `invoice_status_history`
-    - Met à jour pour utiliser `users.org_id` directement
-    - **À exécuter si les factures/clients n'apparaissent pas dans le dashboard**
+### Phase 3 : Critical fixes (015-016)
+15. **`015_fix_rls_policies.sql`** - ⚠️ **IMPORTANT** - RLS policies fix (v1)
+    - Fixes the policies for `invoices`, `clients`, `invoice_status_history`
+    - Updates them to use `users.org_id` directly
+    - **Run this if invoices/clients do not appear in the dashboard**
 
-16. **`016_fix_all_remaining_rls_policies.sql`** - ⚠️ **IMPORTANT** - Correction complète des RLS
-    - Corrige TOUTES les tables restantes : `telegram_bots`, `telegram_users`, `telegram_audit`
-    - Corrige également : `companies`, `organization_capabilities`, `user_capabilities`
-    - Met à jour pour utiliser `users.org_id` directement
-    - **À exécuter après 015 si d'autres tables ne fonctionnent pas (bots Telegram, companies, etc.)**
+16. **`016_fix_all_remaining_rls_policies.sql`** - ⚠️ **IMPORTANT** - Complete RLS fix
+    - Fixes ALL remaining tables: `telegram_bots`, `telegram_users`, `telegram_audit`
+    - Also fixes: `companies`, `organization_capabilities`, `user_capabilities`
+    - Updates them to use `users.org_id` directly
+    - **Run after 015 if other tables do not work (Telegram bots, companies, etc.)**
 
-### Phase 4 : Nettoyage (999)
-999. `999_cleanup_user_org_membership.sql` - Nettoyage de la table dépréciée
-    - Désactive RLS sur user_org_membership
-    - Migre les données vers users.role
-    - **Doit être exécuté APRÈS 015**
+### Phase 4 : Cleanup (999)
+999. `999_cleanup_user_org_membership.sql` - Cleanup of the deprecated table
+    - Disables RLS on user_org_membership
+    - Migrates data to users.role
+    - **Must be run AFTER 015**
 
-## ⚠️ Cas particulier : Problème de visibilité des données
+## ⚠️ Special case : Data visibility problem
 
-**Symptômes :**
-- Dashboard factures vide
-- Dashboard clients vide
-- Mais les données existent en base
+**Symptoms:**
+- Empty invoices dashboard
+- Empty clients dashboard
+- But the data exists in the database
 
-**Cause :** Les politiques RLS (Row Level Security) utilisent une table obsolète
+**Cause:** RLS (Row Level Security) policies use an obsolete table
 
-**Solution rapide :**
+**Quick fix:**
 ```bash
-# Exécuter uniquement la migration corrective
+# Run only the fix migration
 psql "$DATABASE_URL" -f db/schema/015_fix_rls_policies.sql
 ```
 
-## Commandes utiles
+## Useful commands
 
-### Exécuter toutes les migrations
+### Run all migrations
 ```bash
 cd /home/redouane/dev/AI-ERA/surenSaas
 ./scripts/migrate.sh
 ```
 
-### Exécuter une migration spécifique
+### Run a specific migration
 ```bash
 psql "$DATABASE_URL" -f db/schema/015_fix_rls_policies.sql
 ```
 
-### Vérifier les politiques RLS actuelles
+### Check current RLS policies
 ```sql
--- Voir toutes les policies sur une table
+-- View all policies on a table
 SELECT * FROM pg_policies WHERE tablename = 'invoices';
 
--- Voir si RLS est activé
+-- Check whether RLS is enabled
 SELECT relname, relrowsecurity FROM pg_class WHERE relname IN ('invoices', 'clients');
 ```
 
-## Structure des migrations futures
+## Structure of future migrations
 
-Pour ajouter une nouvelle migration :
-1. Nommer selon le schéma : `XXX_description_breve.sql`
-2. Mettre à jour ce README
-3. Documenter dans TESTS.md si impact sur les tests
+To add a new migration:
+1. Name it according to the schema: `XXX_short_description.sql`
+2. Update this README
+3. Document in TESTS.md if it impacts the tests

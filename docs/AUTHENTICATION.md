@@ -1,39 +1,39 @@
-# Authentification
+# Authentication
 
 ## Architecture
-Frontend → Backend Python → Supabase. Pas d'accès direct Supabase depuis le frontend.
+Frontend → Python Backend → Supabase. No direct Supabase access from the frontend.
 
 ## Flow
 ```
-Utilisateur → Route protégée /[org]/projects/123
+User → Protected route /[org]/projects/123
                     ↓
-            Middleware check session via backend
+            Middleware checks session via backend
                     ↓
-            Pas de session → redirect /[org]/login?redirect=...
+            No session → redirect /[org]/login?redirect=...
                     ↓
-            Login (appel backend API)
+            Login (backend API call)
                     ↓
-            Backend crée cookie httpOnly + JWT
+            Backend creates httpOnly cookie + JWT
                     ↓
-            Redirect vers page demandée
+            Redirect to requested page
 ```
 
 ## Middleware (Next.js)
-- Intercepte routes protégées
-- Appelle `/api/v1/auth/session` backend
-- Vérifie cookie httpOnly
-- Redirect vers login si invalide
+- Intercepts protected routes
+- Calls backend `/api/v1/auth/session`
+- Verifies httpOnly cookie
+- Redirects to login if invalid
 
 ## Session
-- **Cookie** : httpOnly, secure, SameSite=lax
-- **JWT** : Signé par backend (pas Supabase)
-- **Claims** : user_id, email, org_id, org_slug, role
-- **Durée** : 7 jours
+- **Cookie**: httpOnly, secure, SameSite=lax
+- **JWT**: Signed by backend (not Supabase)
+- **Claims**: user_id, email, org_id, org_slug, role
+- **Duration**: 7 days
 
-## Sécurité
-- Pas de clé Supabase exposée au frontend
-- Tokens uniquement en cookies httpOnly
-- Validation org côté backend uniquement
+## Security
+- No Supabase key exposed to the frontend
+- Tokens only in httpOnly cookies
+- Org validation on the backend only
 
 ## Tables
 
@@ -51,7 +51,7 @@ CREATE TABLE pre_authorized_emails (
 );
 ```
 
-### user_org_membership (auto-créée au premier login)
+### user_org_membership (auto-created at first login)
 ```sql
 CREATE TABLE user_org_membership (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -66,41 +66,41 @@ CREATE TABLE user_org_membership (
 ## API Endpoints
 
 ### POST /api/v1/auth/check-email
-Vérifie si l'email est pré-autorisé.
+Checks whether the email is pre-authorized.
 ```json
 // Request
-{ "email": "user@entreprise.com" }
+{ "email": "user@company.com" }
 
-// Response 200 - autorisé
+// Response 200 - authorized
 {
   "authorized": true,
   "exists": false,
   "org_id": "uuid",
-  "org_slug": "ma-societe",
+  "org_slug": "my-company",
   "role": "user"
 }
 
-// Response 403 - non autorisé
-{ "authorized": false, "message": "Contactez votre administrateur" }
+// Response 403 - not authorized
+{ "authorized": false, "message": "Contact your administrator" }
 ```
 
 ### POST /api/v1/auth/signup
-Crée compte + membership.
+Creates account + membership.
 ```json
 // Request
 {
-  "email": "user@entreprise.com",
+  "email": "user@company.com",
   "password": "password123",
   "org_id": "uuid"
 }
 ```
 
 ### POST /api/v1/auth/login
-Login standard.
+Standard login.
 ```json
 // Request
 {
-  "email": "user@entreprise.com",
+  "email": "user@company.com",
   "password": "password123"
 }
 ```
@@ -109,57 +109,57 @@ Login standard.
 
 ### Page /[org]/login
 ```tsx
-// 1. Lit paramètre ?redirect=... de l'URL
-// 2. Valide : hostname interne uniquement (pas d'open redirect)
-// 3. Stocke en state React (pas localStorage)
-// 4. Post-login → router.push(redirect) si validé, sinon /dashboard
+// 1. Reads the ?redirect=... URL parameter
+// 2. Validates: internal hostname only (no open redirect)
+// 3. Stores in React state (not localStorage)
+// 4. Post-login → router.push(redirect) if validated, otherwise /dashboard
 ```
 
-### Validation redirect
+### Redirect validation
 ```typescript
-// Autorise :
-// - URLs relatives : /projects/123, /dashboard
-// - URLs absolues même hostname
+// Allows:
+// - Relative URLs: /projects/123, /dashboard
+// - Absolute URLs on the same hostname
 // 
-// Bloque :
-// - Domaines externes
-// - Protocoles : javascript:, data:, etc.
-// - URLs avec // externe
+// Blocks:
+// - External domains
+// - Protocols: javascript:, data:, etc.
+// - URLs with external //
 ```
 
 ## JWT Claims
 ```json
 {
   "sub": "user_uuid",
-  "email": "user@entreprise.com",
+  "email": "user@company.com",
   "org_id": "org_uuid",
-  "org_slug": "ma-societe",
+  "org_slug": "my-company",
   "role": "user"
 }
 ```
 
-## Sécurité
+## Security
 
-### Rate Limiting (mémoire)
-- Stockage en mémoire Python (pas Redis)
-- Clé : hash(IP + User-Agent) + endpoint
-- Login : 5 tentatives/minute
-- Check-email : 10 requêtes/minute
-- Cleanup automatique des entrées anciennes
+### Rate Limiting (memory)
+- Storage in Python memory (not Redis)
+- Key: hash(IP + User-Agent) + endpoint
+- Login: 5 attempts/minute
+- Check-email: 10 requests/minute
+- Automatic cleanup of old entries
 
-### Validation redirect
-- Fonction `isValidRedirect()` centralisée
-- Liste `ALLOWED_HOSTNAMES` par environnement
-- Fallback sur `/[org]/dashboard` si redirect invalide
+### Redirect validation
+- Centralized `isValidRedirect()` function
+- `ALLOWED_HOSTNAMES` list per environment
+- Fallback to `/[org]/dashboard` if redirect is invalid
 
 ### Password
-- Min 8 caractères
-- Pas de complexité forcée (NIST guidelines)
-- Reset via Supabase standard
+- Min 8 characters
+- No forced complexity (NIST guidelines)
+- Reset via standard Supabase
 
-## Triggers SQL
+## SQL Triggers
 
-### Création membership au signup
+### Membership creation at signup
 ```sql
 CREATE OR REPLACE FUNCTION create_user_membership()
 RETURNS TRIGGER AS $$
@@ -179,9 +179,9 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW EXECUTE FUNCTION create_user_membership();
 ```
 
-## Invitations admin
+## Admin invitations
 ```sql
--- Admin invite un nouvel utilisateur
+-- Admin invites a new user
 INSERT INTO pre_authorized_emails (email, org_id, role, invited_by)
-VALUES ('nouveau@entreprise.com', 'org_uuid', 'user', 'admin_uuid');
+VALUES ('new@company.com', 'org_uuid', 'user', 'admin_uuid');
 ```

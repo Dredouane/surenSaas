@@ -1,182 +1,182 @@
-# Bot Telegram - Facturation Chantiers
+# Telegram Bot - Construction Invoicing
 
-## Vue d'ensemble
+## Overview
 
-Ce bot Telegram permet aux conducteurs de travaux de soumettre des factures depuis le terrain via leur téléphone mobile.
+This Telegram bot allows site supervisors to submit invoices from the field via their mobile phone.
 
 ## Architecture
 
 ```
-Conducteur Telegram
+Telegram site supervisor
         ↓
-   Envoi photo/PDF
+   Photo/PDF submission
         ↓
-   Webhook Telegram
+   Telegram Webhook
         ↓
    Handler Service
         ↓
    Invoice Upload Service
         ↓
-   OCR (coquille)
+   OCR (stub)
         ↓
-   Création Facture (brouillon)
+   Invoice Creation (draft)
         ↓
-   Notification Gérants
+   Notification to Managers
 ```
 
-## Primitives (Boutons/Actions)
+## Primitives (Buttons/Actions)
 
-### 1. Upload Facture (`upload_invoice/`)
-- **Fichier**: `services/telegram/upload_invoice/service.py`
-- **Action**: Réception et traitement d'une photo ou PDF de facture
+### 1. Invoice Upload (`upload_invoice/`)
+- **File**: `services/telegram/upload_invoice/service.py`
+- **Action**: Receiving and processing an invoice photo or PDF
 - **Workflow**:
-  1. Réception fichier
-  2. Validation user autorisé
-  3. OCR (coquille - retourne données d'exemple)
-  4. Création facture en status "brouillon"
-  5. Notification gérants
+  1. File reception
+  2. Validation that user is authorized
+  3. OCR (stub - returns sample data)
+  4. Invoice creation in "draft" status
+  5. Notification to managers
 
 ## Configuration
 
-### Prérequis
+### Prerequisites
 
-1. **Créer un bot via @BotFather**:
-   - Allez sur Telegram et cherchez @BotFather
-   - Envoyez `/newbot`
-   - Suivez les instructions pour nommer votre bot
-   - Récupérez le token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+1. **Create a bot via @BotFather**:
+   - Go to Telegram and search for @BotFather
+   - Send `/newbot`
+   - Follow the instructions to name your bot
+   - Get the token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
-2. **Configuration environnement**:
+2. **Environment configuration**:
 
-Ajoutez dans votre `~/.bashrc`:
+Add to your `~/.bashrc`:
 
 ```bash
 # Telegram Bot Configuration
-export TELEGRAM_BOT_TOKEN="votre_token_ici"
-export API_BASE_URL="https://votre-backend.run.app"
+export TELEGRAM_BOT_TOKEN="your_token_here"
+export API_BASE_URL="https://your-backend.run.app"
 
-# Supabase (déjà configuré normalement)
+# Supabase (normally already configured)
 export SUPABASE_URL="https://xxxxx.supabase.co"
-export SUPABASE_SERVICE_KEY="votre_clé_service"
+export SUPABASE_SERVICE_KEY="your_service_key"
 ```
 
-Puis rechargez:
+Then reload:
 ```bash
 source ~/.bashrc
 ```
 
-### Initialisation du bot
+### Bot initialization
 
 ```bash
-# Depuis la racine du projet
+# From the project root
 cd surenSaasBack
 
-# Installer les dépendances si nécessaire
+# Install dependencies if needed
 pip install httpx supabase
 
-# Lancer le script d'initialisation
+# Run the initialization script
 python ../scripts/init-telegram-bot.py \
-    --org-id "uuid-de-votre-org" \
-    --company-id "uuid-de-lentreprise-construction" \
-    --description "Bot facturation chantiers"
+    --org-id "your-org-uuid" \
+    --company-id "construction-company-uuid" \
+    --description "Construction site invoicing bot"
 ```
 
-### Options du script
+### Script options
 
-| Option | Requis | Description |
+| Option | Required | Description |
 |--------|--------|-------------|
-| `--org-id` | Oui | UUID de l'organisation |
-| `--company-id` | Non | UUID de l'entreprise filiale |
-| `--description` | Non | Description du bot |
-| `--skip-db` | Non | Mode test (pas de création en base) |
+| `--org-id` | Yes | UUID of the organization |
+| `--company-id` | No | UUID of the subsidiary company |
+| `--description` | No | Bot description |
+| `--skip-db` | No | Test mode (no DB creation) |
 
-## Structure des services
+## Services structure
 
 ```
 services/telegram/
 ├── __init__.py
-├── bot_manager.py           # Gestion lifecycle bot
-├── webhook_handler.py       # Handler webhooks entrants
-├── notification_service.py  # Notifications users
-├── audit_service.py         # Audit interactions
-└── upload_invoice/          # Primitive: upload facture
+├── bot_manager.py           # Bot lifecycle management
+├── webhook_handler.py       # Incoming webhook handler
+├── notification_service.py  # User notifications
+├── audit_service.py         # Interaction audit
+└── upload_invoice/          # Primitive: invoice upload
     └── service.py
 ```
 
 ## Security
 
 ### Webhook Verification
-Les webhooks Telegram sont sécurisés par:
-1. **Token hash**: L'URL contient un hash du token (pas le token en clair)
-2. **Secret token**: Header `X-Telegram-Bot-Api-Secret-Token` vérifié
-3. **IP filtering**: Telegram envoie depuis IPs connues (optionnel)
+Telegram webhooks are secured by:
+1. **Token hash**: The URL contains a hash of the token (not the token in clear text)
+2. **Secret token**: Header `X-Telegram-Bot-Api-Secret-Token` verified
+3. **IP filtering**: Telegram sends from known IPs (optional)
 
 ### User Authorization
-Chaque interaction vérifie:
-1. User Telegram lié à un compte app (`telegram_users`)
-2. Capability requise (`construction:facturation:write`)
-3. Appartenance à l'organisation
+Each interaction checks:
+1. Telegram user linked to an app account (`telegram_users`)
+2. Required capability (`construction:facturation:write`)
+3. Membership in the organization
 
-## Tables Database
+## Database Tables
 
 ### telegram_bots
-Configuration des bots.
+Bot configuration.
 
 ### telegram_users
-Lien entre Telegram ID et User ID.
+Link between Telegram ID and User ID.
 
 ### telegram_audit
-Audit de toutes les interactions (monitoring/debugging).
+Audit of all interactions (monitoring/debugging).
 
-## Workflow Upload Facture
+## Invoice Upload Workflow
 
 ```python
-# 1. Réception webhook
+# 1. Webhook reception
 POST /{org}/telegram/webhook/{token_hash}
 
 # 2. Handler dispatch
 webhook_handler.handle_update() → upload_invoice.start_workflow()
 
-# 3. Vérifications
-- User autorisé
-- Capability présente
+# 3. Checks
+- User authorized
+- Capability present
 
-# 4. OCR (coquille)
+# 4. OCR (stub)
 _invoice_upload_service._perform_ocr()
-# Retourne: ExtractedInvoiceData (exemple pour l'instant)
+# Returns: ExtractedInvoiceData (sample for now)
 
-# 5. Création facture
+# 5. Invoice creation
 _invoices table → status='brouillon'
 
 # 6. Notification
 notification_service.notify_invoice_pending()
 ```
 
-## Status Factures
+## Invoice Statuses
 
 | Status | Description |
 |--------|-------------|
-| `brouillon` | Créée via OCR, en attente validation conducteur |
-| `en_attente_validation` | Soumise, en attente gérant |
-| `validee` | Validée par gérant |
-| `rejetee` | Rejetée par gérant |
-| `en_traitement_comptable` | Transmise à la compta |
-| `archivee` | Traitée et archivée |
+| `brouillon` | Created via OCR, awaiting supervisor validation |
+| `en_attente_validation` | Submitted, awaiting manager |
+| `validee` | Validated by manager |
+| `rejetee` | Rejected by manager |
+| `en_traitement_comptable` | Forwarded to accounting |
+| `archivee` | Processed and archived |
 
 ## Monitoring
 
-### Logs d'audit
+### Audit logs
 ```sql
--- Voir les 50 dernières interactions
+-- See the last 50 interactions
 SELECT * FROM telegram_audit 
 WHERE org_id = 'uuid'
 ORDER BY created_at DESC 
 LIMIT 50;
 ```
 
-### Erreurs récentes
+### Recent errors
 ```sql
--- Voir les erreurs des dernières 24h
+-- See errors from the last 24 hours
 SELECT * FROM telegram_audit 
 WHERE org_id = 'uuid' 
 AND status = 'failed'
@@ -185,45 +185,45 @@ AND created_at > NOW() - INTERVAL '24 hours';
 
 ### Stats
 ```bash
-# Via l'API
+# Via the API
 GET /{org}/telegram/audit?limit=100
 ```
 
 ## Troubleshooting
 
-### Bot ne répond pas
-1. Vérifier webhook configuré: `python scripts/init-telegram-bot.py --skip-db`
-2. Vérifier URL accessible depuis internet
-3. Vérifier logs audit: `status = 'failed'`
+### Bot does not respond
+1. Verify the webhook is configured: `python scripts/init-telegram-bot.py --skip-db`
+2. Verify the URL is reachable from the internet
+3. Verify audit logs: `status = 'failed'`
 
-### User non autorisé
-- Vérifier que le user a démarré le bot: `telegram_users.is_verified = true`
-- Vérifier la capability: `user_capabilities` table
+### User not authorized
+- Verify the user has started the bot: `telegram_users.is_verified = true`
+- Verify the capability: `user_capabilities` table
 
-### Webhook erreurs 401
-- Vérifier le `webhook_secret` correspond
-- Vérifier header `X-Telegram-Bot-Api-Secret-Token`
+### Webhook 401 errors
+- Verify the `webhook_secret` matches
+- Verify header `X-Telegram-Bot-Api-Secret-Token`
 
-## Développement futur
+## Future development
 
-### Ajouter une nouvelle primitive
+### Adding a new primitive
 
-1. Créer dossier: `services/telegram/nom_primitive/`
-2. Créer `service.py` avec la logique
-3. Ajouter handler dans `webhook_handler.py`
-4. Mettre à jour `openapi/api.yaml`
-5. Documenter dans ce fichier
+1. Create folder: `services/telegram/primitive_name/`
+2. Create `service.py` with the logic
+3. Add handler in `webhook_handler.py`
+4. Update `openapi/api.yaml`
+5. Document in this file
 
-### Implémenter l'OCR
+### Implementing the OCR
 
-Le fichier `services/telegram/upload_invoice/service.py` contient une méthode `_perform_ocr()` qui retourne actuellement des données d'exemple.
+The file `services/telegram/upload_invoice/service.py` contains a `_perform_ocr()` method that currently returns sample data.
 
-Pour implémenter:
-1. Créer le dossier `app/agents/invoice_ocr/`
-2. Implémenter le workflow agentic
-3. Appeler l'agent depuis `_perform_ocr()`
+To implement:
+1. Create the `app/agents/invoice_ocr/` folder
+2. Implement the agentic workflow
+3. Call the agent from `_perform_ocr()`
 
-## Références
+## References
 
 - [Telegram Bot API](https://core.telegram.org/bots/api)
 - [Webhook Setup](https://core.telegram.org/bots/webhooks)

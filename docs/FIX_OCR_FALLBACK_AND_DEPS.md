@@ -1,189 +1,189 @@
-# ✅ Corrections appliquées - Gestion gracieuse OCR + Mise à jour dépendances
+# ✅ Fixes applied - Graceful OCR handling + Dependency update
 
-## 📋 Résumé des problèmes résolus
+## 📋 Summary of solved problems
 
-### 1. Conflit de dépendances httpx
-**Problème** : 
-- `supabase==1.2.0` nécessite `httpx<0.25.0`
-- `google-genai>=1.0.0` nécessite `httpx>=0.25.0`
-- Résultat : Gemini désactivé, OCR impossible
+### 1. httpx dependency conflict
+**Problem**: 
+- `supabase==1.2.0` requires `httpx<0.25.0`
+- `google-genai>=1.0.0` requires `httpx>=0.25.0`
+- Result: Gemini disabled, OCR impossible
 
-**Solution** : Mise à jour vers `supabase>=2.0.0` compatible avec `httpx>=0.25.0`
+**Solution**: Update to `supabase>=2.0.0` compatible with `httpx>=0.25.0`
 
-### 2. Violation contraintes NOT NULL
-**Problème** :
-- Quand OCR échoue, `amount_ttc` et autres champs sont NULL
-- La DB rejette l'insertion avec erreur 23502
+### 2. NOT NULL constraint violations
+**Problem**:
+- When OCR fails, `amount_ttc` and other fields are NULL
+- The DB rejects the insert with error 23502
 
-**Solution** : Valeurs par défaut (0.0, "") quand OCR échoue
+**Solution**: Default values (0.0, "") when OCR fails
 
 ---
 
-## 🔧 Modifications apportées
+## 🔧 Changes made
 
-### 1. `requirements.txt` - Mise à jour des dépendances
+### 1. `requirements.txt` - Dependency update
 
 ```diff
 - supabase==1.2.0
 - httpx>=0.24.0,<0.25.0
 + supabase>=2.0.0,<3.0.0
 + httpx>=0.25.0,<0.28.0
-+ google-genai>=1.0.0  # Réactivé!
++ google-genai>=1.0.0  # Re-enabled!
 ```
 
-### 2. `upload_invoice/service.py` - Gestion gracieuse OCR
+### 2. `upload_invoice/service.py` - Graceful OCR handling
 
-#### Nouvelle méthode `_create_fallback_extraction()`
-Retourne des valeurs par défaut quand Gemini est indisponible :
+#### New method `_create_fallback_extraction()`
+Returns default values when Gemini is unavailable:
 ```python
 ExtractedInvoiceData(
     supplier_name="",
     supplier_address="",
     amount_ht=0.0,
-    amount_ttc=0.0,  # Plus de NULL!
+    amount_ttc=0.0,  # No more NULL!
     vat_amount=0.0,
     vat_rate=0.0,
     confidence_score=0.0,
-    raw_data={"fallback": True, "note": "À compléter manuellement"}
+    raw_data={"fallback": True, "note": "To be completed manually"}
 )
 ```
 
-#### Modification `_perform_ocr()`
-- Détection de l'indisponibilité de Gemini
-- Fallback automatique si exception
-- Valeurs par défaut pour tous les champs
+#### Change to `_perform_ocr()`
+- Detection of Gemini unavailability
+- Automatic fallback if exception
+- Default values for all fields
 
-#### Modification `_create_draft_invoice()`
-- Garantie de valeurs non-NULL :
-  - `amount_ttc: 0.0` (au lieu de None)
+#### Change to `_create_draft_invoice()`
+- Guarantee of non-NULL values:
+  - `amount_ttc: 0.0` (instead of None)
   - `amount_ht: 0.0`
   - `vat_amount: 0.0`
-  - `supplier_name: "À compléter"`
-- Flag `needs_manual_review` dans metadata
+  - `supplier_name: "To be completed"`
+- `needs_manual_review` flag in metadata
 
-### 3. `bot_construction.py` - Messages adaptatifs
+### 3. `bot_construction.py` - Adaptive messages
 
 ```python
 if is_fallback:
-    message = "⚠️ Facture reçue mais OCR indisponible..."
+    message = "⚠️ Invoice received but OCR unavailable..."
 else:
-    message = "✅ Facture analysée avec succès !"
+    message = "✅ Invoice successfully analyzed!"
 ```
 
 ---
 
-## 📊 Comportement par scénario
+## 📊 Behavior by scenario
 
-### Scénario 1 : OCR fonctionne normalement
+### Scenario 1: OCR works normally
 ```
-1. User envoie PDF
-2. Gemini extrait : Fournisseur, Montants, etc.
-3. Facture créée avec données complètes
-4. Message : "✅ Facture analysée avec succès !"
-5. User valide → Notification gérants
-```
-
-### Scénario 2 : Gemini indisponible (conflit dépendances)
-```
-1. User envoie PDF
-2. Détection : Gemini non disponible
-3. Fallback : valeurs par défaut (0, "")
-4. Facture créée avec "needs_manual_review": true
-5. Message : "⚠️ OCR indisponible - À compléter manuellement"
-6. User doit compléter via l'application web
+1. User sends PDF
+2. Gemini extracts: Supplier, Amounts, etc.
+3. Invoice created with complete data
+4. Message: "✅ Invoice successfully analyzed!"
+5. User validates → Notification to managers
 ```
 
-### Scénario 3 : OCR échoue (document illisible)
+### Scenario 2: Gemini unavailable (dependency conflict)
 ```
-1. User envoie PDF flou
-2. Gemini retourne erreur
-3. Fallback : valeurs par défaut
-4. Facture créée en statut "brouillon"
-5. Message indique échec + nécessité de compléter
+1. User sends PDF
+2. Detection: Gemini not available
+3. Fallback: default values (0, "")
+4. Invoice created with "needs_manual_review": true
+5. Message: "⚠️ OCR unavailable - To be completed manually"
+6. User must complete via the web app
+```
+
+### Scenario 3: OCR fails (unreadable document)
+```
+1. User sends blurry PDF
+2. Gemini returns error
+3. Fallback: default values
+4. Invoice created in "draft" status
+5. Message indicates failure + need to complete
 ```
 
 ---
 
-## 🧪 Tests effectués
+## 🧪 Tests performed
 
 ```bash
 ✅ Auth/Supabase import OK
 ✅ InvoiceUploadService import OK
-✅ Bot construction import OK
+✅ Construction bot import OK
 ✅ Main app import OK
 ```
 
 ---
 
-## 🚀 Déploiement
+## 🚀 Deployment
 
-### 1. Mettre à jour les dépendances
+### 1. Update the dependencies
 ```bash
 cd surenSaasBack
 source venv/bin/activate
 pip install -r requirements.txt --upgrade
 ```
 
-### 2. Vérifier les dépendances
+### 2. Check the dependencies
 ```bash
 ./scripts/check_dependencies.sh
 ```
 
-### 3. Déployer
+### 3. Deploy
 ```bash
 ./scripts/deploy_back_test.sh
 ```
 
 ---
 
-## 📈 Résultat attendu
+## 📈 Expected result
 
-### Logs Cloud Run
+### Cloud Run logs
 
-**Cas nominal (OCR OK)** :
+**Nominal case (OCR OK)**:
 ```
-📝 Données extraites par OCR:
-   - Fournisseur: Matériaux Pro SARL
-   - Montant TTC: 1200.0€
-   - Score confiance: 0.85
-✅ OCR terminé
-✅ Message envoyé avec mode: Markdown
+📝 Data extracted by OCR:
+   - Supplier: Matériaux Pro SARL
+   - TTC amount: 1200.0€
+   - Confidence score: 0.85
+✅ OCR finished
+✅ Message sent with mode: Markdown
 ```
 
-**Cas dégradé (OCR indisponible)** :
+**Degraded case (OCR unavailable)**:
 ```
-⚠️ Gemini non disponible: Conflit de dépendances...
-📝 Création d'une extraction par défaut (fallback)
-⚠️ Facture reçue mais OCR indisponible
-✅ Message envoyé avec mode: Markdown
+⚠️ Gemini not available: Dependency conflict...
+📝 Creating a default extraction (fallback)
+⚠️ Invoice received but OCR unavailable
+✅ Message sent with mode: Markdown
 ```
 
 ### User Experience
 
-| Scénario | Message Bot | Action User |
+| Scenario | Bot Message | User Action |
 |----------|-------------|-------------|
-| OCR OK | "✅ Facture analysée" | Valider si OK |
-| OCR Fail | "⚠️ À compléter manuellement" | Compléter dans web app |
+| OCR OK | "✅ Invoice analyzed" | Validate if OK |
+| OCR Fail | "⚠️ To be completed manually" | Complete in web app |
 
 ---
 
-## 🔮 Améliorations futures
+## 🔮 Future improvements
 
-1. **Interface web** : Page de complétion pour factures avec `needs_manual_review=true`
-2. **Notification** : Email aux admins quand une facture nécessite complétion
-3. **Retry OCR** : Bouton "Réessayer l'OCR" si le service redevient disponible
-4. **Cache** : Stocker temporairement les fichiers en attente d'OCR
+1. **Web interface**: Completion page for invoices with `needs_manual_review=true`
+2. **Notification**: Email to admins when an invoice needs completion
+3. **OCR retry**: "Retry OCR" button if the service becomes available again
+4. **Cache**: Temporarily store files pending OCR
 
 ---
 
-## ✅ Checklist validation
+## ✅ Validation checklist
 
-- [ ] Déploiement réussi sans erreur
-- [ ] Test upload PDF avec OCR fonctionnel
-- [ ] Test upload PDF avec OCR indisponible (fallback)
-- [ ] Vérification création facture en DB avec valeurs par défaut
-- [ ] Test complétion manuelle via web app
-- [ ] Vérification notifications gérants
+- [ ] Deployment successful without error
+- [ ] Test PDF upload with working OCR
+- [ ] Test PDF upload with OCR unavailable (fallback)
+- [ ] Verify invoice creation in DB with default values
+- [ ] Test manual completion via web app
+- [ ] Verify manager notifications
 
-**Date de mise à jour** : 2024-03-27
-**Statut** : ✅ Prêt pour déploiement
+**Update date**: 2024-03-27
+**Status**: ✅ Ready for deployment

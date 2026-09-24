@@ -1,8 +1,8 @@
-# Agent d'Extraction IA - Documentation
+# AI Extraction Agent - Documentation
 
-## Vue d'ensemble
+## Overview
 
-Agent modulaire d'extraction de données depuis documents (PDF, images) utilisant **Google Gemini Flash 1.5**.
+Modular agent for extracting data from documents (PDF, images) using **Google Gemini Flash 1.5**.
 
 ### Architecture
 
@@ -10,116 +10,116 @@ Agent modulaire d'extraction de données depuis documents (PDF, images) utilisan
 app/agents/
 ├── base/
 │   ├── __init__.py
-│   └── gemini_client.py          # Client API Gemini
+│   └── gemini_client.py          # Gemini API client
 ├── models/
 │   ├── __init__.py
-│   └── extraction_models.py      # Modèles de données (dataclasses)
+│   └── extraction_models.py      # Data models (dataclasses)
 ├── prompts/
 │   ├── __init__.py
-│   └── extraction_prompts.py     # Prompts système
+│   └── extraction_prompts.py     # System prompts
 ├── processors/
 │   ├── __init__.py
-│   └── file_processor.py         # Traitement fichiers
-├── generic_extractor.py          # Extracteur générique (point d'entrée)
-└── construction_invoice_agent.py # Agent factures (wrapper)
+│   └── file_processor.py         # File processing
+├── generic_extractor.py          # Generic extractor (entry point)
+└── construction_invoice_agent.py # Invoice agent (wrapper)
 ```
 
 ## Installation
 
-### 1. Variables d'environnement
+### 1. Environment variables
 
-Ajouter dans `~/.bashrc` :
+Add to `~/.bashrc`:
 
 ```bash
-export SUREN_GOOGLE_GEMINI_CREDENTIALS_B64="VOTRE_CLE_API_BASE64"
+export SUREN_GOOGLE_GEMINI_CREDENTIALS_B64="YOUR_API_KEY_BASE64"
 ```
 
-Pour encoder votre clé API :
+To encode your API key:
 ```bash
-echo -n "votre_cle_api" | base64
+echo -n "your_api_key" | base64
 ```
 
-### 2. Dépendances
+### 2. Dependencies
 
 ```bash
 cd surenSaasBack
 pip install -r requirements.txt
 ```
 
-Nouvelles dépendances ajoutées :
-- `google-generativeai>=0.3.0` - Client Gemini
-- `Pillow>=10.0.0` - Traitement images
+New dependencies added:
+- `google-generativeai>=0.3.0` - Gemini client
+- `Pillow>=10.0.0` - Image processing
 
 ## Configuration
 
-Dans `app/core/config.py`, la clé API est automatiquement chargée :
+In `app/core/config.py`, the API key is automatically loaded:
 
 ```python
 gemini_api_key: str = ""
-gemini_model: str = "gemini-1.5-flash"  # ou gemini-1.5-pro
+gemini_model: str = "gemini-1.5-flash"  # or gemini-1.5-pro
 
-# Mapping des variables préfixées
+# Mapping of prefixed variables
 ("gemini_api_key", f"{env}_google_gemini_credentials_b64")
 ```
 
-## Utilisation
+## Usage
 
-### Extraction simple - Facture
+### Simple extraction - Invoice
 
 ```python
 from app.agents.generic_extractor import create_invoice_extractor
 
 extractor = create_invoice_extractor()
-result = await extractor.extract("https://.../facture.pdf")
+result = await extractor.extract("https://.../invoice.pdf")
 
-# Résultat
-print(result.raw_data)  # JSON brut extrait par Gemini
+# Result
+print(result.raw_data)  # Raw JSON extracted by Gemini
 print(result.status)    # success/error/partial
 ```
 
-### Extraction personnalisée
+### Custom extraction
 
 ```python
 from app.agents.generic_extractor import GenericDocumentExtractor
 
 extractor = GenericDocumentExtractor(
     document_type="custom",
-    system_prompt="Ton prompt spécifique...",
-    output_schema={"champ1": "description"}
+    system_prompt="Your specific prompt...",
+    output_schema={"field1": "description"}
 )
 
 result = await extractor.extract("document.pdf")
 ```
 
-### Helper pour types prédéfinis
+### Helper for predefined types
 
 ```python
 from app.agents.generic_extractor import (
-    create_invoice_extractor,    # Factures
-    create_receipt_extractor,    # Tickets de caisse
-    create_custom_extractor      # Personnalisé
+    create_invoice_extractor,    # Invoices
+    create_receipt_extractor,    # Receipts
+    create_custom_extractor      # Custom
 )
 
-# Facture
+# Invoice
 invoice_extractor = create_invoice_extractor()
 
-# Ticket
+# Receipt
 ticket_extractor = create_receipt_extractor()
 
-# Personnalisé
+# Custom
 custom_extractor = create_custom_extractor(
     document_type="delivery_note",
     fields={
-        "order_number": "Numéro de commande",
-        "items": "Liste des articles"
+        "order_number": "Order number",
+        "items": "List of items"
     },
-    instructions="Extrais aussi le transporteur"
+    instructions="Also extract the carrier"
 )
 ```
 
-## Format de sortie
+## Output format
 
-### JSON brut (raw_data)
+### Raw JSON (raw_data)
 
 ```json
 {
@@ -143,7 +143,7 @@ custom_extractor = create_custom_extractor(
     },
     "line_items": [
       {
-        "description": "Ciment sac 35kg",
+        "description": "Cement bag 35kg",
         "quantity": 10,
         "unit_price": 50.00,
         "total_ht": 500.00
@@ -157,33 +157,33 @@ custom_extractor = create_custom_extractor(
 }
 ```
 
-### ExtractionResult (objet Python)
+### ExtractionResult (Python object)
 
 ```python
 @dataclass
 class ExtractionResult:
-    document_type: str              # Type de document
-    extraction_timestamp: datetime  # Date extraction
-    source_file: str               # Source (URL ou chemin)
-    model_used: str                # Modèle Gemini utilisé
-    raw_data: Dict[str, Any]       # JSON brut
+    document_type: str              # Document type
+    extraction_timestamp: datetime  # Extraction date
+    source_file: str               # Source (URL or path)
+    model_used: str                # Gemini model used
+    raw_data: Dict[str, Any]       # Raw JSON
     status: ExtractionStatus       # success/error/partial
-    processing_time_ms: float      # Temps de traitement
-    pages_processed: int           # Nombre de pages
+    processing_time_ms: float      # Processing time
+    pages_processed: int           # Number of pages
     
     def get_confidence_score(self) -> float:
-        """Score de confiance global 0-1"""
+        """Overall confidence score 0-1"""
 ```
 
-## Prompts système
+## System prompts
 
-### Prompts prédéfinis
+### Predefined prompts
 
-- **Factures** (`invoice`) : Extraction comptable complète
-- **Tickets** (`receipt`) : Tickets de caisse
-- **Contrats** (`contract`) : Documents juridiques
+- **Invoices** (`invoice`): Complete accounting extraction
+- **Receipts** (`receipt`): Point-of-sale receipts
+- **Contracts** (`contract`): Legal documents
 
-### Créer un prompt personnalisé
+### Create a custom prompt
 
 ```python
 from app.agents.prompts import create_custom_prompt
@@ -191,85 +191,85 @@ from app.agents.prompts import create_custom_prompt
 prompt = create_custom_prompt(
     document_type="delivery_note",
     fields={
-        "order_number": "Numéro de commande",
-        "delivery_date": "Date de livraison",
-        "items": "Articles livrés"
+        "order_number": "Order number",
+        "delivery_date": "Delivery date",
+        "items": "Delivered items"
     },
-    instructions="Extrais aussi le nom du transporteur"
+    instructions="Also extract the carrier's name"
 )
 ```
 
 ## Tests
 
-### Lancer les tests
+### Run the tests
 
 ```bash
 cd surenSaasBack
 pytest tests/test_gemini_extraction.py -v
 ```
 
-### Scénarios de tests
+### Test scenarios
 
-**19 tests couvrant :**
-1. ✅ Client Gemini (connexion, clés, types MIME)
-2. ✅ File Processor (téléchargement, base64, validation)
-3. ✅ Extracteur générique (extraction, parsing, validation)
-4. ✅ Construction Invoice Agent (conversion, validation TVA)
-5. ✅ Helpers (création extracteurs)
+**19 tests covering:**
+1. ✅ Gemini client (connection, keys, MIME types)
+2. ✅ File Processor (download, base64, validation)
+3. ✅ Generic extractor (extraction, parsing, validation)
+4. ✅ Construction Invoice Agent (conversion, VAT validation)
+5. ✅ Helpers (extractor creation)
 
-### Tests en échec (5/24)
+### Failing tests (5/24)
 
-Les échecs sont des problèmes de mocking avec FastAPI DI et le registry. **Ce ne sont pas des bugs fonctionnels**.
+The failures are mocking problems with FastAPI DI and the registry. **They are not functional bugs**.
 
-## Limites et contraintes
+## Limits and constraints
 
 ### Gemini Flash 1.5
 
-- **Max file size** : 20 MB
-- **Max pages PDF** : 5 pages (limite projet)
-- **Max dimension image** : 4096x4096 pixels
-- **Max output tokens** : 8192
+- **Max file size**: 20 MB
+- **Max PDF pages**: 5 pages (project limit)
+- **Max image dimension**: 4096x4096 pixels
+- **Max output tokens**: 8192
 
-### Optimisation
+### Optimization
 
-Les images sont automatiquement optimisées :
-- Redimensionnement si > 4096px
-- Compression JPEG (qualité 85)
-- Conversion RGB si nécessaire
+Images are automatically optimized:
+- Resizing if > 4096px
+- JPEG compression (quality 85)
+- RGB conversion if necessary
 
-## Migration depuis l'ancien système
+## Migration from the old system
 
-L'ancien `ConstructionInvoiceAgent` (dummy) est maintenant un wrapper :
+The old `ConstructionInvoiceAgent` (dummy) is now a wrapper:
 
 ```python
-# Avant (dummy)
+# Before (dummy)
 agent = ConstructionInvoiceAgent()
 data = await agent.extract_from_document(url, "pdf")
-# → Données aléatoires
+# → Random data
 
-# Maintenant (Gemini)
+# Now (Gemini)
 agent = ConstructionInvoiceAgent()
 data = await agent.extract_from_document(url, "pdf")
-# → Vraies données extraites par IA
+# → Real data extracted by AI
 ```
 
-L'API reste identique, seul le backend change.
+The API remains identical, only the backend changes.
 
 ## Roadmap / TODO
 
-- [ ] Implémenter retry avec backoff en cas d'erreur API
-- [ ] Ajouter cache Redis pour éviter re-extraction
-- [ ] Support streaming pour gros documents
-- [ ] Ajouter validation schéma JSON avec Pydantic
-- [ ] Métriques et monitoring (temps, coût, taux succès)
+- [ ] Implement retry with backoff in case of API error
+- [ ] Add Redis cache to avoid re-extraction
+- [ ] Streaming support for large documents
+- [ ] Add JSON schema validation with Pydantic
+- [ ] Metrics and monitoring (time, cost, success rate)
 
 ## Support
 
-Pour les erreurs API Gemini, vérifier :
-1. Clé API valide dans les variables d'environnement
-2. Quota API non dépassé (console Google Cloud)
-3. Fichier < 20 MB et < 5 pages
+For Gemini API errors, check:
+1. Valid API key in the environment variables
+2. API quota not exceeded (Google Cloud console)
+3. File < 20 MB and < 5 pages
 
 ---
 
-**Note** : Cet agent est conçu pour être modulaire. Pour ajouter un nouveau type de document, créez juste un nouveau prompt et utilisez `GenericDocumentExtractor` ou `create_custom_extractor()`.
+**Note**: This agent is designed to be modular. To add a new document type, just create a new prompt and use `GenericDocumentExtractor` or `create_custom_extractor()`.

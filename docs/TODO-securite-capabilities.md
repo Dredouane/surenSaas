@@ -1,114 +1,114 @@
-# TODO-Sécurité-Capabilities.md
+# TODO-Security-Capabilities.md
 
-## 📊 Analyse de l'état actuel du système de sécurité et capabilities
+## 📊 Analysis of the current state of the security and capabilities system
 
-**Date** : 2026-03-27  
-**Contexte** : Problème d'accès aux factures (401 Unauthorized) et manque de gestion des capabilities
+**Date**: 2026-03-27  
+**Context**: Invoice access problem (401 Unauthorized) and lack of capabilities management
 
 ---
 
-## 🔴 Problèmes identifiés
+## 🔴 Identified problems
 
-### 1. Problème d'accès 401 - Cookie de session manquant
+### 1. 401 access problem - Missing session cookie
 
-**Erreur observée** :
+**Observed error**:
 ```
-WARNING | auth:92 | Cookie de session manquant
-Requête GET /api/v1/invoices/{id} - 401
+WARNING | auth:92 | Missing session cookie
+Request GET /api/v1/invoices/{id} - 401
 ```
 
-**Fichier concerné** : `surenSaasBack/app/api/invoices.py:69`
+**File affected**: `surenSaasBack/app/api/invoices.py:69`
 
-**Code actuel** :
+**Current code**:
 ```python
 def check_user_org_access(request: Request, org_id: str):
     user = get_current_user_from_cookie(request)
     if user["org_id"] != org_id:
-        raise HTTPException(status_code=403, detail="Accès non autorisé")
+        raise HTTPException(status_code=403, detail="Access not authorized")
     return user
 ```
 
-**Analyse** :
-- La fonction vérifie uniquement que l'utilisateur appartient à l'org
-- Elle ne vérifie PAS les capabilities (ex: `facture:read`)
-- Le cookie peut être absent ou expiré
-- Le problème vient probablement de la gestion des cookies cross-domain (frontend vs backend)
+**Analysis**:
+- The function only verifies that the user belongs to the org
+- It does NOT check the capabilities (e.g.: `facture:read`)
+- The cookie may be absent or expired
+- The problem probably comes from cross-domain cookie handling (frontend vs backend)
 
 ---
 
-### 2. Système de Capabilities - État détaillé
+### 2. Capabilities System - Detailed state
 
-#### ✅ Ce qui est implémenté
+#### ✅ What is implemented
 
-**Tables Base de données** (Migration 006) :
-- `organization_capabilities` : Liste des capabilities disponibles par organisation
-- `user_capabilities` : Assignation capabilities → utilisateurs
-- Vue `user_active_capabilities` : Vue agrégée des capabilities actives
+**Database tables** (Migration 006):
+- `organization_capabilities`: List of capabilities available per organization
+- `user_capabilities`: Capability → user assignment
+- View `user_active_capabilities`: Aggregated view of active capabilities
 
-**Backend - Services** (`app/services/admin_service.py`) :
-- `get_organization_capabilities()` - Liste capabilities org
-- `get_user_capabilities()` - Liste capabilities user
-- `assign_capability_to_user()` - Assigner capability
-- `revoke_user_capability()` - Révoquer capability
+**Backend - Services** (`app/services/admin_service.py`):
+- `get_organization_capabilities()` - List of org capabilities
+- `get_user_capabilities()` - List of user capabilities
+- `assign_capability_to_user()` - Assign a capability
+- `revoke_user_capability()` - Revoke a capability
 
-**Backend - API** (`app/api/admin.py`) :
+**Backend - API** (`app/api/admin.py`):
 ```python
-GET  /organization-capabilities      # Liste capabilities org
-POST /organization-capabilities      # Créer capability
-GET  /users/{id}/capabilities        # Liste capabilities user
-POST /users/{id}/capabilities        # Assigner capability
-PUT  /users/{id}/capabilities        # Mise à jour batch
-DELETE /users/{id}/capabilities/{code}  # Révoquer
+GET  /organization-capabilities      # List of org capabilities
+POST /organization-capabilities      # Create a capability
+GET  /users/{id}/capabilities        # List of user capabilities
+POST /users/{id}/capabilities        # Assign a capability
+PUT  /users/{id}/capabilities        # Batch update
+DELETE /users/{id}/capabilities/{code}  # Revoke
 ```
 
-#### ❌ Ce qui manque
+#### ❌ What is missing
 
-**1. Middleware/Decorator de vérification capabilities**
+**1. Middleware/Decorator for capability verification**
 
-Actuellement aucun mécanisme pour protéger les routes API avec des capabilities.
+Currently no mechanism to protect API routes with capabilities.
 
-**2. Page de gestion des capabilities (Frontend)**
+**2. Capabilities management page (Frontend)**
 
-Lien existe dans `page.tsx:420` mais la page n'est pas implémentée.
+Link exists in `page.tsx:420` but the page is not implemented.
 
-**3. Menu frontend conditionné par capabilities**
+**3. Frontend menu driven by capabilities**
 
-Actuellement le menu est statique, pas de vérification capability.
-
----
-
-### 3. RLS Supabase - Problèmes
-
-Les RLS policies utilisent `auth.uid()` qui ne fonctionne pas avec le service key (backend).
-
-**Solution temporaire** : Désactiver RLS pour le prototypage
-**Solution production** : Remplacer RLS par vérification capabilities côté backend
+Currently the menu is static, no capability check.
 
 ---
 
-### 4. Line_items manquants
+### 3. Supabase RLS - Problems
 
-**Problème** : Les items de facture extraits par Gemini ne sont pas stockés
+The RLS policies use `auth.uid()` which does not work with the service key (backend).
 
-**Cause** : `ExtractedInvoiceData` ne récupère pas les line_items (service.py ligne 270-296)
-
-**Table invoices** : Champ `items` = `'[]'` (tableau vide)
-
-**Solution** :
-1. Modifier `ExtractedInvoiceData` pour inclure `line_items`
-2. Modifier `_perform_ocr` pour extraire les line_items
-3. Modifier `_create_draft_invoice` pour stocker les items
+**Temporary solution**: Disable RLS for prototyping
+**Production solution**: Replace RLS with capability checks on the backend
 
 ---
 
-## 🛠️ Actions immédiates recommandées
+### 4. Missing line_items
 
-### 1. Désactiver RLS (Prototypage)
+**Problem**: Invoice items extracted by Gemini are not stored
 
-**Fichier** : `db/scripts/disable_rls_prototyping.sql`
+**Cause**: `ExtractedInvoiceData` does not retrieve the line_items (service.py lines 270-296)
+
+**Table invoices**: `items` field = `'[]'` (empty array)
+
+**Solution**:
+1. Modify `ExtractedInvoiceData` to include `line_items`
+2. Modify `_perform_ocr` to extract the line_items
+3. Modify `_create_draft_invoice` to store the items
+
+---
+
+## 🛠️ Recommended immediate actions
+
+### 1. Disable RLS (Prototyping)
+
+**File**: `db/scripts/disable_rls_prototyping.sql`
 
 ```sql
--- Script pour désactiver RLS temporairement (PROTOTYPAGE UNIQUEMENT)
+-- Script to disable RLS temporarily (PROTOTYPING ONLY)
 ALTER TABLE invoices DISABLE ROW LEVEL SECURITY;
 ALTER TABLE clients DISABLE ROW LEVEL SECURITY;
 ALTER TABLE companies DISABLE ROW LEVEL SECURITY;
@@ -118,71 +118,71 @@ ALTER TABLE user_capabilities DISABLE ROW LEVEL SECURITY;
 ALTER TABLE organization_capabilities DISABLE ROW LEVEL SECURITY;
 ```
 
-### 2. Corriger le bug invoices.py ligne 176
+### 2. Fix the invoices.py line 176 bug
 
-Remplacer `return result.data[0] if result.data and len(result.data) > 0 else update_data` 
-par `return result.data[0]`
+Replace `return result.data[0] if result.data and len(result.data) > 0 else update_data` 
+with `return result.data[0]`
 
-### 3. Ajouter line_items dans l'extraction
+### 3. Add line_items to the extraction
 
-Modifier `_perform_ocr` pour récupérer et stocker les line_items extraits par Gemini.
-
----
-
-## 📋 Plan complet d'implémentation
-
-### Phase 1 : Corrections immédiates (1-2 jours)
-
-- [ ] Corriger le bug ligne 176 dans `invoices.py`
-- [ ] Ajouter line_items dans l'extraction OCR
-- [ ] Désactiver RLS temporairement
-- [ ] Investiguer le problème de cookie 401
-
-### Phase 2 : Implémentation Capabilities (3-5 jours)
-
-- [ ] Créer le decorator `require_capability`
-- [ ] Appliquer aux routes API existantes
-- [ ] Créer la page frontend de gestion des capabilities
-- [ ] Implémenter le hook `useCapabilities`
-- [ ] Conditionner le menu par capabilities
-
-### Phase 3 : Sécurisation (2-3 jours)
-
-- [ ] Audit de toutes les routes
-- [ ] Tests des permissions
-- [ ] Documentation pour les admins
+Modify `_perform_ocr` to retrieve and store the line_items extracted by Gemini.
 
 ---
 
-**Prochaine action recommandée** : Exécuter le script `disable_rls_prototyping.sql` pour débloquer l'accès immédiat.
+## 📋 Full implementation plan
+
+### Phase 1: Immediate fixes (1-2 days)
+
+- [ ] Fix the line 176 bug in `invoices.py`
+- [ ] Add line_items to the OCR extraction
+- [ ] Temporarily disable RLS
+- [ ] Investigate the 401 cookie problem
+
+### Phase 2: Capabilities implementation (3-5 days)
+
+- [ ] Create the `require_capability` decorator
+- [ ] Apply it to the existing API routes
+- [ ] Create the frontend capabilities management page
+- [ ] Implement the `useCapabilities` hook
+- [ ] Drive the menu by capabilities
+
+### Phase 3: Hardening (2-3 days)
+
+- [ ] Audit of all routes
+- [ ] Permission tests
+- [ ] Documentation for admins
 
 ---
 
-## ✅ Corrections appliquées le 2026-03-27
+**Recommended next action**: Run the `disable_rls_prototyping.sql` script to unblock immediate access.
 
-### 1. Gestion du cookie expiré - Redirection auto vers login
+---
 
-**Problème** : Quand le cookie de session expire, l'utilisateur reste sur la page et reçoit des erreurs 401
+## ✅ Fixes applied on 2026-03-27
 
-**Solution** :
-- Création de `AuthenticationError` dans `auth.py` avec flag `redirect_to_login`
-- Ajout de headers spécifiques (`X-Auth-Redirect`, `X-Auth-Error`) dans les réponses 401
-- Modification du proxy API (`route.ts`) pour détecter ces headers et rediriger
-- Création du hook `useApiErrorHandler.ts` pour gérer les erreurs côté client
-- Création du middleware Next.js (`middleware.ts`) pour vérifier le cookie avant d'accéder aux routes protégées
+### 1. Expired cookie handling - Auto redirect to login
 
-**Fichiers modifiés** :
-- `surenSaasBack/app/api/auth.py` - Exception personnalisée et gestion des erreurs
-- `surenSaasBack/app/api/invoices.py` - Gestion des AuthenticationError
-- `surenSaasFront/app/api/v1/[[...path]]/route.ts` - Détection des erreurs auth
-- `surenSaasFront/middleware.ts` - Vérification du cookie (NOUVEAU)
-- `surenSaasFront/hooks/useApiErrorHandler.ts` - Hook de gestion des erreurs (NOUVEAU)
+**Problem**: When the session cookie expires, the user stays on the page and gets 401 errors
 
-### 2. Création de la table invoice_items
+**Solution**:
+- Creation of `AuthenticationError` in `auth.py` with a `redirect_to_login` flag
+- Addition of specific headers (`X-Auth-Redirect`, `X-Auth-Error`) in 401 responses
+- Modification of the API proxy (`route.ts`) to detect these headers and redirect
+- Creation of the `useApiErrorHandler.ts` hook to handle errors on the client side
+- Creation of the Next.js middleware (`middleware.ts`) to check the cookie before accessing protected routes
 
-**Migration SQL** : `db/schema/018_create_invoice_items_table.sql`
+**Modified files**:
+- `surenSaasBack/app/api/auth.py` - Custom exception and error handling
+- `surenSaasBack/app/api/invoices.py` - Handling of AuthenticationErrors
+- `surenSaasFront/app/api/v1/[[...path]]/route.ts` - Detection of auth errors
+- `surenSaasFront/middleware.ts` - Cookie check (NEW)
+- `surenSaasFront/hooks/useApiErrorHandler.ts` - Error handling hook (NEW)
 
-**Structure** :
+### 2. Creation of the invoice_items table
+
+**SQL Migration**: `db/schema/018_create_invoice_items_table.sql`
+
+**Structure**:
 ```sql
 CREATE TABLE invoice_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -199,39 +199,39 @@ CREATE TABLE invoice_items (
 );
 ```
 
-**Fichiers modifiés** :
-- `surenSaasBack/app/services/telegram/upload_invoice/service.py` :
-  - Ajout du champ `line_items` dans `ExtractedInvoiceData`
-  - Extraction des line_items depuis la réponse Gemini
-  - Insertion des items dans `invoice_items` lors de la création de facture
-- `surenSaasBack/app/api/invoices.py` :
-  - Ajout du modèle `InvoiceItem` dans les schémas Pydantic
-  - Modification de `InvoiceCreate` et `InvoiceUpdate` pour accepter les items
-  - Modification de `InvoiceResponse` pour retourner les items
-  - Modification de `create_invoice` pour créer les items
-  - Modification de `get_invoice` pour récupérer les items
-  - Modification de `update_invoice` pour mettre à jour les items
-  - Correction du bug ligne 174 et 197 (`else update_data` → code correct)
+**Modified files**:
+- `surenSaasBack/app/services/telegram/upload_invoice/service.py`:
+  - Addition of the `line_items` field in `ExtractedInvoiceData`
+  - Extraction of line_items from the Gemini response
+  - Insertion of items in `invoice_items` during invoice creation
+- `surenSaasBack/app/api/invoices.py`:
+  - Addition of the `InvoiceItem` model in the Pydantic schemas
+  - Modification of `InvoiceCreate` and `InvoiceUpdate` to accept items
+  - Modification of `InvoiceResponse` to return the items
+  - Modification of `create_invoice` to create the items
+  - Modification of `get_invoice` to retrieve the items
+  - Modification of `update_invoice` to update the items
+  - Fix of the line 174 and 197 bug (`else update_data` → correct code)
 
-### 3. Modifications du service OCR
+### 3. OCR service modifications
 
-**Changements dans `_perform_ocr`** :
+**Changes in `_perform_ocr`**:
 ```python
-# Extraction des line_items depuis Gemini
+# Extraction of line_items from Gemini
 line_items = extracted.get("line_items", [])
 if line_items:
-    logger.info(f"📋 {len(line_items)} ligne(s) de détail extraite(s)")
+    logger.info(f"📋 {len(line_items)} detail line(s) extracted")
 
 extracted_data = ExtractedInvoiceData(
-    # ... champs existants ...
-    line_items=line_items,  # NOUVEAU
+    # ... existing fields ...
+    line_items=line_items,  # NEW
     raw_data={...}
 )
 ```
 
-**Changements dans `_create_draft_invoice`** :
+**Changes in `_create_draft_invoice`**:
 ```python
-# Insérer les lignes de détail (items) si présents
+# Insert the detail lines (items) if present
 if extracted_data.line_items and len(extracted_data.line_items) > 0:
     items_data = []
     for idx, item in enumerate(extracted_data.line_items):
@@ -252,54 +252,53 @@ if extracted_data.line_items and len(extracted_data.line_items) > 0:
 
 ---
 
-## 🧪 Tests recommandés
+## 🧪 Recommended tests
 
-### Test 1 : Cookie expiré
-1. Se connecter
-2. Attendre expiration du cookie (ou supprimer manuellement)
-3. Cliquer sur une facture
-4. Vérifier la redirection vers `/login?error=session_expired`
+### Test 1: Expired cookie
+1. Log in
+2. Wait for the cookie to expire (or delete it manually)
+3. Click on an invoice
+4. Verify the redirect to `/login?error=session_expired`
 
-### Test 2 : Extraction OCR avec items
-1. Envoyer une facture PDF via Telegram
-2. Vérifier que les items sont extraits (log backend)
-3. Vérifier que les items sont stockés en DB :
+### Test 2: OCR extraction with items
+1. Send a PDF invoice via Telegram
+2. Verify the items are extracted (backend log)
+3. Verify the items are stored in the DB:
    ```sql
    SELECT * FROM invoice_items WHERE invoice_id = '...';
    ```
-4. Vérifier que les items apparaissent dans l'API :
+4. Verify the items appear in the API:
    ```bash
    curl /api/v1/invoices/{id}?org_id=...
    ```
 
-### Test 3 : CRUD des items
-1. Créer une facture avec items via API
-2. Vérifier les items créés
-3. Modifier la facture avec nouveaux items
-4. Vérifier que les anciens items sont remplacés
+### Test 3: Items CRUD
+1. Create an invoice with items via the API
+2. Verify the created items
+3. Modify the invoice with new items
+4. Verify the old items are replaced
 
 ---
 
-## 📋 Scripts SQL à exécuter
+## 📋 SQL scripts to run
 
-### 1. Créer la table invoice_items
+### 1. Create the invoice_items table
 ```bash
-# Exécuter dans Supabase Dashboard → SQL Editor
+# Run in the Supabase Dashboard → SQL Editor
 cat db/schema/018_create_invoice_items_table.sql
 ```
 
-### 2. Désactiver RLS temporairement (si bloquant)
+### 2. Temporarily disable RLS (if blocking)
 ```bash
-# Exécuter en cas de problèmes d'accès
+# Run in case of access problems
 cat db/scripts/disable_rls_prototyping.sql
 ```
 
 ---
 
-## 🎯 Prochaines étapes suggérées
+## 🎯 Suggested next steps
 
-1. **Tests** : Vérifier que tout fonctionne correctement
-2. **Déploiement** : Déployer backend et frontend
-3. **Documentation** : Mettre à jour la documentation utilisateur
-4. **Future** : Implémenter la vérification des capabilities dans les routes API
-
+1. **Testing**: Verify everything works correctly
+2. **Deployment**: Deploy backend and frontend
+3. **Documentation**: Update the user documentation
+4. **Future**: Implement capability checks in the API routes

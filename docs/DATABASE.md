@@ -1,33 +1,33 @@
-# Base de données (Supabase Postgres)
+# Database (Supabase Postgres)
 
-## Organisation des scripts
+## Script organization
 
-Les scripts SQL sont dans `/home/redouane/dev/AI-ERA/surenSaas/db/` :
+The SQL scripts are in `/home/redouane/dev/AI-ERA/surenSaas/db/`:
 
 ```
 db/
-├── schema/                    # Structure initiale (à exécuter dans l'ordre)
-│   ├── 001_organizations.sql  # Table organisations (racine multi-tenant)
-│   ├── 002_users.sql          # Profils utilisateurs
+├── schema/                    # Initial structure (to run in order)
+│   ├── 001_organizations.sql  # Organizations table (multi-tenant root)
+│   ├── 002_users.sql          # User profiles
 │   ├── 003_pre_authorized_emails.sql  # Invitations
-│   ├── 004_user_org_membership.sql    # Liaison user-org
-│   └── 005_auth_triggers.sql  # Automatisation signup
+│   ├── 004_user_org_membership.sql    # User-org link
+│   └── 005_auth_triggers.sql  # Signup automation
 │
-├── migrations/               # Modifications versionnées (non créé)
-│   └── (futures évolutions)
+├── migrations/               # Versioned changes (not created)
+│   └── (future evolutions)
 │
 └── policies/                 # RLS policies
-    └── auth_rls.sql          # Sécurité row-level
+    └── auth_rls.sql          # Row-level security
 ```
 
-## Ordre d'exécution initial
+## Initial execution order
 
-**IMPORTANT** : Exécuter les scripts dans cet ordre :
+**IMPORTANT**: Run the scripts in this order:
 
 ```bash
-# 1. Se connecter à Supabase -> SQL Editor -> New query
+# 1. Log in to Supabase -> SQL Editor -> New query
 
-# 2. Exécuter chaque fichier dans l'ordre :
+# 2. Run each file in order:
 #    001_organizations.sql
 #    002_users.sql  
 #    003_pre_authorized_emails.sql
@@ -35,26 +35,26 @@ db/
 #    005_auth_triggers.sql
 #    auth_rls.sql (policies)
 
-# OU utiliser le script (si psql disponible)
+# OR use the script (if psql is available)
 ./scripts/migrate.sh
 ```
 
-## Tables principales
+## Main tables
 
 ### 1. organizations (001)
-Table racine du multi-tenant.
+Root table of the multi-tenant setup.
 ```sql
 CREATE TABLE organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug TEXT UNIQUE NOT NULL,           -- Pour routing [org]
+    slug TEXT UNIQUE NOT NULL,           # For [org] routing
     name TEXT NOT NULL,
-    theme_config JSONB DEFAULT '{}',     -- CSS variables
+    theme_config JSONB DEFAULT '{}',     # CSS variables
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
 ### 2. users (002)
-Profils utilisateurs, liés à auth.users de Supabase.
+User profiles, linked to Supabase's auth.users.
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -67,7 +67,7 @@ CREATE TABLE users (
 ```
 
 ### 3. pre_authorized_emails (003)
-Emails autorisés à créer un compte dans une org.
+Emails authorized to create an account in an org.
 ```sql
 CREATE TABLE pre_authorized_emails (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -82,7 +82,7 @@ CREATE TABLE pre_authorized_emails (
 ```
 
 ### 4. user_org_membership (004)
-Association user-organisation avec rôle.
+User-organization association with role.
 ```sql
 CREATE TABLE user_org_membership (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -94,8 +94,8 @@ CREATE TABLE user_org_membership (
 );
 ```
 
-### 5. Trigger auth (005)
-Crée automatiquement le membership quand un user s'inscrit.
+### 5. Auth trigger (005)
+Automatically creates the membership when a user signs up.
 ```sql
 CREATE OR REPLACE FUNCTION create_user_membership()
 RETURNS TRIGGER AS $$
@@ -118,52 +118,52 @@ CREATE TRIGGER on_auth_user_created
 ## RLS Policies (db/policies/auth_rls.sql)
 
 ```sql
--- pre_authorized_emails : lecture par admins org
+-- pre_authorized_emails: read by org admins
 CREATE POLICY "admin_read_pre_auth" ON pre_authorized_emails
     FOR SELECT USING (org_id IN (
         SELECT org_id FROM user_org_membership 
         WHERE user_id = auth.uid() AND role = 'admin'
     ));
 
--- user_org_membership : user voit ses propres memberships
+-- user_org_membership: user sees their own memberships
 CREATE POLICY "user_read_own_memberships" ON user_org_membership
     FOR SELECT USING (user_id = auth.uid());
 ```
 
-## Créer une organisation (exemple TEST)
+## Create an organization (TEST example)
 
-Dans Supabase SQL Editor après avoir exécuté tous les scripts :
+In the Supabase SQL Editor after running all the scripts:
 
 ```sql
--- Créer org de test
+-- Create the test org
 INSERT INTO organizations (slug, name) 
-VALUES ('test-ma-societe', 'Ma Société - TEST')
+VALUES ('test-my-company', 'My Company - TEST')
 RETURNING id;
 
--- Récupérer l'UUID affiché et le mettre dans .env.test : TEST_ORG_ID
+-- Grab the displayed UUID and put it in .env.test: TEST_ORG_ID
 ```
 
-## Inviter un utilisateur
+## Invite a user
 
 ```sql
--- Admin invite un email
+-- Admin invites an email
 INSERT INTO pre_authorized_emails (email, org_id, role)
 VALUES (
-  'nouveau@entreprise.com', 
-  'uuid-org-ici',  -- TEST_ORG_ID ou PROD_ORG_ID
-  'user'           -- ou 'admin'
+  'new@company.com', 
+  'org-uuid-here',  -- TEST_ORG_ID or PROD_ORG_ID
+  'user'            -- or 'admin'
 );
 ```
 
-## Accès
+## Access
 
-- **Backend** : Service Key (bypass RLS, responsabilité du code)
-- **Frontend** : Ne communique pas directement avec la DB
-- **Migrations** : Via Supabase Dashboard ou psql
+- **Backend**: Service Key (bypasses RLS, code's responsibility)
+- **Frontend**: Does not communicate directly with the DB
+- **Migrations**: Via Supabase Dashboard or psql
 
 ## Conventions
 
-- Toutes les tables ont `org_id` + `created_at`
-- Clés étrangères avec `ON DELETE CASCADE`
-- Index sur chaque clé étrangère
-- Enumérations en TEXT avec CHECK constraint
+- All tables have `org_id` + `created_at`
+- Foreign keys with `ON DELETE CASCADE`
+- Index on every foreign key
+- Enumerations as TEXT with CHECK constraints

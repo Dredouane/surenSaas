@@ -1,64 +1,64 @@
 # Frontend (Next.js 14)
 
 ## Stack
-- **Framework** : Next.js 14 App Router
-- **Langage** : TypeScript strict
-- **Styling** : Tailwind CSS + shadcn/ui
-- **Auth** : Supabase Auth (email + password)
+- **Framework**: Next.js 14 App Router
+- **Language**: Strict TypeScript
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Auth**: Supabase Auth (email + password)
 
-## Structure routing
+## Routing structure
 ```
 app/
-├── [org]/                    # Multi-tenancy par slug org
-│   ├── (dashboard)/          # Layout protégé
+├── [org]/                    # Multi-tenancy by org slug
+│   ├── (dashboard)/          # Protected layout
 │   ├── login/                # Auth magic link + password
-│   └── page.tsx              # Landing org
-├── api/                      # Routes API internes
-└── layout.tsx               # Root avec providers
+│   └── page.tsx              # Org landing
+├── api/                      # Internal API routes
+└── layout.tsx               # Root with providers
 ```
 
-## Configuration critique
+## Critical configuration
 
 ### next.config.js
 ```javascript
 {
   images: { unoptimized: true },  // Cloud Run
-  output: 'standalone',            // Docker optimisé
+  output: 'standalone',            // Optimized Docker
   env: {
-    BUILD_ID: process.env.BUILD_ID // Pour force-reload
+    BUILD_ID: process.env.BUILD_ID // For force-reload
   }
 }
 ```
 
-### Theme dynamique
-- CSS variables par organisation (stocké en base)
-- Injection dans `<head>` via middleware
-- Fallback sur thème par défaut
+### Dynamic theme
+- CSS variables per organization (stored in database)
+- Injection into `<head>` via middleware
+- Fallback to default theme
 
-### Version force-reload
-- Middleware lit BUILD_ID via headers
-- Comparaison avec `/api/build-info`
-- Hard reload si mismatch
+### Force-reload version
+- Middleware reads BUILD_ID via headers
+- Comparison with `/api/build-info`
+- Hard reload if mismatch
 
 ## Auth Flow
 
 ### Page `/[org]/login`
 ```tsx
-// 1. EmailInput + bouton "Continuer"
+// 1. EmailInput + "Continue" button
 // 2. POST /api/v1/auth/check-email
-// 3. Affiche formulaire adapté :
-//    - Nouveau : CreatePasswordForm
-//    - Existant : LoginForm
-// 4. Soumission → Supabase Auth
-// 5. Succès → redirect /[org]/dashboard
+// 3. Displays the appropriate form:
+//    - New: CreatePasswordForm
+//    - Existing: LoginForm
+// 4. Submission → Supabase Auth
+// 5. Success → redirect /[org]/dashboard
 ```
 
-### Composants auth
-- `EmailStep` : Input email + validation
-- `PasswordStep` : Input password (création ou login)
-- `AuthForm` : Orchestrateur avec étapes
+### Auth components
+- `EmailStep`: Email input + validation
+- `PasswordStep`: Password input (creation or login)
+- `AuthForm`: Orchestrator with steps
 
-### Dépendances clés
+### Key dependencies
 ```json
 {
   "next": "^14",
@@ -68,7 +68,7 @@ app/
 }
 ```
 
-## Exemple LoginPage
+## LoginPage example
 ```tsx
 // app/[org]/login/page.tsx
 'use client';
@@ -89,7 +89,7 @@ export default function LoginPage() {
     const data = await res.json();
     
     if (!data.authorized) {
-      alert('Contactez votre administrateur');
+      alert('Contact your administrator');
       return;
     }
     
@@ -97,37 +97,37 @@ export default function LoginPage() {
     setStep('password');
   };
 
-  // ... render selon étape
+  // ... render based on step
 }
 ```
 
-## Middleware auth
+## Auth middleware
 ```typescript
 // middleware.ts
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const org = pathname.split('/')[1];
   
-  // Vérifier session Supabase
-  // Si pas de session et pas sur /login → redirect /[org]/login
-  // Vérifier org_id dans session match l'URL
+  // Check Supabase session
+  // If no session and not on /login → redirect /[org]/login
+  // Verify org_id in session matches the URL
 }
 ```
 
-## Scripts utiles
+## Useful scripts
 ```bash
-# Développement
-npm run dev                    # Local sur :3000
+# Development
+npm run dev                    # Local on :3000
 
 # Build test
-npm run build                  # Vérifier build_id injecté
+npm run build                  # Verify build_id injected
 
-# Docker local
-docker-compose up frontend     # Test iso-prod
+# Local Docker
+docker-compose up frontend     # prod-identical test
 ```
 
-## Points de vigilance
-- Toujours utiliser `unoptimized: true` pour images
-- Ne jamais hardcoder l'URL API (variable env)
-- Vérifier org_id match le slug URL dans middleware
-- Rate limiting côté client (désactiver bouton après clic)
+## Points of caution
+- Always use `unoptimized: true` for images
+- Never hardcode the API URL (env variable)
+- Verify that org_id matches the URL slug in the middleware
+- Rate limiting on the client side (disable button after click)

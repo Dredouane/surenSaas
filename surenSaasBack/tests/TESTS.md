@@ -1,237 +1,237 @@
-# Tests Backend - Documentation
+# Backend Tests - Documentation
 
-> **Dernière mise à jour :** Mars 2026 (tests validation + correction RLS policies phases 1 & 2)  
-> **Status :** 🟢 Tests fonctionnels - À maintenir à jour
+> **Last updated:** March 2026 (validation tests + RLS policies fixes phases 1 & 2)  
+> **Status:** 🟢 Functional tests - Keep up to date
 
-## 📋 Vue d'ensemble
+## 📋 Overview
 
-Ce document décrit l'état des tests backend de l'API SurenSaaS. Il sert de référence pour comprendre les scénarios couverts sans relire le code source.
+This document describes the state of the SurenSaaS API backend tests. It serves as a reference to understand the covered scenarios without re-reading the source code.
 
-**Comment maintenir ce document :**
-- ✅ Ajouter une ligne dans la section correspondante quand un nouveau test est créé
-- 🔲 Marquer comme implémenté quand un test est ajouté
-- 📝 Mettre à jour la date en haut du fichier
+**How to maintain this document:**
+- ✅ Add a row in the relevant section when a new test is created
+- 🔲 Mark as implemented when a test is added
+- 📝 Update the date at the top of the file
 
 ---
 
-## 🧪 Tests API Routes (test_api_routes.py)
+## 🧪 API Routes Tests (test_api_routes.py)
 
-### ✅ Tests Clients (`/api/v1/clients`)
+### ✅ Clients Tests (`/api/v1/clients`)
 
-| Scénario | Méthode | Status | Description |
+| Scenario | Method | Status | Description |
 |----------|---------|--------|-------------|
-| Création client | POST | ✅ | Crée un client avec tous les champs (nom, email, téléphone, adresse, SIRET, notes) |
-| Liste clients | GET | ✅ | Récupère la liste paginée des clients avec recherche optionnelle |
-| Détail client | GET | ✅ | Récupère les détails d'un client par son ID |
-| Mise à jour client | PUT | ✅ | Modifie les informations d'un client existant |
-| Suppression client | DELETE | ✅ | Supprime un client de la base de données |
+| Create client | POST | ✅ | Creates a client with all fields (name, email, phone, address, SIRET, notes) |
+| List clients | GET | ✅ | Retrieves the paginated list of clients with optional search |
+| Client detail | GET | ✅ | Retrieves a client's details by ID |
+| Update client | PUT | ✅ | Modifies an existing client's information |
+| Delete client | DELETE | ✅ | Deletes a client from the database |
 
-**Cas d'erreur couverts :**
-- 🔲 404 - Client non trouvé
-- 🔲 403 - Accès non autorisé (mauvais org_id)
-- 🔲 401 - Non authentifié
+**Error cases covered:**
+- 🔲 404 - Client not found
+- 🔲 403 - Unauthorized access (wrong org_id)
+- 🔲 401 - Not authenticated
 
 ---
 
-### ✅ Tests Factures (`/api/v1/invoices`)
+### ✅ Invoices Tests (`/api/v1/invoices`)
 
-| Scénario | Méthode | Status | Description |
+| Scenario | Method | Status | Description |
 |----------|---------|--------|-------------|
-| Création facture | POST | ✅ | Crée une facture avec numéro, fournisseur, montants, dates, description |
-| Liste factures | GET | ✅ | Récupère la liste avec filtres (statut, client, recherche) |
-| Détail facture | GET | ✅ | Récupère les détails complets d'une facture |
-| Mise à jour facture | PUT | ✅ | Modifie une facture (uniquement si en brouillon) |
-| Suppression facture | DELETE | ✅ | Supprime une facture (uniquement si en brouillon) |
-| Validation facture | POST | ✅ | Valide une facture en attente via `/invoices/{id}/validate?action=validate` |
-| Rejet facture | POST | ✅ | Rejette une facture en attente via `/invoices/{id}/validate?action=reject` |
+| Create invoice | POST | ✅ | Creates an invoice with number, supplier, amounts, dates, description |
+| List invoices | GET | ✅ | Retrieves the list with filters (status, client, search) |
+| Invoice detail | GET | ✅ | Retrieves the full details of an invoice |
+| Update invoice | PUT | ✅ | Modifies an invoice (only if in draft) |
+| Delete invoice | DELETE | ✅ | Deletes an invoice (only if in draft) |
+| Validate invoice | POST | ✅ | Validates a pending invoice via `/invoices/{id}/validate?action=validate` |
+| Reject invoice | POST | ✅ | Rejects a pending invoice via `/invoices/{id}/validate?action=reject` |
 
-**Cas d'erreur couverts :**
-- ✅ 404 - Facture non trouvée
-- 🔲 403 - Tentative de modification d'une facture non brouillon
-- ✅ 401 - Non authentifié
-- ✅ 400 - Action invalide (validation d'une facture pas en attente)
+**Error cases covered:**
+- ✅ 404 - Invoice not found
+- 🔲 403 - Attempt to modify a non-draft invoice
+- ✅ 401 - Not authenticated
+- ✅ 400 - Invalid action (validating an invoice not pending)
 
 ---
 
-### ✅ Tests Utilisateurs (`/api/v1/users`)
+### ✅ Users Tests (`/api/v1/users`)
 
-| Scénario | Méthode | Status | Description |
+| Scenario | Method | Status | Description |
 |----------|---------|--------|-------------|
-| Profil utilisateur | GET | ✅ | Récupère le profil de l'utilisateur connecté (email, org, rôle) |
+| User profile | GET | ✅ | Retrieves the logged-in user's profile (email, org, role) |
 
-**Cas d'erreur couverts :**
-- 🔲 401 - Token invalide ou expiré
-- 🔲 404 - Utilisateur non trouvé
+**Error cases covered:**
+- 🔲 401 - Invalid or expired token
+- 🔲 404 - User not found
 
 ---
 
-## 🧪 Tests Scénarios Complets (test_full_scenarios.py)
+## 🧪 Full Scenarios Tests (test_full_scenarios.py)
 
-### ✅ Tests Authentification
+### ✅ Authentication Tests
 
-| Scénario | Status | Description |
+| Scenario | Status | Description |
 |----------|--------|-------------|
-| Check-email autorisé | ✅ | Vérifie qu'un email pré-autorisé peut s'inscrire |
-| Check-email non autorisé | ✅ | Vérifie qu'un email inconnu est rejeté |
-| Validation email invalide | ✅ | Vérifie le format de l'email |
-| Validation body vide | ✅ | Vérifie que les champs requis sont présents |
-| Workflow signup complet | ✅ | Teste le flux complet : check-email → signup → vérification DB |
+| Authorized check-email | ✅ | Verifies a pre-authorized email can sign up |
+| Unauthorized check-email | ✅ | Verifies an unknown email is rejected |
+| Invalid email validation | ✅ | Verifies the email format |
+| Empty body validation | ✅ | Verifies required fields are present |
+| Full signup workflow | ✅ | Tests the full flow: check-email → signup → DB verification |
 
-### ✅ Tests Facturation (DB directe)
+### ✅ Billing Tests (direct DB)
 
-| Scénario | Status | Description |
+| Scenario | Status | Description |
 |----------|--------|-------------|
-| Création factures test | ✅ | Crée 3 factures de test (brouillon, attente, validée) |
-| Workflow statut complet | ✅ | Teste le changement de statut : brouillon → attente → validée → traitement |
+| Create test invoices | ✅ | Creates 3 test invoices (draft, pending, validated) |
+| Full status workflow | ✅ | Tests the status change: draft → pending → validated → processing |
 
 ---
 
-## 🔧 Configuration des Tests
+## 🔧 Test Configuration
 
-### Variables d'environnement requises
+### Required environment variables
 
 ```bash
-# Credentials pour les tests API (authentification requise)
-export SUREN_TEST_LOGIN="email@exemple.com"
-export SUREN_TEST_PASSWORD="mot-de-passe"
+# Credentials for API tests (authentication required)
+export SUREN_TEST_LOGIN="email@example.com"
+export SUREN_TEST_PASSWORD="password"
 
-# OU via fichier .env.test.local (non versionné)
+# OR via .env.test.local file (not versioned)
 ```
 
-### Lancer les tests
+### Run the tests
 
 ```bash
-# Tous les tests
+# All tests
 ./scripts/run-tests.sh
 
-# Uniquement les tests API
+# API tests only
 python tests/test_api_routes.py
 
-# Uniquement les scénarios complets
+# Full scenarios only
 python tests/test_full_scenarios.py
 ```
 
 ---
 
-### ✅ Tests Gestion des Erreurs
+### ✅ Error Handling Tests
 
-| Scénario | Route | Status | Description |
+| Scenario | Route | Status | Description |
 |----------|-------|--------|-------------|
-| 401 - Non authentifié | `/users/me` | ✅ | Retourne 401 sans cookie de session |
-| 404 - Client inexistant | `/clients/{fake_id}` | ✅ | Retourne 404 pour un ID inexistant |
-| 404 - Facture inexistante | `/invoices/{fake_id}` | ✅ | Retourne 404 pour un ID inexistant |
-| 400 - Validation invalide | `/invoices/{id}/validate` | ✅ | Retourne 400 si la facture n'est pas en attente |
+| 401 - Not authenticated | `/users/me` | ✅ | Returns 401 without a session cookie |
+| 404 - Nonexistent client | `/clients/{fake_id}` | ✅ | Returns 404 for a nonexistent ID |
+| 404 - Nonexistent invoice | `/invoices/{fake_id}` | ✅ | Returns 404 for a nonexistent ID |
+| 400 - Invalid validation | `/invoices/{id}/validate` | ✅ | Returns 400 if the invoice is not pending |
 
 ---
 
-## 📝 À Implémenter (TODO)
+## 📝 To Implement (TODO)
 
-### Priorité Haute
-- [x] **Validation/Rejet de factures** - Tester `POST /invoices/{id}/validate?action=validate/reject`
-- [x] **Tests erreurs 401** - Vérifier que les routes protégées retournent 401 sans auth
-- [ ] **Tests erreurs 403** - Vérifier qu'un user ne peut pas accéder aux données d'une autre org
-- [x] **Tests erreurs 404** - Vérifier le comportement sur ID inexistant
+### High Priority
+- [x] **Invoice Validation/Rejection** - Test `POST /invoices/{id}/validate?action=validate/reject`
+- [x] **401 error tests** - Verify protected routes return 401 without auth
+- [ ] **403 error tests** - Verify a user cannot access another org's data
+- [x] **404 error tests** - Verify behavior on nonexistent ID
 
-### Priorité Moyenne
-- [ ] **Tests pagination** - Vérifier les paramètres limit/offset sur les listes
-- [ ] **Tests recherche** - Vérifier le filtre search sur clients et factures
-- [ ] **Historique statuts** - Vérifier que l'historique est bien créé lors des changements
+### Medium Priority
+- [ ] **Pagination tests** - Verify limit/offset parameters on lists
+- [ ] **Search tests** - Verify the search filter on clients and invoices
+- [ ] **Status history** - Verify history is properly created on changes
 
-### Priorité Basse
-- [ ] **Tests upload fichiers** - Tester l'upload de PDF/factures
-- [ ] **Tests Telegram** - Tester les intégrations webhook (si applicable)
-- [ ] **Tests de charge** - Vérifier les performances avec beaucoup de données
+### Low Priority
+- [ ] **File upload tests** - Test PDF/invoice upload
+- [ ] **Telegram tests** - Test webhook integrations (if applicable)
+- [ ] **Load tests** - Verify performance with lots of data
 
 ---
 
-## 🐛 Bugs Connus / Corrections
+## 🐛 Known Bugs / Fixes
 
-### ✅ Problèmes résolus
+### ✅ Resolved issues
 
-| Problème | Cause | Solution | Migration |
+| Issue | Cause | Solution | Migration |
 |----------|-------|----------|-----------|
-| **`.single()` et `.offset()`** | Supabase Python client ne supporte pas ces méthodes | Utiliser `.execute()` et gérer la logique en Python | ✅ Corrigé dans tous les fichiers |
-| **Authentification email non confirmé** | Supabase Auth requiert confirmation par défaut | Fallback avec token JWT de test | ✅ Géré dans test_api_routes.py |
-| **RLS Policies - données non visibles (v1)** | Politiques utilisaient table DEPRECATED `user_org_membership` (invoices, clients) | Migration 015 créant des politiques basées sur `users.org_id` | ✅ 015_fix_rls_policies.sql |
-| **RLS Policies - données non visibles (v2)** | Politiques utilisaient table DEPRECATED `user_org_membership` (telegram_bots, companies, etc.) | Migration 016 corrigeant TOUTES les tables restantes | ✅ 016_fix_all_remaining_rls_policies.sql |
+| **`.single()` and `.offset()`** | Supabase Python client does not support these methods | Use `.execute()` and handle logic in Python | ✅ Fixed in all files |
+| **Authentication with unconfirmed email** | Supabase Auth requires confirmation by default | Fallback with test JWT token | ✅ Handled in test_api_routes.py |
+| **RLS Policies - data not visible (v1)** | Policies used DEPRECATED table `user_org_membership` (invoices, clients) | Migration 015 creating policies based on `users.org_id` | ✅ 015_fix_rls_policies.sql |
+| **RLS Policies - data not visible (v2)** | Policies used DEPRECATED table `user_org_membership` (telegram_bots, companies, etc.) | Migration 016 fixing ALL remaining tables | ✅ 016_fix_all_remaining_rls_policies.sql |
 
-### 🔴 Correction RLS Critique - Phase 1 (Mars 2026)
+### 🔴 Critical RLS Fix - Phase 1 (March 2026)
 
-**Problème :** Les factures et clients n'étaient pas visibles malgré leur existence en DB
+**Problem:** Invoices and clients were not visible despite existing in the DB
 
-**Cause :** Les politiques RLS créées dans `008_invoices.sql` et `014_add_clients_and_update_invoices.sql` utilisaient la table `user_org_membership` qui a été désactivée par `999_cleanup_user_org_membership.sql`
+**Cause:** RLS policies created in `008_invoices.sql` and `014_add_clients_and_update_invoices.sql` used the `user_org_membership` table which was disabled by `999_cleanup_user_org_membership.sql`
 
-**Impact :** 
-- Dashboard factures : écran vide
-- Dashboard clients : écran vide
-- Administration users : fonctionnait (autre politique)
+**Impact:** 
+- Invoices dashboard: blank screen
+- Clients dashboard: blank screen
+- Users administration: worked (different policy)
 
-**Solution :** Exécuter `015_fix_rls_policies.sql`
+**Solution:** Run `015_fix_rls_policies.sql`
 ```bash
 psql "$DATABASE_URL" -f db/schema/015_fix_rls_policies.sql
 ```
 
-**Politiques corrigées :**
-- `members_read_invoices` : utilise `users.org_id` directement
-- `members_read_clients` : utilise `users.org_id` directement
-- Toutes les policies INSERT/UPDATE/DELETE mises à jour
+**Fixed policies:**
+- `members_read_invoices`: uses `users.org_id` directly
+- `members_read_clients`: uses `users.org_id` directly
+- All INSERT/UPDATE/DELETE policies updated
 
-### 🔴 Correction RLS Critique - Phase 2 (Mars 2026)
+### 🔴 Critical RLS Fix - Phase 2 (March 2026)
 
-**Problème :** Les bots Telegram, companies, et autres tables ne retournaient pas de données
+**Problem:** Telegram bots, companies, and other tables did not return data
 
-**Cause :** Les migrations 006-011 avaient créé des politiques utilisant `user_org_membership` mais n'ont pas été corrigées dans la phase 1
+**Cause:** Migrations 006-011 had created policies using `user_org_membership` but were not fixed in phase 1
 
-**Impact :** 
-- Invitation bot Telegram : retourne liste vide
-- Gestion companies : potentiellement cassée
-- Audit Telegram : inaccessible
-- Capabilities : gestion impossible
+**Impact:** 
+- Telegram bot invitation: returns empty list
+- Companies management: potentially broken
+- Telegram audit: inaccessible
+- Capabilities: management impossible
 
-**Solution :** Exécuter `016_fix_all_remaining_rls_policies.sql`
+**Solution:** Run `016_fix_all_remaining_rls_policies.sql`
 ```bash
 psql "$DATABASE_URL" -f db/schema/016_fix_all_remaining_rls_policies.sql
 ```
 
-**Tables corrigées :**
-- `telegram_bots` : 2 policies (admin_manage, members_read)
-- `telegram_users` : 1 policy (admin_read_org_telegram)
-- `telegram_audit` : 1 policy (admin_read_audit)
-- `companies` : 2 policies (members_read, admin_manage)
-- `organization_capabilities` : 1 policy (admin_manage)
-- `user_capabilities` : 1 policy (admin_manage)
-- `invoice_status_history` : 1 policy (complément au 015)
+**Fixed tables:**
+- `telegram_bots`: 2 policies (admin_manage, members_read)
+- `telegram_users`: 1 policy (admin_read_org_telegram)
+- `telegram_audit`: 1 policy (admin_read_audit)
+- `companies`: 2 policies (members_read, admin_manage)
+- `organization_capabilities`: 1 policy (admin_manage)
+- `user_capabilities`: 1 policy (admin_manage)
+- `invoice_status_history`: 1 policy (complement to 015)
 
-**Total :** 7 tables, 10 policies corrigées
-
----
-
-## 📊 Couverture Actuelle
-
-**Routes API testées :** 12/13 (92%)
-**Scénarios critiques :** ✅ 100% couverts
-**Gestion d'erreurs :** 🔲 20% couverts (à améliorer)
-
-**Routes non testées :**
-- `/api/v1/invoices/{id}/validate` (validation/rejet)
-- Routes d'erreur spécifiques (401, 403, 404)
+**Total:** 7 tables, 10 policies fixed
 
 ---
 
-## 🎯 Bonnes Pratiques
+## 📊 Current Coverage
 
-1. **Ajouter un test pour chaque nouvelle route API**
-2. **Documenter ici immédiatement après création**
-3. **Maintenir à jour la section "À Implémenter"**
-4. **Exécuter les tests avant chaque commit important**
+**API routes tested:** 12/13 (92%)
+**Critical scenarios:** ✅ 100% covered
+**Error handling:** 🔲 20% covered (to improve)
 
----
-
-## 👥 Contributeurs
-
-- Documentation créée : Mars 2026
-- Dernier test ajouté : test_api_routes.py (Clients, Invoices, Users)
+**Untested routes:**
+- `/api/v1/invoices/{id}/validate` (validation/rejection)
+- Specific error routes (401, 403, 404)
 
 ---
 
-**💡 Besoin d'aide ?** Voir le fichier `tests/README.md` pour la structure des tests.
+## 🎯 Best Practices
+
+1. **Add a test for every new API route**
+2. **Document here immediately after creation**
+3. **Keep the "To Implement" section up to date**
+4. **Run the tests before every important commit**
+
+---
+
+## 👥 Contributors
+
+- Documentation created: March 2026
+- Last test added: test_api_routes.py (Clients, Invoices, Users)
+
+---
+
+**💡 Need help?** See the `tests/README.md` file for the test structure.

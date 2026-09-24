@@ -1,106 +1,106 @@
-# Décisions Backend
+# Backend Decisions
 
 ## ADR-001 : Contract-first OpenAPI
-**Choix** : OpenAPI YAML génère le code FastAPI
-**Pourquoi** : API documentée dès la conception, synchro front/back
-**Outil** : openapi-generator-cli
+**Choice**: OpenAPI YAML generates the FastAPI code
+**Why**: API documented from the design phase, front/back sync
+**Tool**: openapi-generator-cli
 
-## ADR-002 : Pas d'ORM
-**Choix** : Supabase client direct (pas SQLAlchemy ORM)
-**Pourquoi** : RLS policies Supabase déjà en place, moins de couche
-**Alternative** : Prisma (rejeté - complexité inutile)
+## ADR-002 : No ORM
+**Choice**: Direct Supabase client (no SQLAlchemy ORM)
+**Why**: Supabase RLS policies already in place, fewer layers
+**Alternative**: Prisma (rejected - unnecessary complexity)
 
 ## ADR-003 : Scale-to-zero backend
-**Choix** : Cloud Run avec min instances = 0
-**Pourquoi** : Économies sur environnements non-prod
-**Cold start** : Acceptable (<2s) pour backend API
+**Choice**: Cloud Run with min instances = 0
+**Why**: Savings on non-prod environments
+**Cold start**: Acceptable (<2s) for an API backend
 
-## ADR-004 : Workers séparés
-**Choix** : Agents IA dans process séparé (Celery)
-**Pourquoi** : Cloud Run stateless, pas de long-running dans API
-**Queue** : Redis ou Cloud Tasks
+## ADR-004 : Separate workers
+**Choice**: AI agents in a separate process (Celery)
+**Why**: Cloud Run is stateless, no long-running in the API
+**Queue**: Redis or Cloud Tasks
 
-## ADR-005 : Validation JWT manuelle
-**Choix** : Validation JWT dans FastAPI (pas dépendance Supabase)
-**Pourquoi** : Contrôle total claims, vérification authorized_users
+## ADR-005 : Manual JWT validation
+**Choice**: JWT validation in FastAPI (no Supabase dependency)
+**Why**: Full control over claims, verification of authorized_users
 
-## ADR-006 : Auth Magic Link + Password
-**Choix** : Système email+password avec table pre_authorized_emails
-**Pourquoi** : 
-- Plus simple à maintenir que Microsoft SSO
-- Pas de dépendance externe (Azure)
-- Contrôle total sur invitations
-- Rate limiting facile à implémenter
-**Alternatives** : Microsoft Entra ID (rejeté - complexité, coût, dépendance)
+## ADR-006 : Magic Link + Password Auth
+**Choice**: Email+password system with pre_authorized_emails table
+**Why**: 
+- Simpler to maintain than Microsoft SSO
+- No external dependency (Azure)
+- Full control over invitations
+- Rate limiting easy to implement
+**Alternatives**: Microsoft Entra ID (rejected - complexity, cost, dependency)
 
-## ADR-007 : Rate limiting mémoire
-**Choix** : Stockage en mémoire Python (pas Redis)
-**Pourquoi** : Pas de dépendance externe, suffisant pour scale Cloud Run, plus simple
-**Implémentation** : Dictionnaire {hash(IP+UA): [timestamps]} avec nettoyage auto
+## ADR-007 : In-memory rate limiting
+**Choice**: Python in-memory storage (no Redis)
+**Why**: No external dependency, sufficient for Cloud Run scale, simpler
+**Implementation**: Dictionary {hash(IP+UA): [timestamps]} with auto cleanup
 
-## ADR-008 : Pas de validation password complexe
-**Choix** : Min 8 caractères seulement
-**Pourquoi** : NIST recommande longueur > complexité
-**UX** : Moins de friction pour les utilisateurs
+## ADR-008 : No complex password validation
+**Choice**: Min 8 characters only
+**Why**: NIST recommends length > complexity
+**UX**: Less friction for users
 
-## ADR-009 : Système de Capabilities
-**Choix** : Permissions granulaires `resource:action` au lieu de rôles binaires
-**Pourquoi** : 
-- Flexibilité pour multi-PME (construction, nettoyage, etc.)
-- Capabilities spécifiques par entreprise filiale
-- Admin bypass automatique
-**Format** : `construction:facturation:read`
-**Implémentation** : Tables `user_capabilities` + `organization_capabilities`
+## ADR-009 : Capabilities System
+**Choice**: Granular `resource:action` permissions instead of binary roles
+**Why**: 
+- Flexibility for multi-SMB (construction, cleaning, etc.)
+- Specific capabilities per subsidiary company
+- Automatic admin bypass
+**Format**: `construction:invoicing:read`
+**Implementation**: Tables `user_capabilities` + `organization_capabilities`
 
-## ADR-010 : Bot Telegram par entreprise
-**Choix** : Un bot peut être lié à une entreprise filiale ou à l'org globale
-**Pourquoi** : 
-- Séparation des préoccupations
-- Configuration personnalisée par métier
-- Notifications ciblées
-**Architecture** : Services séparés par primitive (bouton)
+## ADR-010 : Telegram bot per company
+**Choice**: A bot can be linked to a subsidiary company or the global org
+**Why**: 
+- Separation of concerns
+- Custom configuration per business
+- Targeted notifications
+**Architecture**: Services separated by primitive (button)
 
-## ADR-011 : Audit complet Telegram
-**Choix** : Table `telegram_audit` logue toutes les interactions
-**Pourquoi** : 
-- Debugging des workflows
-- Monitoring des erreurs
-- Traçabilité métier
-**Data** : Payload, result, timing, errors
+## ADR-011 : Complete Telegram audit
+**Choice**: `telegram_audit` table logs all interactions
+**Why**: 
+- Workflow debugging
+- Error monitoring
+- Business traceability
+**Data**: Payload, result, timing, errors
 
-## ADR-012 : OCR Agentic - Coquille
-**Choix** : Structure workflow prête mais OCR non implémenté
-**Pourquoi** : 
-- Architecture extensible
-- Définition des contrats d'abord
-- Implémentation IA dans second temps
-**Structure** : `app/agents/invoice_ocr/workflow.py` + `contracts.py`
+## ADR-012 : Agentic OCR - Shell
+**Choice**: Workflow structure ready but OCR not implemented
+**Why**: 
+- Extensible architecture
+- Contracts defined first
+- AI implementation in a second phase
+**Structure**: `app/agents/invoice_ocr/workflow.py` + `contracts.py`
 
-## ADR-013 : Factures multi-status
-**Choix** : Workflow à 6 status avec historique complet
-**Status** : brouillon → en_attente_validation → [validee/rejetee] → en_traitement_comptable → archivee
-**Pourquoi** : Traçabilité complète du cycle de vie
-**Table** : `invoice_status_history` logue tous les changements
+## ADR-013 : Multi-status invoices
+**Choice**: Workflow with 6 statuses and full history
+**Status**: draft → pending_validation → [validated/rejected] → accountant_processing → archived
+**Why**: Full life cycle traceability
+**Table**: `invoice_status_history` logs all changes
 
-## ADR-014 : Security Webhook Telegram
-**Choix** : Double sécurité sur webhooks
-**Mécanismes** :
-1. Token hash dans l'URL (pas le token en clair)
-2. Header `X-Telegram-Bot-Api-Secret-Token` vérifié
-**Pourquoi** : Sécurité même si URL leakée
+## ADR-014 : Telegram Webhook Security
+**Choice**: Double security on webhooks
+**Mechanisms**:
+1. Token hash in the URL (not the token in clear text)
+2. Header `X-Telegram-Bot-Api-Secret-Token` verified
+**Why**: Security even if the URL leaks
 
-## ADR-015 : Admin Space - Gestion utilisateurs et permissions
-**Choix** : Interface admin dédiée pour gérer les accès
-**Fonctionnalités** :
-1. **Pré-autorisation emails** : Admin ajoute/supprime emails autorisés à rejoindre l'org
-2. **Capabilities granulaires** : Assigner permissions `resource:action` par utilisateur
-3. **Scope par ressource** : Capabilities globales ou limitées à une entreprise filiale
-**Routes API** : `/admin/*` (OpenAPI contract-first)
-**Architecture** : 
-- Service layer `app/services/admin_service.py` appelle Supabase REST API
-- Pages frontend sous `/dashboard/settings/admin/`
-- Guard component `AdminGuard.tsx` pour protection routes
-**Pourquoi** :
-- Contrôle total sur qui peut rejoindre l'organisation
-- Permissions fines adaptées au multi-PME
-- Séparation claire admin vs utilisateur standard
+## ADR-015 : Admin Space - User and permission management
+**Choice**: Dedicated admin interface to manage access
+**Features**:
+1. **Email pre-authorization**: Admin adds/removes emails authorized to join the org
+2. **Granular capabilities**: Assign `resource:action` permissions per user
+3. **Per-resource scope**: Global capabilities or limited to a subsidiary company
+**API Routes**: `/admin/*` (OpenAPI contract-first)
+**Architecture**: 
+- Service layer `app/services/admin_service.py` calls the Supabase REST API
+- Frontend pages under `/dashboard/settings/admin/`
+- Guard component `AdminGuard.tsx` for route protection
+**Why**:
+- Full control over who can join the organization
+- Fine-grained permissions suited to multi-SMB
+- Clear separation between admin and standard user

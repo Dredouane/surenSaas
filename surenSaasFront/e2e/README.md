@@ -1,61 +1,61 @@
-# Documentation E2E - SurenSaaS
+# E2E Documentation - SurenSaaS
 
-## 🎯 Objectif
+## 🎯 Purpose
 
-Cette suite de tests E2E (End-to-End) teste les **parcours utilisateurs complets** de l'application SurenSaaS en simulant des interactions réelles avec le navigateur.
+This E2E (End-to-End) test suite tests the **complete user journeys** of the SurenSaaS application by simulating real interactions with the browser.
 
-### Ce qui est testé :
-- ✅ Flux d'authentification (login/signup/logout)
-- ✅ Création et gestion des factures
-- ✅ Upload de factures via Telegram
-- ✅ Workflows métier complets (conducteur → gérant → comptable)
+### What is tested:
+- ✅ Authentication flow (login/signup/logout)
+- ✅ Invoice creation and management
+- ✅ Invoice upload via Telegram
+- ✅ Complete business workflows (driver → manager → accountant)
 
-### Ce qui n'est PAS testé ici :
-- ❌ Tests unitaires (cf. `surenSaasBack/tests/`)
-- ❌ Tests d'intégration API (cf. `surenSaasBack/tests/`)
-- ❌ Tests de performance (à ajouter plus tard)
+### What is NOT tested here:
+- ❌ Unit tests (see `surenSaasBack/tests/`)
+- ❌ API integration tests (see `surenSaasBack/tests/`)
+- ❌ Performance tests (to be added later)
 
 ---
 
-## 🛠️ Stack Technique
+## 🛠️ Tech Stack
 
-| Outil | Version | Usage |
+| Tool | Version | Usage |
 |-------|---------|-------|
-| **Playwright** | ^1.58.2 | Framework E2E (navigateur automatisé) |
-| **@playwright/test** | ^1.58.2 | Runner de tests |
-| **Firefox** | Latest | Navigateur par défaut (Chromium a trop de dépendances système) |
+| **Playwright** | ^1.58.2 | E2E framework (automated browser) |
+| **@playwright/test** | ^1.58.2 | Test runner |
+| **Firefox** | Latest | Default browser (Chromium has too many system dependencies) |
 
-### Pourquoi Playwright ?
-- **Multi-navigateurs** : Chrome, Firefox, Safari
-- **Auto-waiting** : Attend automatiquement les éléments
-- **Screenshots/Vidéos** : Capture automatique sur échec
-- **Trace viewer** : Debug interactif
-- **Parallélisation** : Tests rapides
+### Why Playwright?
+- **Multi-browser**: Chrome, Firefox, Safari
+- **Auto-waiting**: Automatically waits for elements
+- **Screenshots/Videos**: Automatic capture on failure
+- **Trace viewer**: Interactive debugging
+- **Parallelization**: Fast tests
 
 ---
 
-## 📁 Structure des Dossiers
+## 📁 Folder Structure
 
 ```
 e2e/
-├── _setup/                    # ⚙️ Configuration partagée
-│   ├── helpers.ts            # Fonctions utilitaires (login, createInvoice, etc.)
-│   ├── fixtures.ts           # Données de test (emails, mots de passe)
-│   └── auth.setup.ts         # Pré-authentification (optionnel)
+├── _setup/                    # ⚙️ Shared configuration
+│   ├── helpers.ts            # Utility functions (login, createInvoice, etc.)
+│   ├── fixtures.ts           # Test data (emails, passwords)
+│   └── auth.setup.ts         # Pre-authentication (optional)
 │
-├── 01-auth/                   # 🚪 Authentification
-│   ├── login.spec.ts         # Connexion
-│   ├── signup.spec.ts        # Inscription
-│   ├── logout.spec.ts        # Déconnexion
+├── 01-auth/                   # 🚪 Authentication
+│   ├── login.spec.ts         # Login
+│   ├── signup.spec.ts        # Sign up
+│   ├── logout.spec.ts        # Logout
 │   └── _flows/
 │       └── complete-auth-flow.spec.ts
 │
-├── 02-dashboard/              # 📊 Tableau de bord
+├── 02-dashboard/              # 📊 Dashboard
 │   ├── dashboard.spec.ts
 │   └── _flows/
 │       └── navigation.spec.ts
 │
-├── 03-invoices/               # 📄 Factures (fonctionnalité clé)
+├── 03-invoices/               # 📄 Invoices (key feature)
 │   ├── list.spec.ts
 │   ├── create.spec.ts
 │   ├── detail.spec.ts
@@ -63,49 +63,49 @@ e2e/
 │       ├── create-and-validate.spec.ts
 │       └── upload-via-bot.spec.ts
 │
-├── 04-clients/                # 👥 Gestion clients
-├── 05-telegram/               # 🤖 Intégration Telegram
-├── 06-settings/               # ⚙️ Paramètres
-├── 99-end-to-end/             # 🔄 Scénarios complexes métier
+├── 04-clients/                # 👥 Client management
+├── 05-telegram/               # 🤖 Telegram integration
+├── 06-settings/               # ⚙️ Settings
+├── 99-end-to-end/             # 🔄 Complex business scenarios
 │
-├── SCENARIOS.md              # 📋 Documentation scénarios
-└── README.md                 # 📖 Ce fichier
+├── SCENARIOS.md              # 📋 Scenario documentation
+└── README.md                 # 📖 This file
 ```
 
-### Convention de nommage :
-- **Dossiers** : `XX-nom-feature/` (numérotation pour ordre logique)
-- **Fichiers** : `[action]-[objet].spec.ts`
-- **Emojis** : Chaque module a un emoji (🚪 Auth, 📄 Invoices, etc.)
+### Naming convention:
+- **Folders**: `XX-feature-name/` (numbering for logical order)
+- **Files**: `[action]-[object].spec.ts`
+- **Emojis**: Each module has an emoji (🚪 Auth, 📄 Invoices, etc.)
 
 ---
 
-## 🚀 Commandes
+## 🚀 Commands
 
 ```bash
-# Depuis surenSaasFront/
+# From surenSaasFront/
 
-# Lancer tous les tests
+# Run all tests
 npm run test:e2e
 
-# Tests en local (localhost:3000)
+# Tests in local (localhost:3000)
 npm run test:e2e:local
 
-# Tests sur environnement TEST
+# Tests on TEST environment
 npm run test:e2e:test
 
-# Mode interactif (UI)
+# Interactive mode (UI)
 npm run test:e2e:ui
 
-# Mode debug (step-by-step)
+# Debug mode (step-by-step)
 npm run test:e2e:debug
 
-# Voir le rapport HTML
+# View the HTML report
 npm run test:e2e:report
 
-# Lancer un fichier spécifique
+# Run a specific file
 npx playwright test e2e/01-auth/login.spec.ts
 
-# Lancer avec headed (voir le navigateur)
+# Run headed (see the browser)
 npx playwright test --headed
 ```
 
@@ -113,26 +113,26 @@ npx playwright test --headed
 
 ## ⚙️ Configuration
 
-### Environnements
+### Environments
 
-3 environnements supportés (définis dans `playwright.config.ts`) :
+3 supported environments (defined in `playwright.config.ts`):
 
-| Environnement | URL Frontend | URL Backend | Commande |
+| Environment | Frontend URL | Backend URL | Command |
 |---------------|--------------|-------------|----------|
 | **local** | http://localhost:3000 | http://localhost:8080 | `npm run test:e2e:local` |
-| **test** | URL TEST | URL TEST API | `npm run test:e2e:test` |
-| **prod** | URL PROD | URL PROD API | `npm run test:e2e:prod` |
+| **test** | TEST URL | TEST API URL | `npm run test:e2e:test` |
+| **prod** | PROD URL | PROD API URL | `npm run test:e2e:prod` |
 
-### Variables d'environnement
+### Environment variables
 
-Créer un fichier `.env.local` à la racine de `surenSaasFront/` :
+Create a `.env.local` file at the root of `surenSaasFront/`:
 
 ```bash
 # URLs
 TEST_FRONTEND_URL=https://test-surensaas.example.com
 TEST_API_URL=https://test-api.example.com
 
-# Credentials de test
+# Test credentials
 TEST_ADMIN_EMAIL=admin@test.com
 TEST_ADMIN_PASSWORD=password123
 TEST_CONDUCTEUR_EMAIL=conducteur@test.com
@@ -141,190 +141,190 @@ TEST_CONDUCTEUR_PASSWORD=password123
 
 ---
 
-## 🧪 Écrire un Nouveau Test
+## 🧪 Writing a New Test
 
-### 1. Test simple (unitaire)
+### 1. Simple test (unit)
 
 ```typescript
 // e2e/01-auth/login.spec.ts
 import { test, expect } from '@playwright/test';
 
-test('✅ Login avec email valide', async ({ page }) => {
+test('✅ Login with valid email', async ({ page }) => {
   await page.goto('/login');
   await page.fill('input[type="email"]', 'test@example.com');
-  await page.click('button:has-text("Continuer")');
+  await page.click('button:has-text("Continue")');
   
   await expect(page).toHaveURL(/.*password.*/);
 });
 ```
 
-### 2. Test utilisant les helpers
+### 2. Test using the helpers
 
 ```typescript
 // e2e/03-invoices/create.spec.ts
 import { test, expect } from '@playwright/test';
 import { loginAs, createInvoice } from '../_setup/helpers';
 
-test('✅ Conducteur crée une facture', async ({ page }) => {
-  // Utiliser le helper pour login
+test('✅ Driver creates an invoice', async ({ page }) => {
+  // Use the helper to login
   await loginAs(page, 'conducteur');
   
-  // Utiliser le helper pour créer une facture
+  // Use the helper to create an invoice
   const invoiceId = await createInvoice(page, {
-    supplier: 'Fournisseur Test',
+    supplier: 'Test Supplier',
     amount: 1000,
-    description: 'Test E2E'
+    description: 'E2E Test'
   });
   
-  // Vérifier
-  await expect(page.locator('.status')).toHaveText('En attente');
+  // Verify
+  await expect(page.locator('.status')).toHaveText('Pending');
 });
 ```
 
-### 3. Test de flux (workflow complet)
+### 3. Flow test (complete workflow)
 
 ```typescript
 // e2e/03-invoices/_flows/create-and-validate.spec.ts
 import { test, expect } from '@playwright/test';
 import { loginAs, logout } from '../../_setup/helpers';
 
-test('🔄 Conducteur crée → Gérant valide', async ({ page }) => {
-  // Étape 1: Login conducteur
+test('🔄 Driver creates → Manager validates', async ({ page }) => {
+  // Step 1: Driver login
   await loginAs(page, 'conducteur');
   
-  // Étape 2: Créer facture
+  // Step 2: Create invoice
   await page.goto('/dashboard/invoices/create');
-  await page.fill('[name="supplier"]', 'Fournisseur Test');
-  await page.click('button:has-text("Créer")');
+  await page.fill('[name="supplier"]', 'Test Supplier');
+  await page.click('button:has-text("Create")');
   
-  // Étape 3: Vérifier statut
-  await expect(page.locator('.status')).toHaveText('En attente');
+  // Step 3: Verify status
+  await expect(page.locator('.status')).toHaveText('Pending');
   
-  // Étape 4: Logout
+  // Step 4: Logout
   await logout(page);
   
-  // Étape 5: Login gérant
+  // Step 5: Manager login
   await loginAs(page, 'gerant');
   
-  // Étape 6: Valider
+  // Step 6: Validate
   await page.goto('/dashboard/invoices');
-  await page.click('text=Fournisseur Test');
-  await page.click('button:has-text("Valider")');
+  await page.click('text=Test Supplier');
+  await page.click('button:has-text("Validate")');
   
-  // Étape 7: Vérifier
-  await expect(page.locator('.status')).toHaveText('Validée');
+  // Step 7: Verify
+  await expect(page.locator('.status')).toHaveText('Validated');
 });
 ```
 
 ---
 
-## 🔧 Helpers Disponibles
+## 🔧 Available Helpers
 
 ### `helpers.ts`
 
-| Fonction | Description | Exemple |
+| Function | Description | Example |
 |----------|-------------|---------|
-| `loginAs(page, role)` | Connecte un utilisateur par rôle | `await loginAs(page, 'admin')` |
-| `logout(page)` | Déconnexion | `await logout(page)` |
-| `createInvoice(page, data)` | Crée une facture | `await createInvoice(page, {supplier: 'Test', amount: 1000})` |
-| `generateTestEmail(prefix)` | Génère email unique | `generateTestEmail('test')` |
-| `waitForElement(page, selector)` | Attend un élément | `await waitForElement(page, 'text=Success')` |
-| `screenshot(page, name)` | Capture d'écran | `await screenshot(page, 'erreur')` |
+| `loginAs(page, role)` | Logs in a user by role | `await loginAs(page, 'admin')` |
+| `logout(page)` | Logout | `await logout(page)` |
+| `createInvoice(page, data)` | Creates an invoice | `await createInvoice(page, {supplier: 'Test', amount: 1000})` |
+| `generateTestEmail(prefix)` | Generates unique email | `generateTestEmail('test')` |
+| `waitForElement(page, selector)` | Waits for an element | `await waitForElement(page, 'text=Success')` |
+| `screenshot(page, name)` | Screenshot | `await screenshot(page, 'error')` |
 
-### Rôles disponibles
+### Available roles
 
-- `admin` : Administrateur (tous les droits)
-- `conducteur` : Créer des factures via Telegram
-- `gerant` : Valider/rejeter les factures
-- `comptable` : Voir les factures validées
+- `admin`: Administrator (all rights)
+- `conducteur`: Creates invoices via Telegram
+- `gerant`: Validates/rejects invoices
+- `comptable`: Views validated invoices
 
 ---
 
 ## 🐛 Debugging
 
-### 1. Voir le rapport HTML
+### 1. View the HTML report
 
 ```bash
 npm run test:e2e:report
 ```
 
-Le rapport contient :
-- Screenshots sur échec
-- Vidéos des tests
-- Traces détaillées (clics, navigations)
+The report contains:
+- Screenshots on failure
+- Test videos
+- Detailed traces (clicks, navigations)
 
-### 2. Mode UI (interactif)
+### 2. UI mode (interactive)
 
 ```bash
 npm run test:e2e:ui
 ```
 
-Interface graphique pour :
-- Lancer les tests un par un
-- Voir les traces en temps réel
-- Inspecter les éléments
+Graphical interface to:
+- Run tests one by one
+- View traces in real time
+- Inspect elements
 
-### 3. Mode Debug (step-by-step)
+### 3. Debug mode (step-by-step)
 
 ```bash
 npm run test:e2e:debug
 ```
 
-Le test s'arrête à chaque ligne pour inspection.
+The test pauses at each line for inspection.
 
-### 4. Screenshots manuels
+### 4. Manual screenshots
 
 ```typescript
-// Dans un test
+// In a test
 await page.screenshot({ path: 'debug.png', fullPage: true });
 ```
 
 ---
 
-## 📊 Bonnes Pratiques
+## 📊 Best Practices
 
-### ✅ À FAIRE
+### ✅ DO
 
-- Utiliser les **helpers** pour éviter la duplication
-- Attendre les **éléments** avant d'interagir (`waitForSelector`)
-- Utiliser des **sélecteurs robustes** (texte visible, role) pas des classes CSS
-- **Nettoyer** les données de test en fin de test
-- Ajouter des **logs** (`console.log`) pour suivre le déroulement
+- Use the **helpers** to avoid duplication
+- Wait for **elements** before interacting (`waitForSelector`)
+- Use **robust selectors** (visible text, role) not CSS classes
+- **Clean up** test data at the end of the test
+- Add **logs** (`console.log`) to follow the execution
 
-### ❌ À ÉVITER
+### ❌ AVOID
 
-- Attendre des **temps fixes** (`waitForTimeout(1000)`)
-- Utiliser des **sélecteurs fragiles** (`.btn-primary`, `#id-123`)
-- Tester des **détails d'implémentation** (structure HTML exacte)
-- Oublier de **gérer les erreurs** (try/catch sur les actions critiques)
+- Waiting for **fixed times** (`waitForTimeout(1000)`)
+- Using **fragile selectors** (`.btn-primary`, `#id-123`)
+- Testing **implementation details** (exact HTML structure)
+- Forgetting to **handle errors** (try/catch on critical actions)
 
 ---
 
-## 🔄 Cycle de Vie d'un Test
+## 🔄 Test Life Cycle
 
 ```
 Setup → Action → Assertion → Cleanup
   ↓       ↓          ↓          ↓
-Login   Remplir    Vérifier   Logout
-        formulaire   résultat   Cleanup DB
+Login   Fill      Verify     Logout
+        form      result     DB Cleanup
 ```
 
-### Exemple complet :
+### Full example:
 
 ```typescript
 import { test } from '@playwright/test';
 import { loginAs, logout, generateTestEmail } from './_setup/helpers';
 
-test('✅ Créer une facture', async ({ page }) => {
+test('✅ Create an invoice', async ({ page }) => {
   // 1. SETUP
-  const testEmail = generateTestEmail('facture');
+  const testEmail = generateTestEmail('invoice');
   await loginAs(page, 'conducteur');
   
   // 2. ACTION
   await page.goto('/dashboard/invoices/create');
-  await page.fill('[name="supplier"]', 'Fournisseur Test');
+  await page.fill('[name="supplier"]', 'Test Supplier');
   await page.fill('[name="amount"]', '1000');
-  await page.click('button:has-text("Créer")');
+  await page.click('button:has-text("Create")');
   
   // 3. ASSERTION
   await expect(page).toHaveURL(/.*invoices.*/);
@@ -337,29 +337,29 @@ test('✅ Créer une facture', async ({ page }) => {
 
 ---
 
-## 🚀 Pour un Autre LLM / Développeur
+## 🚀 For Another LLM / Developer
 
-### Comment reprendre ce travail :
+### How to resume this work:
 
-1. **Lire `SCENARIOS.md`** : Liste complète des scénarios prévus
-2. **Regarder les helpers** : `e2e/_setup/helpers.ts` pour réutiliser
-3. **Suivre la convention** : Nomenclature des fichiers et dossiers
-4. **Tester localement d'abord** : `npm run test:e2e:local`
-5. **Ajouter des tests par priorité** : Voir section "Scénarios Prioritaires" dans SCENARIOS.md
+1. **Read `SCENARIOS.md`**: Complete list of planned scenarios
+2. **Look at the helpers**: `e2e/_setup/helpers.ts` to reuse
+3. **Follow the convention**: File and folder naming
+4. **Test locally first**: `npm run test:e2e:local`
+5. **Add tests by priority**: See "Priority Scenarios" section in SCENARIOS.md
 
-### Points d'attention :
+### Points of attention:
 
-- Les tests utilisent **Firefox** par défaut (pas Chromium à cause des dépendances système)
-- Les **timeouts** sont à 10s par défaut
-- Le **backend doit tourner** avant de lancer les tests (`./scripts/run-local-back_test.sh`)
-- Le **frontend doit tourner** aussi (`./scripts/run-local-front_test.sh`)
+- Tests use **Firefox** by default (not Chromium because of system dependencies)
+- **Timeouts** are 10s by default
+- The **backend must be running** before running the tests (`./scripts/run-local-back_test.sh`)
+- The **frontend must also be running** (`./scripts/run-local-front_test.sh`)
 
 ---
 
-## 📚 Ressources
+## 📚 Resources
 
-- [Documentation Playwright](https://playwright.dev/docs/intro)
-- [Sélecteurs Playwright](https://playwright.dev/docs/selectors)
+- [Playwright Documentation](https://playwright.dev/docs/intro)
+- [Playwright Selectors](https://playwright.dev/docs/selectors)
 - [Assertions](https://playwright.dev/docs/test-assertions)
 - [Best Practices](https://playwright.dev/docs/best-practices)
 
@@ -367,12 +367,12 @@ test('✅ Créer une facture', async ({ page }) => {
 
 ## 📝 Changelog
 
-| Date | Auteur | Changement |
+| Date | Author | Change |
 |------|--------|------------|
-| 2026-03-16 | AI | Création structure E2E avec Playwright |
-| 2026-03-16 | AI | Mise en place helpers (login, createInvoice, etc.) |
-| 2026-03-16 | AI | Documentation complète (README.md + SCENARIOS.md) |
+| 2026-03-16 | AI | Created E2E structure with Playwright |
+| 2026-03-16 | AI | Set up helpers (login, createInvoice, etc.) |
+| 2026-03-16 | AI | Complete documentation (README.md + SCENARIOS.md) |
 
 ---
 
-**Questions ?** Consulter la documentation Playwright ou le fichier `SCENARIOS.md` pour voir les scénarios prévus.
+**Questions?** Consult the Playwright documentation or the `SCENARIOS.md` file to see the planned scenarios.

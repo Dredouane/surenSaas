@@ -1,72 +1,72 @@
 # Conventions
 
-## Nommage
+## Naming
 
-### Fichiers
-- **Composants** : PascalCase (`UserCard.tsx`)
-- **Utils** : camelCase (`formatDate.ts`)
-- **API** : kebab-case (`user-controller.ts`)
-- **SQL** : snake_case (`001_add_users.sql`)
+### Files
+- **Components**: PascalCase (`UserCard.tsx`)
+- **Utils**: camelCase (`formatDate.ts`)
+- **API**: kebab-case (`user-controller.ts`)
+- **SQL**: snake_case (`001_add_users.sql`)
 
 ### Variables
-- **Constantes** : UPPER_SNAKE_CASE
-- **Fonctions** : camelCase
-- **Classes** : PascalCase
-- **Privées** : préfixe `_`
+- **Constants**: UPPER_SNAKE_CASE
+- **Functions**: camelCase
+- **Classes**: PascalCase
+- **Private**: `_` prefix
 
 ## Code
 
 ### TypeScript
 ```typescript
-// Toujours typer les props
+// Always type the props
 interface Props {
   user: User;
   onUpdate: (id: string) => void;
 }
 
-// Pas de any
-// Pas d'assertions non null (!)
-// Préférer nullish coalescing (??)
+// No any
+// No non-null assertions (!)
+// Prefer nullish coalescing (??)
 ```
 
 ### Python
 ```python
-# Type hints obligatoires
+# Mandatory type hints
 def get_user(user_id: UUID) -> User | None:
     pass
 
-# Docstrings Google style
-"""Récupère un utilisateur.
+# Google-style docstrings
+"""Fetches a user.
 
 Args:
-    user_id: UUID de l'utilisateur
+    user_id: UUID of the user
 
 Returns:
-    User ou None si non trouvé
+    User or None if not found
 """
 ```
 
 ## Git
 ```bash
 # Branches
-feature/ajout-projets
-fix/correction-auth
+feature/add-projects
+fix/fix-auth
 hotfix/urgent-db
 
 # Commits
-feat: ajoute gestion des projets
-fix: corrige validation email
-docs: met à jour README
+feat: add project management
+fix: fix email validation
+docs: update README
 ```
 
-## Base de données
-- UUID v4 pour les IDs
-- Timestamps en UTC
-- Pas de ON DELETE CASCADE (soft delete)
-- Index sur chaque clé étrangère
+## Database
+- UUID v4 for IDs
+- Timestamps in UTC
+- No ON DELETE CASCADE (soft delete)
+- Index on every foreign key
 
 ## API
-- RESTful strict
-- Version dans URL : `/api/v1/`
-- HTTP codes standards
-- Erreurs format JSON : `{ "error": "message", "code": "XXX" }`
+- Strict RESTful
+- Version in URL: `/api/v1/`
+- Standard HTTP codes
+- JSON error format: `{ "error": "message", "code": "XXX" }`

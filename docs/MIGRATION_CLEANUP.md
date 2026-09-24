@@ -1,83 +1,83 @@
-# 🧹 Nettoyage de l'architecture - Simplification
+# 🧹 Architecture cleanup - Simplification
 
-## Résumé des changements
+## Summary of changes
 
-### Suppression de `user_org_membership`
+### Removal of `user_org_membership`
 
-**Avant** :
-- `users` : Profil utilisateur
-- `user_org_membership` : Association user-org avec `role`
+**Before**:
+- `users`: User profile
+- `user_org_membership`: User-org association with `role`
 
-**Après** (simplifié) :
-- `users` : Profil utilisateur AVEC `org_id` ET `role` directement
+**After** (simplified):
+- `users`: User profile WITH `org_id` AND `role` directly
 
-### Pourquoi ?
-- Une seule source de vérité
-- Moins de complexité
-- Évite les récursions RLS
-- Plus performant
+### Why?
+- Single source of truth
+- Less complexity
+- Avoids RLS recursions
+- Better performance
 
-## Fichiers modifiés
+## Modified files
 
 ### Backend
-- ✅ `app/core/capabilities.py` - Utilise `users` au lieu de `user_org_membership`
-- ✅ `app/api/admin.py` - Utilise `users.role` directement
-- ✅ `app/services/telegram/*.py` - Mis à jour
+- ✅ `app/core/capabilities.py` - Uses `users` instead of `user_org_membership`
+- ✅ `app/api/admin.py` - Uses `users.role` directly
+- ✅ `app/services/telegram/*.py` - Updated
 
 ### Database
-- ✅ `db/schema/999_cleanup_user_org_membership.sql` - Script de nettoyage
-- ✅ `docs/DATABASE_SIMPLIFIED.md` - Documentation mise à jour
+- ✅ `db/schema/999_cleanup_user_org_membership.sql` - Cleanup script
+- ✅ `docs/DATABASE_SIMPLIFIED.md` - Updated documentation
 
 ### Frontend
-- ✅ Aucun changement nécessaire (utilise déjà l'API)
+- ✅ No changes needed (already uses the API)
 
-## Procédure de migration
+## Migration procedure
 
-### 1. Backup (important !)
+### 1. Backup (important!)
 ```bash
-# Faire un backup de la base de données
-# Via Supabase Dashboard ou pg_dump
+# Back up the database
+# Via Supabase Dashboard or pg_dump
 ```
 
-### 2. Exécuter le script de migration des données
+### 2. Run the data migration script
 ```bash
 export TEST_SUPABASE_SERVICE_KEY="eyJ..."
 python scripts/migrate-membership-to-users.py
 ```
 
-### 3. Nettoyer la DB
-Exécuter dans Supabase SQL Editor :
+### 3. Clean up the DB
+Run in the Supabase SQL Editor:
 ```sql
--- Exécuter le script de nettoyage
+-- Run the cleanup script
 -- 999_cleanup_user_org_membership.sql
 ```
 
-### 4. Redémarrer le backend
+### 4. Restart the backend
 ```bash
 cd surenSaasBack
 python -m uvicorn app.main:app --reload --port 8080
 ```
 
-### 5. Tester
-- ✅ Connexion d'un admin
-- ✅ Page Administration accessible
-- ✅ Liste des utilisateurs pré-autorisés
-- ✅ Capabilities fonctionnent
+### 5. Test
+- ✅ Admin login
+- ✅ Administration page accessible
+- ✅ List of pre-authorized users
+- ✅ Capabilities working
 
-## Rollback (si nécessaire)
+## Rollback (if needed)
 
-Si vous devez revenir en arrière :
+If you need to go back:
 
 ```sql
--- Réactiver user_org_membership
+-- Re-enable user_org_membership
 ALTER TABLE public.user_org_membership ENABLE ROW LEVEL SECURITY;
 
--- Recréer les policies (si nécessaire)
--- Voir backup initial
+-- Recreate the policies (if needed)
+-- See initial backup
 ```
 
 ## Notes
 
-- `user_org_membership` est maintenant **DEPRECATED**
-- Table conservée temporairement mais ignorée par le code
-- À supprimer définitivement après validation complète
+- `user_org_membership` is now **DEPRECATED**
+- Table kept temporarily but ignored by the code
+- To be deleted permanently after full validation
