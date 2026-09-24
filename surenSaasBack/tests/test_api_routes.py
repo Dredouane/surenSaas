@@ -18,8 +18,9 @@ from app.main import app
 client = TestClient(app)
 
 # Configuration
-TEST_ORG_ID = "REDACTEDORG"
-TEST_COMPANY_ID = "REDACTED"
+TEST_ORG_ID = "<your-org-uuid>"
+import os
+TEST_COMPANY_ID = os.environ.get("SUREN_TEST_COMPANY_ID", "")
 
 # Credentials de test depuis les variables d'environnement
 TEST_LOGIN = os.getenv("SUREN_TEST_LOGIN")

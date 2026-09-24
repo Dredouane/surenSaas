@@ -11,7 +11,7 @@ import sys
 from supabase import create_client
 
 # Configuration
-SUPABASE_URL = "https://REDACTED.supabase.co"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
 
 # Utilisateurs et leurs mots de passe de test

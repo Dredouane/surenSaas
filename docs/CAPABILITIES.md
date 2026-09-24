@@ -1,10 +1,10 @@
-# Système de Capabilities (Permissions)
+# Capabilities System (Permissions)
 
-## Vue d'ensemble
+## Overview
 
-Système de permissions granulaires basé sur des capabilities au format `resource:action`.
+Granular permissions system based on capabilities in the `resource:action` format.
 
-Les **admins** bypassent automatiquement toutes les vérifications.
+**Admins** automatically bypass all checks.
 
 ## Format
 
@@ -12,7 +12,7 @@ Les **admins** bypassent automatiquement toutes les vérifications.
 {resource}:{subresource}:{action}
 ```
 
-Exemples:
+Examples:
 - `construction:facturation:read`
 - `construction:facturation:write`
 - `construction:planning:read`
@@ -22,7 +22,7 @@ Exemples:
 ### Tables
 
 #### `organization_capabilities`
-Définit les capabilities disponibles pour une organisation.
+Defines the capabilities available for an organization.
 
 ```sql
 org_id UUID
@@ -32,7 +32,7 @@ capability_code TEXT  -- 'construction:facturation:read'
 ```
 
 #### `user_capabilities`
-Assigne des capabilities aux users.
+Assigns capabilities to users.
 
 ```sql
 user_id UUID
@@ -42,42 +42,42 @@ granted_by UUID
 is_active BOOLEAN
 ```
 
-#### Vue `user_active_capabilities`
-Vue facilitant la récupération des capabilities actives.
+#### View `user_active_capabilities`
+View making it easy to retrieve active capabilities.
 
-### Vérification
+### Checking
 
 ```python
 from app.core.capabilities import CapabilityChecker
 
 checker = CapabilityChecker(supabase)
 
-# Vérifier une capability
+# Check a capability
 has_access = await checker.has_capability(
     user_id='uuid',
     org_id='uuid',
     capability='construction:facturation:read'
 )
 
-# Récupérer toutes les capabilities
+# Retrieve all capabilities
 capabilities = await checker.get_user_capabilities(
     user_id='uuid',
     org_id='uuid'
 )
 ```
 
-## Capabilities Construction
+## Construction Capabilities
 
 | Code | Description |
 |------|-------------|
-| `construction:facturation:read` | Voir les factures |
-| `construction:facturation:write` | Créer/modifier factures |
-| `construction:facturation:validate` | Valider/rejeter factures |
-| `construction:facturation:delete` | Supprimer factures |
+| `construction:facturation:read` | View invoices |
+| `construction:facturation:write` | Create/modify invoices |
+| `construction:facturation:validate` | Validate/reject invoices |
+| `construction:facturation:delete` | Delete invoices |
 
-## Utilisation dans les routes FastAPI
+## Usage in FastAPI routes
 
-### Méthode 1: Vérification manuelle
+### Method 1: Manual check
 
 ```python
 @router.get("/invoices")
@@ -88,23 +88,23 @@ async def list_invoices(
     checker: CapabilityChecker = Depends(get_capability_checker)
 ):
     if not await checker.has_capability(user['id'], org, 'construction:facturation:read'):
-        raise HTTPException(403, "Capability requise")
+        raise HTTPException(403, "Capability required")
     
-    # Suite...
+    # Continued...
 ```
 
-### Méthode 2: Dépendance
+### Method 2: Dependency
 
 ```python
 @router.get("/invoices", dependencies=[
     Depends(require_capability('construction:facturation:read'))
 ])
 async def list_invoices(request: Request, org: str):
-    # Capability déjà vérifiée
+    # Capability already checked
     pass
 ```
 
-### Méthode 3: Décorateur
+### Method 3: Decorator
 
 ```python
 from app.core.capabilities import CONSTRUCTION_CAPABILITIES
@@ -115,69 +115,69 @@ async def list_invoices(request: Request, org: str):
     pass
 ```
 
-## Comportement Admin
+## Admin Behavior
 
-Les users avec `users.role = 'admin'`:
-- ✅ Ont automatiquement TOUTES les capabilities
-- ✅ Ne nécessitent pas d'entrée dans `user_capabilities`
-- ✅ Sont détectés avant vérification capability
+Users with `users.role = 'admin'`:
+- ✅ Automatically have ALL capabilities
+- ✅ Do not require an entry in `user_capabilities`
+- ✅ Are detected before the capability check
 
 ## SQL Helper
 
 ```sql
--- Vérifier si user a une capability (ou est admin)
+-- Check whether a user has a capability (or is an admin)
 SELECT check_user_capability('user-uuid', 'org-uuid', 'construction:facturation:read');
 
--- Liste capabilities d'un user
+-- List a user's capabilities
 SELECT * FROM user_active_capabilities 
 WHERE user_id = 'uuid' AND org_id = 'uuid';
 
--- Assigner capability (admin uniquement)
+-- Assign a capability (admin only)
 INSERT INTO user_capabilities (user_id, org_id, capability_code, granted_by)
 VALUES ('user-uuid', 'org-uuid', 'construction:facturation:write', 'admin-uuid');
 
--- Révoquer capability
+-- Revoke a capability
 UPDATE user_capabilities 
 SET is_active = false, revoked_at = NOW()
 WHERE user_id = 'uuid' AND capability_code = 'construction:facturation:write';
 ```
 
-## Comparaison avec Rôles
+## Comparison with Roles
 
-| Aspect | Rôles (admin/user) | Capabilities |
+| Aspect | Roles (admin/user) | Capabilities |
 |--------|-------------------|--------------|
-| Granularité | Grossière (2 rôles) | Fine (illimité) |
-| Flexibilité | Limitée | Haute |
-| Complexité | Simple | Modérée |
-| Usage | Authentification | Autorisation |
+| Granularity | Coarse (2 roles) | Fine (unlimited) |
+| Flexibility | Limited | High |
+| Complexity | Simple | Moderate |
+| Usage | Authentication | Authorization |
 
-## Migration depuis rôles binaires
+## Migration from binary roles
 
-Existant: `role IN ('admin', 'user')`
+Existing: `role IN ('admin', 'user')`
 
-Nouveau:
-1. Garder `admin` pour accès complet
-2. Créer capabilities pour les users
-3. Users standards n'ont pas de rôle spécial mais des capabilities
+New:
+1. Keep `admin` for full access
+2. Create capabilities for users
+3. Standard users have no special role but capabilities
 
-## Bonnes pratiques
+## Best practices
 
-### Nommage
-- **Resource**: Singulier, minuscule (`construction`, `planning`)
-- **Action**: Verbe CRUD (`read`, `write`, `update`, `delete`, `validate`)
+### Naming
+- **Resource**: Singular, lowercase (`construction`, `planning`)
+- **Action**: CRUD verb (`read`, `write`, `update`, `delete`, `validate`)
 
-### Héritage implicite
-Pas d'héritage automatique (ex: `write` n'implique pas `read`).
-Chaque capability doit être assignée explicitement.
+### Implicit inheritance
+No automatic inheritance (e.g. `write` does not imply `read`).
+Each capability must be assigned explicitly.
 
 ### Documentation
-Documenter chaque capability dans:
-- `docs/CAPABILITIES.md` (ce fichier)
-- Code avec constantes
+Document each capability in:
+- `docs/CAPABILITIES.md` (this file)
+- Code with constants
 - OpenAPI `security` descriptions
 
-## Références
+## References
 
-- Implémentation: `app/core/capabilities.py`
-- Schéma SQL: `db/schema/006_capabilities.sql`
-- Utilisation: `docs/CONSTRUCTION_INVOICES.md`
+- Implementation: `app/core/capabilities.py`
+- SQL schema: `db/schema/006_capabilities.sql`
+- Usage: `docs/CONSTRUCTION_INVOICES.md`

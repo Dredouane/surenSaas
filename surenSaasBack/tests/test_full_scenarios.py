@@ -22,8 +22,8 @@ import asyncio
 from typing import Dict, List, Any, Optional
 
 # Configuration test
-TEST_ORG_ID = "REDACTEDORG"
-TEST_COMPANY_ID = "REDACTED"
+TEST_ORG_ID = "<your-org-uuid>"
+TEST_COMPANY_ID = os.environ.get("SUREN_TEST_COMPANY_ID", "")
 
 # Données de test
 TEST_DATA = {

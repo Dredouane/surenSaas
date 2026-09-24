@@ -15,7 +15,7 @@ import secrets
 from supabase import create_client
 
 # Configuration
-SUPABASE_URL = "https://REDACTED.supabase.co"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
 
 # Utilisateurs de test avec mots de passe fixes

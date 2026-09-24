@@ -10,7 +10,7 @@ import os
 import sys
 
 # Configuration
-SUPABASE_URL = "https://REDACTED.supabase.co"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
 
 # SQL pour mettre à jour les mots de passe

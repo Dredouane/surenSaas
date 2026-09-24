@@ -46,8 +46,8 @@ fi
 echo ""
 
 # Paramètres par défaut pour l'environnement de test
-DEFAULT_ORG_ID="REDACTEDORG"
-DEFAULT_COMPANY_ID="REDACTED"
+DEFAULT_ORG_ID="${NEXT_PUBLIC_ORG_ID:-}"
+DEFAULT_COMPANY_ID="${SUREN_TEST_COMPANY_ID:-}"
 
 # Récupérer les arguments ou utiliser les valeurs par défaut
 ORG_ID=${1:-$DEFAULT_ORG_ID}

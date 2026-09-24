@@ -26,7 +26,7 @@ def test_signup_step_by_step():
     
     test_email = "test-debug@example.com"
     test_password = "TestPassword123!"
-    test_org_id = "REDACTEDORG"
+    test_org_id = "<your-org-uuid>"
     
     try:
         supabase = get_supabase()

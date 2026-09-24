@@ -40,7 +40,7 @@ python3 << EOF
 import os
 from supabase import create_client
 
-SUPABASE_URL = "https://REDACTED.supabase.co"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("TEST_SUPABASE_SERVICE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)

@@ -126,7 +126,7 @@ export const TEST_TELEGRAM = {
  * 🏢 Organisation de test
  */
 export const TEST_ORG = {
-  id: 'REDACTEDORG',
+  id: process.env.NEXT_PUBLIC_ORG_ID ?? '',
   slug: 'REDACTED_ORG_SLUG',
   name: 'Suren - TEST',
 };

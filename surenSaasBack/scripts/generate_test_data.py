@@ -203,7 +203,7 @@ def generate_test_data(org_id: str, created_by: str, company_id: Optional[str] =
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python generate_test_data.py <org_id> <user_id> [company_id]")
-        print("Example: python generate_test_data.py REDACTEDORG REDACTED REDACTED")
+        print("Example: python generate_test_data.py <your-org-uuid> <your-user-uuid> <your-company-uuid>")
         sys.exit(1)
     
     org_id = sys.argv[1]

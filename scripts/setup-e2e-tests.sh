@@ -15,7 +15,7 @@ echo "🧪 Setup E2E Tests - Environment: $ENV"
 echo "======================================"
 
 # Charger les variables d'environnement
-cd /home/redouane/dev/AI-ERA/surenSaas
+cd "$(dirname "$0")/.."
 
 if [ "$ENV" = "local" ]; then
     set -a
@@ -44,13 +44,14 @@ EOF
 
 python3 << 'PYTHON_SCRIPT'
 import sys
+import os
 sys.path.insert(0, '.')
 
 from app.api.auth import get_supabase
 from datetime import datetime
 
 supabase = get_supabase()
-org_id = "REDACTEDORG"
+org_id = os.environ.get("NEXT_PUBLIC_ORG_ID", "")
 
 print("🔧 Configuration des données de test...")
 print("")

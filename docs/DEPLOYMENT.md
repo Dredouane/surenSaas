@@ -1,8 +1,8 @@
-# Déploiement et Configuration
+# Deployment and Configuration
 
-## Architecture des Scripts
+## Scripts Architecture
 
-### Vue d'ensemble
+### Overview
 
 ```
 ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
@@ -11,58 +11,58 @@
 │                  │ │                  │ │                  │
 │  Localhost:8080  │ │  Localhost:3000  │ │  Cloud Run       │
 │                  │ │                  │ │                  │
-│ Charge:          │ │ Charge:          │ │ Charge:          │
+│ Loads:           │ │ Loads:           │ │ Loads:           │
 │ • .env.test      │ │ • .env.test      │ │ • .env.test      │
 │ • ~/.bashrc      │ │ • ~/.bashrc      │ │ • ~/.bashrc      │
-│   (secrets)      │ │   (URLs GCP)     │ │   (secrets)      │
+│   (secrets)      │ │   (GCP URLs)     │ │   (secrets)      │
 │                  │ │                  │ │                  │
-│ Crée:            │ │ Crée:            │ │ Passe via        │
+│ Creates:         │ │ Creates:         │ │ Passes via       │
 │ • .env (backend) │ │ • .env.local     │ │ --build-arg:     │
-│   dynamique      │ │   dynamique      │ │ • URL backend    │
-│                  │ │ • Supprime .next/│ │ • Org ID/Slug    │
-│ Tue port 8080    │ │ Tue port 3000    │ │ • Supabase       │
+│   dynamically    │ │   dynamically    │ │ • Backend URL    │
+│                  │ │ • Removes .next/ │ │ • Org ID/Slug    │
+│ Kills port 8080  │ │ Kills port 3000  │ │ • Supabase       │
 └──────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
-## Scripts disponibles
+## Available scripts
 
-### 🏃 Scripts RUN-LOCAL (Développement)
+### 🏃 RUN-LOCAL scripts (Development)
 
 | Script | Description | Backend URL |
 |--------|-------------|-------------|
-| `run-local-back_test.sh` | Backend uniquement | `localhost:8080` |
-| `run-local-front_test.sh` | Frontend uniquement | `localhost:8080` |
-| `run-local-front_test-gcp.sh` | Frontend avec backend GCP | `$SUREN_TEST_API_BASE_URL` (bashrc) |
-| `run-local_test.sh` | Backend + Frontend (2 terminaux) | `localhost:8080` |
+| `run-local-back_test.sh` | Backend only | `localhost:8080` |
+| `run-local-front_test.sh` | Frontend only | `localhost:8080` |
+| `run-local-front_test-gcp.sh` | Frontend with GCP backend | `$SUREN_TEST_API_BASE_URL` (bashrc) |
+| `run-local_test.sh` | Backend + Frontend (2 terminals) | `localhost:8080` |
 
-### 🚀 Scripts DEPLOY (Production)
+### 🚀 DEPLOY scripts (Production)
 
-| Script | Description | Cible |
+| Script | Description | Target |
 |--------|-------------|-------|
-| `deploy_back_test.sh` | Backend uniquement | GCP Cloud Run |
-| `deploy_front_test.sh` | Frontend uniquement | GCP Cloud Run |
+| `deploy_back_test.sh` | Backend only | GCP Cloud Run |
+| `deploy_front_test.sh` | Frontend only | GCP Cloud Run |
 
-### 🔍 Scripts utilitaires
+### 🔍 Utility scripts
 
 | Script | Description |
 |--------|-------------|
-| `check-config.sh` | Vérifie que tout est configuré correctement |
+| `check-config.sh` | Checks that everything is configured correctly |
 
-## Configuration requise
+## Required configuration
 
-### 1. Fichier `.env.test` (racine du projet)
+### 1. `.env.test` file (project root)
 
 ```bash
-# Organisation (NE CHANGE JAMAIS)
-NEXT_PUBLIC_ORG_ID=REDACTEDORG
+# Organization (NEVER CHANGES)
+NEXT_PUBLIC_ORG_ID=<your-org-uuid>
 NEXT_PUBLIC_ORG_SLUG=REDACTED_ORG_SLUG
 
-# Supabase (partagé)
-NEXT_PUBLIC_SUPABASE_URL=https://REDACTED.supabase.co
+# Supabase (shared)
+NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=REDACTED_JWT
 
 # GCP
-GCP_PROJECT_ID=suren-saas
+GCP_PROJECT_ID=<your-gcp-project-id>
 GCP_REGION=europe-west1
 TEST_FRONT_SERVICE_NAME=test-surensaas-front
 TEST_BACK_SERVICE_NAME=test-surensaas-back
@@ -74,17 +74,17 @@ ALLOWED_ORIGINS=http://localhost:3000
 DEBUG=true
 ```
 
-### 2. Fichier `~/.bashrc` (secrets personnels)
+### 2. `~/.bashrc` file (personal secrets)
 
 ```bash
-# Backend Supabase
+# Supabase backend
 export TEST_SUPABASE_SERVICE_KEY="REDACTED_JWT"
-export TEST_JWT_SECRET="votre-secret-jwt-test"
+export TEST_JWT_SECRET="your-test-jwt-secret"
 
-# URL GCP (pour run-local-front_test-gcp.sh)
+# GCP URL (for run-local-front_test-gcp.sh)
 export SUREN_TEST_API_BASE_URL="https://test-surensaas-back-xxx.run.app"
 
-# Optionnels
+# Optional
 export SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_TOKEN="..."
 export SUREN_TEST_TELEGRAM_CONSTRUCTION_BOT_USERNAME="..."
 export SUREN_GOOGLE_GEMINI_CREDENTIALS_B64="..."
@@ -93,20 +93,20 @@ export SUREN_GOOGLE_GEMINI_CREDENTIALS_B64="..."
 ### 3. `.gitignore` (IMPORTANT)
 
 ```
-# Variables d'environnement locales
+# Local environment variables
 .env.local
 surenSaasFront/.env.local
 
-# Cache Next.js
+# Next.js cache
 surenSaasFront/.next/
 
-# Variables backend
+# Backend variables
 surenSaasBack/.env
 ```
 
 ## Workflows
 
-### Workflow 1 : Développement complet en local
+### Workflow 1: Full local development
 
 ```bash
 # Terminal 1 - Backend
@@ -116,251 +116,251 @@ surenSaasBack/.env
 ./scripts/run-local-front_test.sh
 ```
 
-**Ce qui se passe :**
-- Backend lit `.env.test` + `~/.bashrc` → crée `surenSaasBack/.env`
-- Frontend lit `.env.test` → crée `surenSaasFront/.env.local` avec `localhost:8080`
-- Cache Next.js supprimé avant démarrage
-- Processus existants tués automatiquement
+**What happens:**
+- Backend reads `.env.test` + `~/.bashrc` → creates `surenSaasBack/.env`
+- Frontend reads `.env.test` → creates `surenSaasFront/.env.local` with `localhost:8080`
+- Next.js cache removed before startup
+- Existing processes killed automatically
 
-### Workflow 2 : Frontend local avec backend GCP
+### Workflow 2: Local frontend with GCP backend
 
 ```bash
-# Assurez-vous que SUREN_TEST_API_BASE_URL est à jour dans ~/.bashrc
+# Make sure SUREN_TEST_API_BASE_URL is up to date in ~/.bashrc
 ./scripts/run-local-front_test-gcp.sh
 ```
 
-**Ce qui se passe :**
-- Frontend crée `.env.local` avec l'URL GCP depuis `~/.bashrc`
-- ⚠️ Cookies cross-origin peuvent ne pas fonctionner
-- Idéal pour tester l'UI sans démarrer le backend local
+**What happens:**
+- Frontend creates `.env.local` with the GCP URL from `~/.bashrc`
+- ⚠️ Cross-origin cookies may not work
+- Ideal for testing the UI without starting the local backend
 
-### Workflow 3 : Déploiement Test
+### Workflow 3: Test deployment
 
 ```bash
-# 1. Vérifier la configuration
+# 1. Check the configuration
 ./scripts/check-config.sh
 
-# 2. Déployer le backend (d'abord pour CORS)
+# 2. Deploy the backend (first, for CORS)
 ./scripts/deploy_back_test.sh
 
-# 3. Mettre à jour l'URL dans ~/.bashrc si elle a changé
-#    (le script affiche la nouvelle URL)
+# 3. Update the URL in ~/.bashrc if it changed
+#    (the script displays the new URL)
 
-# 4. Déployer le frontend
+# 4. Deploy the frontend
 ./scripts/deploy_front_test.sh
 ```
 
-**Caractéristiques du déploiement TEST :**
+**TEST deployment characteristics:**
 - Scale-to-zero (min instances: 0)
 - Max 5-10 instances
-- Debug mode activé
-- CORS: localhost + URL frontend GCP
+- Debug mode enabled
+- CORS: localhost + GCP frontend URL
 
-## Détails des scripts
+## Script details
 
 ### `run-local-back_test.sh`
 
 ```bash
-# Actions :
-1. Tue les processus sur le port 8080
-2. Charge .env.test
-3. Charge ~/.bashrc (secrets)
-4. Crée surenSaasBack/.env dynamiquement
-5. Démarre uvicorn sur localhost:8080
+# Actions:
+1. Kills processes on port 8080
+2. Loads .env.test
+3. Loads ~/.bashrc (secrets)
+4. Creates surenSaasBack/.env dynamically
+5. Starts uvicorn on localhost:8080
 ```
 
-**Variables créées dans `.env` :**
+**Variables created in `.env`:**
 - `SUPABASE_URL`
-- `SUPABASE_SERVICE_KEY` (depuis ~/.bashrc)
-- `JWT_SECRET` (depuis ~/.bashrc)
+- `SUPABASE_SERVICE_KEY` (from ~/.bashrc)
+- `JWT_SECRET` (from ~/.bashrc)
 - `ALLOWED_ORIGINS`
 - `ENVIRONMENT=test`
 
 ### `run-local-front_test.sh`
 
 ```bash
-# Actions :
-1. Tue les processus sur le port 3000
-2. Charge .env.test
-3. Crée surenSaasFront/.env.local :
+# Actions:
+1. Kills processes on port 3000
+2. Loads .env.test
+3. Creates surenSaasFront/.env.local:
    - API_URL=http://localhost:8080
-   - NEXT_PUBLIC_ORG_ID/SLUG depuis .env.test
-   - Supabase depuis .env.test
-4. Supprime .next/ (cache)
-5. Démarre Next.js
+   - NEXT_PUBLIC_ORG_ID/SLUG from .env.test
+   - Supabase from .env.test
+4. Removes .next/ (cache)
+5. Starts Next.js
 ```
 
 ### `run-local-front_test-gcp.sh`
 
 ```bash
-# Actions :
-1. Tue les processus sur le port 3000
-2. Charge .env.test
-3. Charge ~/.bashrc (SUREN_TEST_API_BASE_URL)
-4. Crée .env.local avec l'URL GCP
-5. Supprime .next/
-6. Démarre Next.js
+# Actions:
+1. Kills processes on port 3000
+2. Loads .env.test
+3. Loads ~/.bashrc (SUREN_TEST_API_BASE_URL)
+4. Creates .env.local with the GCP URL
+5. Removes .next/
+6. Starts Next.js
 ```
 
 ### `deploy_back_test.sh`
 
 ```bash
-# Actions :
-1. Charge .env.test
-2. Charge ~/.bashrc (secrets)
-3. Crée/Met à jour les secrets GCP :
+# Actions:
+1. Loads .env.test
+2. Loads ~/.bashrc (secrets)
+3. Creates/Updates the GCP secrets:
    - supabase-url
    - test-supabase-service-key
    - test-jwt-secret
-   - test-telegram-bot-* (si défini)
-   - test-google-gemini-* (si défini)
-4. Ping le frontend pour vérifier s'il est accessible
-5. Calcule les CORS (localhost + URL frontend si accessible)
-6. Déploie sur Cloud Run avec :
-   - Secrets montés comme variables d'env
-   - Variables d'env (ORG_ID, DEBUG, etc.)
+   - test-telegram-bot-* (if set)
+   - test-google-gemini-* (if set)
+4. Pings the frontend to check whether it is reachable
+5. Computes CORS (localhost + frontend URL if reachable)
+6. Deploys to Cloud Run with:
+   - Secrets mounted as env variables
+   - Env variables (ORG_ID, DEBUG, etc.)
 ```
 
-**IMPORTANT :** Le backend est déployé avec `NEXT_PUBLIC_ORG_ID` (pas `TEST_ORG_ID`).
+**IMPORTANT:** The backend is deployed with `NEXT_PUBLIC_ORG_ID` (not `TEST_ORG_ID`).
 
 ### `deploy_front_test.sh`
 
 ```bash
-# Actions :
-1. Charge .env.test
-2. Récupère l'URL du backend via gcloud
-3. Crée un fichier .env temporaire avec les variables pour le build :
-   - NEXT_PUBLIC_API_URL=<url_backend>
+# Actions:
+1. Loads .env.test
+2. Retrieves the backend URL via gcloud
+3. Creates a temporary .env file with the variables for the build:
+   - NEXT_PUBLIC_API_URL=<backend_url>
    - NEXT_PUBLIC_ORG_ID/SLUG
-   - NEXT_PUBLIC_SUPABASE_* (depuis .env.test)
-4. Déploie sur Cloud Run avec --set-env-vars (pour le runtime) :
-   - API_URL=<url_backend>
+   - NEXT_PUBLIC_SUPABASE_* (from .env.test)
+4. Deploys to Cloud Run with --set-env-vars (for runtime):
+   - API_URL=<backend_url>
    - ENVIRONMENT=test
    - BUILD_ID
-5. Supprime le fichier .env après le build
+5. Deletes the .env file after the build
 ```
 
-**IMPORTANT :** Le fichier `.env` est créé temporairement et copié par le Dockerfile. Next.js le lit automatiquement au build time pour "baker" les variables dans le bundle. Le fichier est supprimé après le déploiement.
+**IMPORTANT:** The `.env` file is created temporarily and copied by the Dockerfile. Next.js reads it automatically at build time to "bake" the variables into the bundle. The file is deleted after deployment.
 
-## Caractéristiques de robustesse
+## Robustness features
 
-### ✅ Gestion des conflits
+### ✅ Conflict handling
 
-- **Ports occupés** : Scripts tuent automatiquement les processus existants
-- **Cache parasite** : `.next/` supprimé avant chaque démarrage
-- **Variables obsolètes** : `.env.test` est la seule source de vérité
+- **Occupied ports**: Scripts automatically kill existing processes
+- **Parasite cache**: `.next/` removed before each startup
+- **Stale variables**: `.env.test` is the single source of truth
 
-### ✅ Sécurité
+### ✅ Security
 
-- **Secrets** : Uniquement dans `~/.bashrc`, jamais versionnés
-- **JWT** : Secrets différents entre test et prod
-- **CORS** : Strict, configuré dynamiquement
-- **Organisation** : Isolation par `org_id`
+- **Secrets**: Only in `~/.bashrc`, never version-controlled
+- **JWT**: Different secrets between test and prod
+- **CORS**: Strict, configured dynamically
+- **Organization**: Isolation by `org_id`
 
-### ✅ Cohérence
+### ✅ Consistency
 
-- **Une seule source** : `.env.test` pour toute la configuration
-- **Noms uniformes** : `NEXT_PUBLIC_ORG_ID/SLUG` partout
-- **Pas d'URLs hardcodées** : Dans `.env.test`
-- **Pas de .env.local versionné** : Dans `.gitignore`
+- **Single source**: `.env.test` for all configuration
+- **Uniform names**: `NEXT_PUBLIC_ORG_ID/SLUG` everywhere
+- **No hardcoded URLs**: In `.env.test`
+- **No versioned .env.local**: In `.gitignore`
 
-## Dépannage
+## Troubleshooting
 
-### Problème : "Port déjà utilisé"
+### Problem: "Port already in use"
 
 ```bash
-# Solution : Les scripts le font automatiquement, mais si besoin :
+# Solution: The scripts do it automatically, but if needed:
 lsof -ti:3000 | xargs kill -9
 lsof -ti:8080 | xargs kill -9
 ```
 
-### Problème : "Variables d'env pas prises en compte"
+### Problem: "Env variables not taken into account"
 
 ```bash
-# Cause : Cache Next.js
-# Solution : Supprimer manuellement
+# Cause: Next.js cache
+# Solution: Remove manually
 rm -rf surenSaasFront/.next
 ```
 
-### Problème : "URL backend incorrecte"
+### Problem: "Incorrect backend URL"
 
 ```bash
-# Vérifier la source :
-echo $SUREN_TEST_API_BASE_URL  # Pour GCP
-cat surenSaasFront/.env.local | grep API_URL  # Pour local
+# Check the source:
+echo $SUREN_TEST_API_BASE_URL  # For GCP
+cat surenSaasFront/.env.local | grep API_URL  # For local
 ```
 
-### Problème : "Secrets manquants"
+### Problem: "Missing secrets"
 
 ```bash
-# Vérifier ~/.bashrc
+# Check ~/.bashrc
 env | grep TEST_SUPABASE
 env | grep TEST_JWT
 
-# Si vide, recharger :
+# If empty, reload:
 source ~/.bashrc
 ```
 
-## Migrations et Évolutions
+## Migrations and Evolution
 
-### Si l'URL GCP change
+### If the GCP URL changes
 
 ```bash
-# 1. Mettre à jour ~/.bashrc
-export SUREN_TEST_API_BASE_URL="https://nouvelle-url.run.app"
+# 1. Update ~/.bashrc
+export SUREN_TEST_API_BASE_URL="https://new-url.run.app"
 
-# 2. Recharger
+# 2. Reload
 source ~/.bashrc
 
-# 3. Pas besoin de modifier .env.test (pas d'URLs dedans)
+# 3. No need to modify .env.test (no URLs in it)
 ```
 
-### Si l'organisation change
+### If the organization changes
 
 ```bash
-# 1. Modifier .env.test
-NEXT_PUBLIC_ORG_ID=nouvel-uuid
-NEXT_PUBLIC_ORG_SLUG=nouveau-slug
+# 1. Modify .env.test
+NEXT_PUBLIC_ORG_ID=new-uuid
+NEXT_PUBLIC_ORG_SLUG=new-slug
 
 # 2. Commit + Push
 git add .env.test
-git commit -m "Changement d'organisation"
+git commit -m "Organization change"
 
-# 3. Redémarrer tous les services (ils lisent .env.test à chaque fois)
+# 3. Restart all services (they read .env.test every time)
 ```
 
-## Commandes utiles
+## Useful commands
 
 ```bash
-# Vérifier la configuration
+# Check the configuration
 ./scripts/check-config.sh
 
-# Voir les logs GCP
+# View GCP logs
 gcloud logging tail --service=test-surensaas-back
 gcloud logging tail --service=test-surensaas-front
 
-# Redémarrer un service
-./scripts/run-local-back_test.sh  # ou front
+# Restart a service
+./scripts/run-local-back_test.sh  # or front
 
-# Voir les variables chargées
+# View loaded variables
 env | grep NEXT_PUBLIC
 env | grep TEST_
 ```
 
-## Résumé des fichiers critiques
+## Summary of critical files
 
-### Versionnés (Git)
-- `.env.test` : Configuration organisation et Supabase
-- `scripts/*.sh` : Scripts automatisés
-- `.gitignore` : Ignore .env.local et cache
+### Version-controlled (Git)
+- `.env.test`: Organization and Supabase configuration
+- `scripts/*.sh`: Automated scripts
+- `.gitignore`: Ignores .env.local and cache
 
-### Non versionnés (Local)
-- `~/.bashrc` : Secrets et URLs GCP
-- `surenSaasBack/.env` : Créé dynamiquement
-- `surenSaasFront/.env.local` : Créé dynamiquement
-- `surenSaasFront/.next/` : Cache (supprimé à chaque fois)
+### Not version-controlled (Local)
+- `~/.bashrc`: Secrets and GCP URLs
+- `surenSaasBack/.env`: Created dynamically
+- `surenSaasFront/.env.local`: Created dynamically
+- `surenSaasFront/.next/`: Cache (removed every time)
 
 ---
 
-**Dernière mise à jour :** 2024-03-23
-**Architecture :** Source de vérité unique (.env.test) + Secrets externes (~/.bashrc)
+**Last updated:** 2024-03-23
+**Architecture:** Single source of truth (.env.test) + External secrets (~/.bashrc)

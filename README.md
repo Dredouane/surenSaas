@@ -1,212 +1,100 @@
 # SurenSaaS
 
-SaaS multi-PME (construction, nettoyage, diagnostic énergétique) avec architecture moderne.
+[![Next.js](https://img.shields.io/badge/frontend-Next.js%2014-black)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/backend-FastAPI-teal)](https://fastapi.tiangolo.com/)
+[![Supabase](https://img.shields.io/badge/database-Supabase%20Postgres-green)](https://supabase.com/)
+[![Cloud Run](https://img.shields.io/badge/deployment-GCP%20Cloud%20Run-blue)](https://cloud.google.com/run)
+[![Telegram Bots](https://img.shields.io/badge/field%20access-Telegram%20bots-26A5E4)](https://telegram.org/)
 
-## Architecture
+> Production multi-tenant SaaS for small businesses (construction, cleaning, energy diagnostics) — built around real field operations, not a demo.
 
-- **Frontend**: Next.js 14 + TypeScript + Tailwind CSS
-- **Backend**: FastAPI (Python) + Supabase
-- **Base de données**: PostgreSQL (Supabase) - partagée entre test et prod
-- **Auth**: Email + Password avec pré-autorisation
-- **Déploiement**: GCP Cloud Run (2 environnements: TEST + PROD)
+**SurenSaaS** is a real-world SaaS developed for an actual SMB: construction
+crews record invoices on the go via **Telegram bots**, the backend extracts
+data with **Gemini/OCR**, managers accept/reject and track everything from a
+**multi-tenant web backoffice**. Built with a two-environment deployment
+(TEST + PROD) on GCP Cloud Run and Supabase Postgres.
 
-## Stratégie Test/Production
+## ✨ Features
 
-Ce projet utilise **2 environnements distincts** sur la même base de données:
+- **Multi-tenancy done properly** — org-based routing (`/[org]/...`) front and back + PostgreSQL Row-Level Security isolation of every org's data
+- **Field access via Telegram bots** — one bot per business vertical (construction, cleaning, energy-audit), using workers' Telegram identity as the entry point into the backoffice
+- **AI document extraction** — Gemini-based agent (with OCR fallback) turns photos of invoices/reports into structured data
+- **Contract-first API** — OpenAPI contract generates the backend controllers; front and bots always match the API
+- **Safe dual environments** — TEST and PROD Cloud Run services, shared Supabase database isolated by `org_id`
+- **Hardened perimeter** — strict CORS whitelist, JWT validation, GCP Secret Manager only
 
-- **TEST** : Pour développer et tester les nouvelles fonctionnalités
-- **PROD** : L'environnement de production stable
+## 🏗️ Architecture
 
-Chaque environnement a ses propres URLs Cloud Run mais partage la DB Supabase (isolation par `org_id`).
-
-## Quick Start
-
-### 1. Configuration initiale
-
-```bash
-# Vérifier que tout est configuré
-./scripts/check-config.sh
+```mermaid
+flowchart LR
+    W[Field workers<br/>Telegram bots] --> B[FastAPI<br/>Cloud Run]
+    M[Managers] --> F[Next.js 14<br/>Cloud Run]
+    F -- REST/JWT --> B
+    B --> S[(Supabase Postgres<br/>RLS multi-tenancy)]
+    B -- Gemini/OCR --> X[Document<br/>extraction]
 ```
 
-### 2. Configuration des secrets
+## 🧰 Stack
+
+| Service | Tech | Deployment |
+|---|---|---|
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind | Cloud Run |
+| Backend | FastAPI (Python) | Cloud Run (scale-to-zero) |
+| Database | Supabase Postgres + RLS | Supabase Cloud |
+| Auth | Email/password with pre-authorization | JWT end-to-end |
+| Bots | Telegram | via backend |
+
+*(Developed with a French SMB — the product is in production; key docs are translated to English, operational docs in French.)*
+
+## 🚀 Quick Start
+
+Full operational guide → [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) ⭐
 
 ```bash
-# Ajouter dans ~/.bashrc :
-export TEST_SUPABASE_SERVICE_KEY="votre-clé-supabase"
-export TEST_JWT_SECRET="votre-secret-jwt"
-export SUREN_TEST_API_BASE_URL="https://test-surensaas-back-xxx.run.app"
-
-# Recharger
-source ~/.bashrc
-```
-
-### 3. Démarrer en local
-
-```bash
-# Backend (Terminal 1)
-./scripts/run-local-back_test.sh
-
-# Frontend (Terminal 2)
-./scripts/run-local-front_test.sh
-
-# Frontend: http://localhost:3000
-# Backend: http://localhost:8080
-```
-
-## Déploiement GCP
-
-### Configuration préalable
-
-1. **Créer un projet GCP** et activer Cloud Run + Secret Manager
-2. **Créer un projet Supabase** avec l'organisation
-3. **Remplir `.env.test`** avec vos valeurs (organisation, Supabase)
-4. **Ajouter les secrets dans `~/.bashrc`** (clés Supabase, JWT)
-
-### Développement Local
-
-```bash
-# Vérifier la configuration
+# Check configuration
 ./scripts/check-config.sh
 
-# Lancer backend + frontend
-./scripts/run-local_test.sh
+# Run locally (backend :8080 / frontend :3000)
+./scripts/run-local-back_test.sh     # terminal 1
+./scripts/run-local-front_test.sh    # terminal 2
+
+# Deploy TEST then PROD
+./scripts/deploy_back_test.sh && ./scripts/deploy_front_test.sh
+./scripts/deploy_back_prod.sh && ./scripts/deploy_front_prod.sh
+
+# Watch the logs
+gcloud logging tail --service=test-surensaas-back
 ```
 
-### Déployer TEST
+Secrets are read from environment variables
+(`TEST_SUPABASE_SERVICE_KEY`, `TEST_JWT_SECRET`, bot tokens…); see
+[`.env.example`](.env.example).
 
-```bash
-# 1. Déployer le backend (crée les secrets GCP)
-./scripts/deploy_back_test.sh
-
-# 2. Mettre à jour l'URL dans ~/.bashrc si elle a changé
-
-# 3. Déployer le frontend
-./scripts/deploy_front_test.sh
-```
-
-### Scripts disponibles
-
-| Script | Description |
-|--------|-------------|
-| `./scripts/check-config.sh` | Vérifie que tout est configuré |
-| `./scripts/run-local-back_test.sh` | Backend local (localhost:8080) |
-| `./scripts/run-local-front_test.sh` | Frontend local (localhost:3000) |
-| `./scripts/run-local-front_test-gcp.sh` | Frontend local + backend GCP |
-| `./scripts/deploy_back_test.sh` | Déploie backend sur GCP |
-| `./scripts/deploy_front_test.sh` | Déploie frontend sur GCP |
-
-📖 **Documentation complète** : Voir `docs/DEPLOYMENT.md`
-
-## Structure du projet
+## 📂 Project structure
 
 ```
 .
-├── docs/                       # Documentation technique
-│   ├── ARCHITECTURE.md
-│   ├── DEPLOYMENT.md          # Guide déploiement test/prod
-│   └── ...
-├── db/                         # Scripts SQL
-│   ├── schema/                # Tables (auth, orgs...)
-│   └── policies/              # RLS policies
-├── openapi/                    # Contrat API (racine projet)
-│   └── api.yaml
-├── scripts/                    # Scripts utilitaires
-│   ├── check-config.sh        # Vérifie la configuration
-│   ├── run-local-back_test.sh # Backend local
-│   ├── run-local-front_test.sh # Frontend local
-│   ├── run-local-front_test-gcp.sh # Frontend + GCP
-│   ├── deploy_back_test.sh    # Deploy back TEST
-│   └── deploy_front_test.sh   # Deploy front TEST
-├── surenSaasFront/             # Next.js frontend
-│   ├── Dockerfile
-│   └── ...
-└── surenSaasBack/              # FastAPI backend
-    ├── Dockerfile
-    └── ...
+├── docs/                  # Technical documentation (see index below)
+├── db/schema + policies   # SQL: tables, RLS policies
+├── openapi/               # OpenAPI contract
+├── scripts/               # Config-check / run / deploy scripts (test & prod)
+├── surenSaasFront/        # Next.js frontend
+└── surenSaasBack/         # FastAPI backend
 ```
 
-## Workflow de développement
+## 📖 Documentation index
 
-### Nouvelle fonctionnalité
-
-```bash
-# 1. Vérifier la configuration
-./scripts/check-config.sh
-
-# 2. Développer en local (2 terminaux)
-./scripts/run-local-back_test.sh    # Terminal 1
-./scripts/run-local-front_test.sh   # Terminal 2
-
-# 3. Déployer sur TEST
-./scripts/deploy_back_test.sh
-./scripts/deploy_front_test.sh
-
-# 4. Tester sur l'URL de test
-```
-
-### Développement avec backend GCP
-
-```bash
-# Si vous voulez tester le frontend avec le backend déployé :
-./scripts/run-local-front_test-gcp.sh
-```
-
-### Mise en production
-
-```bash
-# 1. Vérifier la config
-./scripts/check-config.sh
-
-# 2. Déployer (confirmation requise)
-./scripts/deploy_back_prod.sh
-./scripts/deploy_front_prod.sh
-
-# 3. Surveiller les logs
-gcloud logging tail --service=surensaas-front
-gcloud logging tail --service=surensaas-back
-```
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Déploiement Test/Prod](docs/DEPLOYMENT.md) ⭐ Important!
-- [Frontend](docs/FRONTEND.md)
-- [Backend](docs/BACKEND.md)
-- [Authentication](docs/AUTHENTICATION.md)
-- [Base de données](docs/DATABASE.md)
-
-## Développement local
-
-### Frontend seul
-
-```bash
-cd surenSaasFront
-npm install
-npm run dev
-```
-
-### Backend seul
-
-```bash
-cd surenSaasBack
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-## Commandes utiles
-
-```bash
-# Vérifier la configuration
-./scripts/check-config.sh
-
-# Logs en temps réel
-gcloud logging tail --service=test-surensaas-front
-
-# Lister les services déployés
-gcloud run services list
-
-# Ouvrir l'URL dans le navigateur
-gcloud run services describe test-surensaas-front --format 'value(status.url)' | xargs xdg-open
-```
+| Topic | Doc |
+|---|---|
+| ⭐ Deployment TEST/PROD | [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| Architecture | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Multi-tenancy | [MULTITENANCY.md](docs/MULTITENANCY.md) |
+| Authentication | [AUTHENTICATION.md](docs/AUTHENTICATION.md) |
+| Database | [DATABASE.md](docs/DATABASE.md) |
+| Telegram bots | [TELEGRAM_BOT.md](docs/TELEGRAM_BOT.md) · [telegram-construction-bot.md](docs/telegram-construction-bot.md) |
+| Gemini extraction | [gemini-extraction-agent.md](docs/gemini-extraction-agent.md) |
+| Security & capabilities | [CAPABILITIES.md](docs/CAPABILITIES.md) · [TODO-securite-capabilities.md](docs/TODO-securite-capabilities.md) |
+| Infrastructure | [INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) |
+| Conventions & decisions | [CONVENTIONS.md](docs/CONVENTIONS.md) · [DECISIONS.md (backend)](surenSaasBack/docs/DECISIONS.md) |
+| Frontend | [FRONTEND.md](docs/FRONTEND.md) · [frontend decisions](surenSaasFront/docs/DECISIONS.md) |
+| Testing | [API contract tests](surenSaasBack/tests/TESTS.md) · [bot tests](docs/tests-telegram-bot.md) · [e2e scenarios](surenSaasFront/e2e/SCENARIOS.md) |
